@@ -18,7 +18,7 @@ bun src/cli.ts
 `config/workbench.local.json`：`sample.acquire_limit` 同时决定当前任务获取和交给 MinerU 解析多少条带标注发票。
 菜单会在进入时显示这个任务数量，不会再要求手工输入数量，也不会为菜单生成 `--limit` 参数；修改配置后重新运行命令即可。
 
-`paths.local.json` 和 `workbench.local.json` 都是本机文件，不提交到 Git。仓库不再保留 `*.example.json` 模板；首次使用按下面的完整结构创建这两个文件：
+`paths.local.json`、`workbench.local.json` 和 `mineru.local.json` 都是本机文件，不提交到 Git。仓库不再保留 `*.example.json` 模板；首次使用按下面的完整结构创建这三个文件：
 
 创建 `config/paths.local.json`：
 
@@ -54,18 +54,93 @@ bun src/cli.ts
 }
 ```
 
+创建 `config/mineru.local.json`。这是 Flowmate 自己的 MinerU 配置，运行时不会读取
+`paper-knowledge-engine/config/engine.yaml` 的 `mineru` 段：
+
+```json
+{
+  "schema_version": 1,
+  "mineru": {
+    "source_root": "D:\\agent-data\\tools\\MinerU",
+    "expected_version": "3.4.5",
+    "expected_commit": "4fe4bde114a23ee5dd637eae99b767f4669bf58c",
+    "python_version": "3.12",
+    "venv_root": "D:\\agent-data\\tools\\MinerU\\.venv",
+    "model_source_setup": "modelscope",
+    "model_source_runtime": "local",
+    "modelscope_revision": "master",
+    "model_download_type": "all",
+    "models_root": "D:\\agent-data\\tools\\MinerU",
+    "modelscope_cache_root": "D:\\agent-data\\tools\\MinerU\\modelscope",
+    "mineru_tools_config": "D:\\agent-data\\config\\mineru.runtime.json",
+    "pipeline_models_dir": "D:\\agent-data\\tools\\MinerU\\modelscope\\models\\OpenDataLab--PDF-Extract-Kit-1.0",
+    "vlm_models_dir": "D:\\agent-data\\tools\\MinerU\\modelscope\\models\\OpenDataLab--MinerU2.5-Pro-2605-1.2B",
+    "pipeline_model_repository": "OpenDataLab/PDF-Extract-Kit-1.0",
+    "pipeline_required_paths": [
+      "models/Layout/PP-DocLayoutV2",
+      "models/MFR/unimernet_hf_small_2503",
+      "models/MFR/pp_formulanet_plus_m",
+      "models/OCR/paddleocr_torch",
+      "models/TabRec/SlanetPlus/slanet-plus.onnx",
+      "models/TabRec/UnetStructure/unet.onnx",
+      "models/TabCls/paddle_table_cls/PP-LCNet_x1_0_table_cls.onnx"
+    ],
+    "vlm_model_repository": "OpenDataLab/MinerU2.5-Pro-2605-1.2B",
+    "expected_gpu_name": "RTX 5060 Laptop GPU",
+    "mineru_install_extras": "all",
+    "torch_index_url": "https://download.pytorch.org/whl/cu128",
+    "lmdeploy_wheel_url": "https://github.com/InternLM/lmdeploy/releases/download/v0.11.1/lmdeploy-0.11.1+cu128-cp312-cp312-win_amd64.whl",
+    "cuda_runtime_dll": "cudart64_12.dll",
+    "model": "pipeline",
+    "allowed_models": ["pipeline", "vlm"],
+    "max_concurrency": 1,
+    "processing_window_size": 1,
+    "pipeline_batch_ratio": 1,
+    "cuda_visible_devices": "0",
+    "pipeline_device_mode": "cuda",
+    "pipeline_method": "auto",
+    "pipeline_language": "ch",
+    "formula_enabled": true,
+    "table_enabled": true,
+    "vlm_device": "cuda",
+    "vlm_lmdeploy_backend": "turbomind",
+    "vlm_batch_size": 1,
+    "vlm_cache_max_entry_count": 0.5,
+    "task_timeout_seconds": 3600,
+    "result_download_timeout_seconds": 600,
+    "api_host": "127.0.0.1",
+    "api_port": 17860,
+    "api_startup_timeout_seconds": 120,
+    "local_import": {
+      "recursive": true,
+      "max_files": 60,
+      "max_pdf_pages": 200,
+      "max_pdf_size_mb": 200,
+      "default_track": "Local-PDF"
+    }
+  },
+  "runtime": {
+    "process_cleanup_timeout_ms": 10000,
+    "diagnostic_timeout_ms": 20000,
+    "max_output_bytes": 33554432
+  }
+}
+```
+
 ## 共享引擎和 MinerU 前置
 
-Flowmate 通过 `paths.local.json` 的 `paperEngineRoot` 读取共享引擎的 `config/engine.yaml` 和 `config/machine.local.yaml`，不复制 MinerU 配置，也不把发票写入 FSD 数据库。请先按 [Paper Knowledge Engine 使用手册](../../paper-knowledge-engine/使用手册.md) 配好本机 MinerU、模型和 GPU，再检查共享配置：
+Flowmate 通过自身的 `config/mineru.local.json` 读取 MinerU 版本、源码、虚拟环境、模型目录、GPU、解析参数和进程策略；运行时不读取
+`paper-knowledge-engine/config/engine.yaml`，也不通过 `--library fsd` 获取 MinerU 配置。
+`paperEngineRoot` 只用于读取共享 `config/machine.local.yaml` 中的 HTTP 代理，让公开来源下载复用现有网络出口；这不是 MinerU 配置。
+请先按 [Paper Knowledge Engine 使用手册](../../paper-knowledge-engine/使用手册.md) 安装或准备本机 MinerU、模型和 GPU，再把实际值填写到 Flowmate 配置：
 
 ```powershell
 cd D:\agent-data\backend\projects\paper-knowledge-engine
 bun install --frozen-lockfile
 bun run typecheck
-bun src/cli.ts --library fsd mineru-config --format json
 ```
 
-上面的 `--library fsd` 只用于共享引擎的只读 MinerU 配置检查。回到 Flowmate 项目后，所有工作台命令都在 Flowmate 根目录执行，不要再加 `--library fsd`：
+回到 Flowmate 项目后，所有工作台命令都在 Flowmate 根目录执行，不要加 `--library fsd`，也不要删除或改名 `config/mineru.local.json`：
 
 ```powershell
 cd D:\agent-data\backend\projects\flowmate-data
@@ -126,7 +201,7 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | 参数 | 作用 | 本项目默认位置 |
 |---|---|---|
 | `projectRoot` | Flowmate 项目代码和配置根目录；用于定位项目文件 | `D:\agent-data\backend\projects\flowmate-data` |
-| `paperEngineRoot` | 共享 Paper Knowledge Engine 根目录；只通过 bridge 复用底层能力 | `D:\agent-data\backend\projects\paper-knowledge-engine` |
+| `paperEngineRoot` | 共享 Paper Knowledge Engine 根目录；只通过 bridge 复用 HTTP 代理等底层能力 | `D:\agent-data\backend\projects\paper-knowledge-engine` |
 | `originalRoot` | 网上下载的原始文件、发布方原始标注，以及结构化镜像 | `D:\paper\Invoice` |
 | `dataRoot` | 机器记录、selection、标签、MinerU 结果、Release 和策略文件 | `D:\agent-data\data\flowmate-data` |
 | `vaultRoot` | 可重建的 Obsidian Markdown 卡片和索引 | `D:\obsidian\data\flowmate-data` |
@@ -139,7 +214,7 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 - 机器记录和解析结果保存到 `dataRoot`。
 - Obsidian 只保存由机器记录重建的 Markdown，不保存原图、PDF 或结构化镜像副本。
 - 不使用 `raw/<sha256>/` 目录；SHA-256 写在记录、快照和 manifest 中，用于校验和身份追踪。
-- 来源探测和原始文件下载会复用 `paperEngineRoot/config/machine.local.yaml` 的 `network.http_proxy`；直连不稳定时必须先启动该代理。MinerU 的共享配置继续保存在 `paperEngineRoot/config/engine.yaml` 和 `paperEngineRoot/config/machine.local.yaml`；Flowmate 的 `workbench.local.json` 只负责来源、当前任务数量、Release 和备份默认值。
+- 来源探测和原始文件下载会复用 `paperEngineRoot/config/machine.local.yaml` 的 `network.http_proxy`；直连不稳定时必须先启动该代理。MinerU 的全部运行参数和进程策略保存在 Flowmate 自己的 `config/mineru.local.json`；Flowmate 不读取 `paperEngineRoot/config/engine.yaml` 的 MinerU 配置。`workbench.local.json` 只负责来源、当前任务数量、Release 和备份默认值。
 
 ## 文件二：`workbench.local.json`
 
@@ -199,7 +274,85 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | `verify` | `backup create` 完成后是否立即验证 manifest、文件集合和 SHA-256 |
 | `restore_smoke` | 是否恢复到 `backupRoot/.restore-smoke-<uuid>` 独立目录，验证文件、结构化镜像并重建 Obsidian 卡片；成功后清理临时目录 |
 
-## 文件三：`sources/voxel51-invoice-ocr.json`
+## 文件三：`mineru.local.json`
+
+这个文件只描述 Flowmate 调用 MinerU 所需的本机运行环境，不描述来源和样本数量。
+它的 `mineru` 对象沿用共享 MinerU runner 的字段名称，但值由 Flowmate 单独维护；
+`tempRoot`、`outputRoot` 和论文库身份不会从文件读取，而是固定派生为
+`dataRoot/work`、`dataRoot/datasets`，并且不设置 `libraryId/libraryPaths`。
+
+### 顶层参数
+
+| 参数 | 作用 |
+|---|---|
+| `schema_version` | Flowmate MinerU 配置格式版本；当前只能是 `1` |
+| `mineru` | MinerU 安装、模型、GPU、解析和本地 API 参数 |
+| `runtime` | MinerU 进程监督的清理超时、诊断超时和输出上限 |
+
+### `mineru` 参数
+
+| 参数 | 作用 |
+|---|---|
+| `source_root` | MinerU 源码 checkout 根目录；运行时校验版本和 commit |
+| `expected_version` | 允许的 MinerU 版本；写入解析 `parser_key` |
+| `expected_commit` | 允许的 MinerU 源码完整 Git SHA；必须 40 位小写十六进制 |
+| `python_version` | 该虚拟环境的 Python 主次版本记录 |
+| `venv_root` | MinerU Python 虚拟环境；必须位于 `source_root` 内 |
+| `model_source_setup` | 模型安装来源；当前固定为 `modelscope` |
+| `model_source_runtime` | 运行时模型来源；当前固定为 `local` |
+| `modelscope_revision` | ModelScope 模型配置版本，例如 `master` |
+| `model_download_type` | 模型准备范围，例如 `all` |
+| `models_root` | 本机模型根目录 |
+| `modelscope_cache_root` | ModelScope 缓存目录；必须位于 `models_root` 内 |
+| `mineru_tools_config` | MinerU runtime JSON；其中的 pipeline/VLM 模型目录必须与本文件一致 |
+| `pipeline_models_dir` | Pipeline 模型目录 |
+| `vlm_models_dir` | VLM 模型目录 |
+| `pipeline_model_repository` | Pipeline 模型仓库名；用于校验目录名 |
+| `pipeline_required_paths` | Pipeline 模型目录中必须存在的相对文件或目录清单 |
+| `vlm_model_repository` | VLM 模型仓库名；用于校验目录名 |
+| `expected_gpu_name` | 预期 GPU 名称，供人工核对本机设备 |
+| `mineru_install_extras` | MinerU 安装 extras 记录，例如 `all` |
+| `torch_index_url` | PyTorch CUDA wheel 索引地址 |
+| `lmdeploy_wheel_url` | VLM 所需 LMDeploy wheel 地址 |
+| `cuda_runtime_dll` | CUDA runtime DLL 文件名记录 |
+| `model` | 本次任务使用的模型；当前为 `pipeline` |
+| `allowed_models` | 允许的模型集合；当前固定为 `pipeline` 和 `vlm` |
+| `max_concurrency` | MinerU API 最大并发；当前固定为 `1` |
+| `processing_window_size` | API 处理窗口大小；当前为 `1` |
+| `pipeline_batch_ratio` | Pipeline 虚拟显存批量比例，可选 `1/2/4/8/16` |
+| `cuda_visible_devices` | 传给 MinerU 的 `CUDA_VISIBLE_DEVICES`，例如 `0` |
+| `pipeline_device_mode` | Pipeline 设备模式；当前为 `cuda` |
+| `pipeline_method` | Pipeline 解析方法：`auto`、`txt` 或 `ocr` |
+| `pipeline_language` | Pipeline 语言参数，例如 `ch` |
+| `formula_enabled` | 是否启用公式解析 |
+| `table_enabled` | 是否启用表格解析 |
+| `vlm_device` | VLM 设备；当前为 `cuda` |
+| `vlm_lmdeploy_backend` | VLM LMDeploy 后端；当前为 `turbomind` |
+| `vlm_batch_size` | VLM 批量大小 |
+| `vlm_cache_max_entry_count` | VLM 缓存占用比例，范围为 `(0, 1]` |
+| `task_timeout_seconds` | 单个 MinerU 任务超时 |
+| `result_download_timeout_seconds` | MinerU 结果下载超时 |
+| `api_host` | 本地 MinerU API 监听地址；只能是 `127.0.0.1` |
+| `api_port` | 本地 MinerU API 端口 |
+| `api_startup_timeout_seconds` | API 健康检查等待时间 |
+| `local_import.recursive` | 共享 runner 的本地导入是否递归；Flowmate 当前不从 FSD 导入 |
+| `local_import.max_files` | 本地导入文件数上限 |
+| `local_import.max_pdf_pages` | 本地导入 PDF 页数上限 |
+| `local_import.max_pdf_size_mb` | 本地导入 PDF 大小上限 |
+| `local_import.default_track` | 共享 runner 的默认本地导入 Track；Flowmate 当前不写入 FSD |
+
+### `runtime` 参数
+
+| 参数 | 作用 |
+|---|---|
+| `process_cleanup_timeout_ms` | MinerU API 及其子进程清理超时 |
+| `diagnostic_timeout_ms` | 读取 MinerU 版本、Git 和运行时诊断的超时 |
+| `max_output_bytes` | 受监督进程 stdout/stderr 总输出上限 |
+
+修改 MinerU 配置后重新运行菜单即可。解析记录会把版本、commit、模型、方法、
+语言和开关写入 `parser_key`，因此配置变化会生成新的解析 attempt，不会覆盖旧结果。
+
+## 文件四：`sources/voxel51-invoice-ocr.json`
 
 这是 `dataset-records` 类型来源。它描述“从哪里读 revision、索引和图片”，不描述本机存储路径，也不决定获取数量。
 

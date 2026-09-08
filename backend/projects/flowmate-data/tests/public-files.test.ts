@@ -12,6 +12,8 @@ const roots: string[] = [];
 async function paths(): Promise<FlowmatePaths> {
   const root = await mkdtemp(join(tmpdir(), 'flowmate-public-files-'));
   roots.push(root);
+  await mkdir(join(root, 'config'), { recursive: true });
+  await cp(join(import.meta.dir, 'fixtures/mineru.local.json'), join(root, 'config/mineru.local.json'));
   return { projectRoot: root, paperEngineRoot: join(import.meta.dir, '../../paper-knowledge-engine'), originalRoot: join(root, 'paper'), dataRoot: join(root, 'data'), vaultRoot: join(root, 'vault'), backupRoot: join(root, 'backup') };
 }
 

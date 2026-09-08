@@ -15,22 +15,21 @@
 
 ## 运行前准备
 
-Flowmate 复用 Paper Knowledge Engine 的本地 MinerU 配置，但不把发票注册成 FSD 论文，也不通过 `--library fsd` 运行 Flowmate。先按照 [Paper Knowledge Engine 使用手册](../paper-knowledge-engine/使用手册.md) 在共享引擎项目中确认 `config/engine.yaml`、`config/machine.local.yaml`、MinerU 安装、模型和 GPU 配置，再回到 Flowmate 项目执行工作台命令：
+Flowmate 复用 Paper Knowledge Engine 的 MinerU 启动、监督和结果规整代码，但不复用其 `config/engine.yaml` MinerU 配置；发票也不会注册成 FSD 论文或通过 `--library fsd` 运行。先按照 [Paper Knowledge Engine 使用手册](../paper-knowledge-engine/使用手册.md) 准备 MinerU 安装、模型和 GPU，再把实际路径和参数写入 Flowmate 自己的 `config/mineru.local.json`。公开来源 HTTP 代理仍从 `paperEngineRoot/config/machine.local.yaml` 的 `network.http_proxy` 读取：
 
 ```powershell
-# 共享引擎项目：检查依赖、类型和 MinerU 配置
+# 共享引擎项目：准备底层 MinerU 启动和规整代码
 cd D:\agent-data\backend\projects\paper-knowledge-engine
 bun install --frozen-lockfile
 bun run typecheck
-bun src/cli.ts --library fsd mineru-config --format json
 
-# Flowmate 项目：检查自身依赖和类型
+# Flowmate 项目：检查自身依赖和独立 MinerU 配置
 cd D:\agent-data\backend\projects\flowmate-data
 bun install --frozen-lockfile
 bun run typecheck
 ```
 
-`mineru-config` 是共享引擎的只读检查命令；Flowmate 的 `parse` 会通过 bridge 创建任务级 MinerU API，会话结束后自动回收。不要同时启动第二个 MinerU 服务，也不要从 PDF 目录或 Obsidian 目录执行下面的命令。
+共享引擎的 `mineru-config` 只属于 Paper Knowledge Engine 自身的诊断命令，不是 Flowmate 的配置入口；Flowmate 的 `parse` 会通过 bridge 创建任务级 MinerU API，会话结束后自动回收。不要同时启动第二个 MinerU 服务，也不要从 PDF 目录或 Obsidian 目录执行下面的命令。
 
 ## 配置
 
@@ -38,6 +37,7 @@ bun run typecheck
 
 - `config/paths.local.json`：本机目录位置配置；不会提交到 Git。字段和示例值见 [config/README.md](config/README.md)。
 - `config/workbench.local.json`：本次工作台的采集、解析、知识资料、Release 和备份默认参数；不会提交到 Git。仓库不再保留 example 模板，首次使用按 [config/README.md](config/README.md) 创建。
+- `config/mineru.local.json`：Flowmate 独立的 MinerU 安装、模型、GPU、解析和进程策略；不会提交到 Git，不能用 `paper-knowledge-engine/config/engine.yaml` 替代。
 - `config/sources/*.json`：公开来源登记，真正的获取位置在这里，包括主页、revision API 或内容 URL、文件 URL、允许的重定向域名、许可证和是否解析。
 
 `workbench.local.json` 的关键字段如下：
@@ -65,7 +65,7 @@ bun run typecheck
 
 ## 推荐运行方式
 
-先按 [config/README.md](config/README.md) 创建两个本地配置并确认路径，然后只需从项目根目录运行一个命令：
+先按 [config/README.md](config/README.md) 创建三个本地配置并确认路径，然后只需从项目根目录运行一个命令：
 
 ```powershell
 cd D:\agent-data\backend\projects\flowmate-data

@@ -24,5 +24,6 @@ fsd-code2doc/output/
 /backend/projects/fsd-code2doc/config/paths.local.yaml
 /backend/projects/flowmate-data/config/paths.local.json
 /backend/projects/flowmate-data/config/workbench.local.json
+/backend/projects/flowmate-data/config/mineru.local.json
 # Local LLM endpoint selection stays untracked; actual API keys live only in environment variables.
 /config/llm-wiki.local.json

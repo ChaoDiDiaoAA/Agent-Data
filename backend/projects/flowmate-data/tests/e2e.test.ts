@@ -12,7 +12,12 @@ import { publishStructuredSnapshot, verifyStructuredSnapshot } from '../src/stru
 import { saveSampleRecord, type SampleRecord } from '../src/task-store.ts';
 
 const roots: string[] = [];
-async function paths(): Promise<FlowmatePaths> { const root = await mkdtemp(join(tmpdir(), 'flowmate-e2e-')); roots.push(root); return { projectRoot: root, paperEngineRoot: root, originalRoot: join(root, 'original'), dataRoot: join(root, 'data'), vaultRoot: join(root, 'vault'), backupRoot: join(root, 'backup') }; }
+async function paths(): Promise<FlowmatePaths> {
+  const root = await mkdtemp(join(tmpdir(), 'flowmate-e2e-')); roots.push(root);
+  await mkdir(join(root, 'config'), { recursive: true });
+  await cp(join(import.meta.dir, 'fixtures/mineru.local.json'), join(root, 'config/mineru.local.json'));
+  return { projectRoot: root, paperEngineRoot: root, originalRoot: join(root, 'original'), dataRoot: join(root, 'data'), vaultRoot: join(root, 'vault'), backupRoot: join(root, 'backup') };
+}
 const sourceConfig: SourceConfig = { schema_version: 1, source_id: 'e2e', dataset_id: 'e2e-dataset', reader: 'dataset-records', homepage: 'https://example.test/e2e', revision: { kind: 'content-hash', url: 'https://example.test/e2e' }, allowed_origins: ['https://example.test'], redirect_origins: [], declared_license: 'test', license_evidence: 'https://example.test/license', retention: 'allowed', local_use: 'allowed', redistribution: 'unknown', origin_kind: 'synthetic', language: 'zh-CN', document_kind: 'invoice' };
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 

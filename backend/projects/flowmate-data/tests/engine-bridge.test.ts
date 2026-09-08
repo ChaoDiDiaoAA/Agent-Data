@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as bridge from '../src/engine-bridge.ts';
@@ -31,10 +31,11 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'flowmate-parse-')); roots.push(root);
   const paths: FlowmatePaths = { projectRoot: root, paperEngineRoot: join(root, 'engine'), dataRoot: join(root, 'data'), originalRoot: join(root, 'original'), vaultRoot: join(root, 'vault'), backupRoot: join(root, 'backup') };
-  await mkdir(join(paths.paperEngineRoot, 'config'), { recursive: true });
-  for (const file of ['engine.yaml', 'machine.local.yaml']) await cp(join(import.meta.dir, '../../paper-knowledge-engine/config', file), join(paths.paperEngineRoot, 'config', file));
+  await mkdir(join(paths.projectRoot, 'config'), { recursive: true });
+  await cp(join(import.meta.dir, 'fixtures/mineru.local.json'), join(paths.projectRoot, 'config/mineru.local.json'));
   expect(typeof bridge.createFlowmateMinerURuntime).toBe('function');
   const runtime = bridge.createFlowmateMinerURuntime(paths);
+  expect(await Bun.file(join(paths.paperEngineRoot, 'config/engine.yaml')).exists()).toBe(false);
   return { paths, runtime, input: { sampleId: 'invoice-a', sourcePath: join(fixture, 'invoice.png'), outputDir: join(paths.dataRoot, 'datasets', 'test', 'samples', 'invoice-a', 'parsed'), ...runtime } };
 }
 
@@ -69,6 +70,14 @@ test('standalone bridge routes only original input, explicit output/config and F
   expect(result.attemptId).toMatch(/^attempt-[0-9a-f]{64}$/);
   expect(await bridge.verifyNormalizedOutput(result.normalizedDir)).toMatchObject({ contentHash: result.contentHash });
   expect(await readFile(join(result.normalizedDir, 'assets', 'images', 'invoice.png'))).toEqual(await readFile(join(fixture, 'invoice.png')));
+});
+
+test('Flowmate MinerU runtime requires its own config and never falls back to engine.yaml', async () => {
+  const { paths } = await setup();
+  await unlink(join(paths.projectRoot, 'config/mineru.local.json'));
+  await mkdir(join(paths.paperEngineRoot, 'config'), { recursive: true });
+  await cp(join(import.meta.dir, '../../paper-knowledge-engine/config/engine.yaml'), join(paths.paperEngineRoot, 'config/engine.yaml'));
+  expect(() => bridge.createFlowmateMinerURuntime(paths)).toThrow('FLOWMATE_MINERU_CONFIG_INVALID');
 });
 
 for (const mode of ['missing', 'failed', 'throw', 'dispose-failed'] as const) test(`parse rejects ${mode} and disposes the session`, async () => {

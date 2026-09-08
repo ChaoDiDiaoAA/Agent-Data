@@ -11,10 +11,11 @@ export function createHttpClient(options: { fetch?: HttpFetch } = {}): ResearchH
 }
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
-import { loadSharedEngineRuntime } from '../../paper-knowledge-engine/src/shared/engine-context.ts';
-import { toStandaloneMinerULocalConfig, type MinerULocalConfig } from '../../paper-knowledge-engine/src/mineru/mineru-local-config.ts';
+import { loadSharedMachineRuntime } from '../../paper-knowledge-engine/src/shared/engine-context.ts';
+import { loadMinerULocalConfig, type MinerULocalConfig } from '../../paper-knowledge-engine/src/mineru/mineru-local-config.ts';
 import { createMineruApiSession } from '../../paper-knowledge-engine/src/mineru/mineru-api-session.ts';
 import { createProcessContext, type ProcessContext } from '../../paper-knowledge-engine/src/runtime/process.ts';
 import { withRunLock } from '../../paper-knowledge-engine/src/runtime/run-lock.ts';
@@ -27,8 +28,10 @@ import type { FlowmatePaths } from './contracts.ts';
 export type { MinerULocalConfig, ProcessContext };
 export { realTree };
 export { withRunLock };
+
+/** Source downloads may reuse only the shared machine proxy; MinerU settings are Flowmate-owned. */
 export function loadSharedEngineNetwork(root: string): HttpScope['network'] {
-  return loadSharedEngineRuntime({ root }).machine.network;
+  return loadSharedMachineRuntime({ root }).machine.network;
 }
 export interface ParsedFile { path: string; sha256: string; bytes: number }
 export interface ParseReceipt {
@@ -61,6 +64,61 @@ export interface ParseDependencies {
 }
 const digest = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
 
+const mineruConfigFields = [
+  'source_root', 'expected_version', 'expected_commit', 'python_version', 'venv_root',
+  'model_source_setup', 'model_source_runtime', 'modelscope_revision', 'model_download_type', 'models_root',
+  'modelscope_cache_root', 'mineru_tools_config', 'pipeline_models_dir', 'vlm_models_dir',
+  'pipeline_model_repository', 'pipeline_required_paths', 'vlm_model_repository', 'expected_gpu_name',
+  'mineru_install_extras', 'torch_index_url', 'lmdeploy_wheel_url', 'cuda_runtime_dll', 'model',
+  'allowed_models', 'max_concurrency', 'processing_window_size', 'pipeline_batch_ratio', 'cuda_visible_devices',
+  'pipeline_device_mode', 'pipeline_method', 'pipeline_language', 'formula_enabled', 'table_enabled',
+  'vlm_device', 'vlm_lmdeploy_backend', 'vlm_batch_size', 'vlm_cache_max_entry_count', 'task_timeout_seconds',
+  'result_download_timeout_seconds', 'api_host', 'api_port', 'api_startup_timeout_seconds', 'local_import',
+] as const;
+
+interface FlowmateMineruConfigFile {
+  schema_version: 1;
+  mineru: Record<string, unknown>;
+  runtime: { process_cleanup_timeout_ms: number; diagnostic_timeout_ms: number; max_output_bytes: number };
+}
+
+function configObject(value: unknown, code: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(code);
+  return value as Record<string, unknown>;
+}
+
+function closedConfigObject(value: unknown, fields: readonly string[], code: string): Record<string, unknown> {
+  const object = configObject(value, code);
+  if (Object.keys(object).some(field => !fields.includes(field))) throw new Error(code);
+  return object;
+}
+
+function positiveConfigInteger(value: unknown, field: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) <= 0) throw new Error(`FLOWMATE_MINERU_CONFIG_INVALID: ${field}`);
+  return Number(value);
+}
+
+function loadFlowmateMineruConfig(path: string, projectRoot: string, stateRoot: string): { mineru: MinerULocalConfig; runtime: FlowmateMineruConfigFile['runtime'] } {
+  let parsed: unknown;
+  try { parsed = JSON.parse(readFileSync(path, 'utf8')); }
+  catch { throw new Error(`FLOWMATE_MINERU_CONFIG_INVALID: ${path}`); }
+  const file = closedConfigObject(parsed, ['schema_version', 'mineru', 'runtime'], 'FLOWMATE_MINERU_CONFIG_INVALID');
+  if (file.schema_version !== 1) throw new Error('FLOWMATE_MINERU_CONFIG_INVALID: schema_version');
+  const mineru = closedConfigObject(file.mineru, mineruConfigFields, 'FLOWMATE_MINERU_CONFIG_INVALID: mineru');
+  const runtime = closedConfigObject(file.runtime, ['process_cleanup_timeout_ms', 'diagnostic_timeout_ms', 'max_output_bytes'], 'FLOWMATE_MINERU_CONFIG_INVALID: runtime');
+  return {
+    // The raw branch performs the complete schema/path validation. Its
+    // inferred return type also covers the legacy no-local-import shape, while
+    // Flowmate's owned config always supplies local_import.
+    mineru: loadMinerULocalConfig(projectRoot, { raw: mineru, stateRoot }) as MinerULocalConfig,
+    runtime: {
+      process_cleanup_timeout_ms: positiveConfigInteger(runtime.process_cleanup_timeout_ms, 'runtime.process_cleanup_timeout_ms'),
+      diagnostic_timeout_ms: positiveConfigInteger(runtime.diagnostic_timeout_ms, 'runtime.diagnostic_timeout_ms'),
+      max_output_bytes: positiveConfigInteger(runtime.max_output_bytes, 'runtime.max_output_bytes'),
+    },
+  };
+}
+
 /** The single identity contract used when creating and verifying parse attempts. */
 export function deriveParseAttemptId(input: Pick<ParseReceipt, 'parserKey' | 'originalSha256' | 'startedAt'>): string {
   const { parserKey, originalSha256, startedAt } = input;
@@ -73,11 +131,19 @@ export function deriveParseAttemptId(input: Pick<ParseReceipt, 'parserKey' | 'or
 }
 
 export function createFlowmateMinerURuntime(paths: FlowmatePaths) {
-  const runtime = loadSharedEngineRuntime({ root: paths.paperEngineRoot });
   const workRoot = resolveOwnedPath(paths.dataRoot, 'work');
+  const datasetsRoot = resolveOwnedPath(paths.dataRoot, 'datasets');
+  const mineruConfigPath = resolveOwnedPath(paths.projectRoot, 'config/mineru.local.json');
+  const configured = loadFlowmateMineruConfig(mineruConfigPath, paths.projectRoot, paths.dataRoot);
+  const mineruConfig = { ...configured.mineru, tempRoot: workRoot, outputRoot: datasetsRoot };
+  const processPolicy = {
+    processCleanupTimeoutMs: configured.runtime.process_cleanup_timeout_ms,
+    diagnosticTimeoutMs: configured.runtime.diagnostic_timeout_ms,
+    maxOutputBytes: configured.runtime.max_output_bytes,
+  };
   return {
-    mineruConfig: toStandaloneMinerULocalConfig(runtime, { tempRoot: workRoot, outputRoot: resolveOwnedPath(paths.dataRoot, 'datasets') }),
-    processContext: createProcessContext(paths.paperEngineRoot, resolveOwnedPath(paths.dataRoot, 'work/processes'), runtime.engine.runtime),
+    mineruConfig,
+    processContext: createProcessContext(paths.projectRoot, resolveOwnedPath(paths.dataRoot, 'work/processes'), processPolicy),
     lockPath: resolveOwnedPath(paths.dataRoot, 'work/run.lock'),
   };
 }

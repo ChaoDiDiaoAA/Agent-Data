@@ -857,11 +857,16 @@ export function parseLibrarySelection(argv: string[]): { libraryId?: string; arg
   return { libraryId, argv: remaining };
 }
 
+/** Shared read-only machine layer: does not read engine.yaml or any library. */
+export function loadSharedMachineRuntime(options: { root: string }): Pick<EngineContext, 'machine'> {
+  return { machine: loadMachine(join(options.root, 'config', 'machine.local.yaml')) };
+}
+
 /** Shared read-only runtime: never selects or opens a library. */
 export function loadSharedEngineRuntime(options: { root: string }): Pick<EngineContext, 'engine' | 'machine'> {
   return {
     engine: loadEngine(join(options.root, 'config', 'engine.yaml')),
-    machine: loadMachine(join(options.root, 'config', 'machine.local.yaml')),
+    ...loadSharedMachineRuntime(options),
   };
 }
 

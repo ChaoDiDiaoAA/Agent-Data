@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { cp, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FlowmatePaths } from '../src/contracts.ts';
@@ -13,6 +13,8 @@ const roots: string[] = [];
 async function fixturePaths(): Promise<FlowmatePaths> {
   const root = await mkdtemp(join(tmpdir(), 'flowmate-snapshot-'));
   roots.push(root);
+  await mkdir(join(root, 'config'), { recursive: true });
+  await cp(join(import.meta.dir, 'fixtures/mineru.local.json'), join(root, 'config/mineru.local.json'));
   return { projectRoot: root, paperEngineRoot: root, originalRoot: join(root, 'paper'), dataRoot: join(root, 'data'), vaultRoot: join(root, 'vault'), backupRoot: join(root, 'backup') };
 }
 

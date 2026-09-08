@@ -27,6 +27,18 @@ test('standalone runtime reads engine and machine without requiring any library'
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('shared machine runtime does not read engine.yaml', () => {
+  const root = mkdtempSync(join(tmpdir(), 'machine-runtime-'));
+  try {
+    mkdirSync(join(root, 'config'));
+    writeFileSync(join(root, 'config', 'machine.local.yaml'), readFileSync(join(process.cwd(), 'config', 'machine.local.yaml')));
+    assert.equal(typeof sharedContext.loadSharedMachineRuntime, 'function');
+    const runtime = sharedContext.loadSharedMachineRuntime({ root });
+    assert.deepEqual(runtime.machine.network, sharedContext.loadSharedEngineRuntime({ root: process.cwd() }).machine.network);
+    assert.equal(existsSync(join(root, 'config', 'engine.yaml')), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 const validArxiv = () => ({
   page_size: 100,
   request_interval_seconds: 6,
