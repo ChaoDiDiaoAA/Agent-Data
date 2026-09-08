@@ -1,0 +1,19 @@
+{
+  "name": "flowmate-data",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": "1.4.0"
+  },
+  "packageManager": "bun@1.4.0",
+  "scripts": {
+    "test": "bun test --timeout 30000",
+    "typecheck": "bun ./node_modules/typescript/bin/tsc --noEmit",
+    "cli": "bun src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "26.4.0",
+    "typescript": "7.0.2"
+  }
+}

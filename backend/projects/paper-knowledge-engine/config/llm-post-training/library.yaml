@@ -1,0 +1,36 @@
+library_kind: paper
+library_id: llm-post-training
+display_name: LLM Post-Training（大模型后训练知识库）
+start_date: 2026-01-01
+overlap_hours: 48
+download_after_hard_filter: true
+current_task:
+  max_papers: 180
+  track_limits:
+    pt-foundations: 10
+    pt-sft: 10
+    pt-data-curation: 10
+    pt-synthetic-data: 10
+    pt-reward-modeling: 10
+    pt-preference-optimization: 10
+    pt-policy-optimization: 10
+    pt-verifiable-rewards: 10
+    pt-reasoning: 10
+    pt-distillation: 10
+    pt-tool-agent: 10
+    pt-multimodal: 10
+    pt-safety-alignment: 10
+    pt-adaptation: 10
+    pt-efficient-tuning: 10
+    pt-training-systems: 10
+    pt-stability: 10
+    pt-evaluation: 10
+weekly_schedule:
+  enabled: true
+  task_name: paper-knowledge-engine-llm-post-training-weekly
+  day_of_week: monday
+  interval_weeks: 4
+  start_date: 2026-09-07
+  local_time: '23:30'
+  timezone: Asia/Shanghai
+  max_papers: 18

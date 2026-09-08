@@ -1,0 +1,101 @@
+start_date: "2026-01-01"
+excluded_domains:
+  - autonomous driving
+  - natural language translation without code
+# Automatic inclusion gates use source title/summary: (AI OR program structure)
+# AND a target engineering task. No manual review or external model is required.
+ai_technique_terms:
+  - large language model
+  - llm
+  - code llm
+  - coding agent
+  - llm agent
+  - tool-using agent
+  - retrieval-augmented generation
+  - rag
+  - graph rag
+  - llm wiki
+  - knowledge graph
+  - ai-assisted program analysis
+program_structure_terms:
+  - abstract syntax tree
+  - ast
+  - concrete syntax tree
+  - cst
+  - control flow graph
+  - cfg
+  - data flow graph
+  - dfg
+  - call graph
+  - program dependency graph
+  - pdg
+  - symbol table
+  - type information
+  - intermediate representation
+  - ir
+  - static analysis
+  - dynamic analysis
+  - symbolic execution
+engineering_task_terms:
+  - repository understanding
+  - repository wiki
+  - repository documentation
+  - repository-level documentation
+  - codebase wiki
+  - code2doc
+  - specification recovery
+  - requirements recovery
+  - test generation
+  - test repair
+  - test oracle
+  - characterization test
+  - domain model
+  - business rule
+  - bounded context
+  - legacy modernization
+  - architecture recovery
+  - module decomposition
+  - program translation
+  - language migration
+  - framework migration
+  - api migration
+  - dependency migration
+  - database migration
+  - schema migration
+  - semantic equivalence
+  - behavior preservation
+  - differential testing
+  - coding agent benchmark
+  - repository benchmark
+# Equivalent word forms only; these do not introduce new research topics.
+term_variants:
+  large language model: [large language models]
+  llm: [llms]
+  code llm: [code llms]
+  coding agent: [coding agents]
+  llm agent: [llm agents]
+  tool-using agent: [tool-using agents]
+  knowledge graph: [knowledge graphs]
+  graph rag: [graphrag]
+  abstract syntax tree: [abstract syntax trees]
+  ast: [asts]
+  concrete syntax tree: [concrete syntax trees]
+  cst: [csts]
+  control flow graph: [control flow graphs]
+  cfg: [cfgs]
+  data flow graph: [data flow graphs]
+  dfg: [dfgs]
+  call graph: [call graphs]
+  program dependency graph: [program dependency graphs]
+  pdg: [pdgs]
+  symbol table: [symbol tables]
+  intermediate representation: [intermediate representations]
+  requirements recovery: [requirement recovery]
+  test oracle: [test oracles]
+  characterization test: [characterization tests]
+  domain model: [domain models]
+  business rule: [business rules]
+  bounded context: [bounded contexts]
+  coding agent benchmark: [coding agent benchmarks]
+  repository benchmark: [repository benchmarks]
+track_priority: [AI-FSD, LLM-Wiki, AI-TDD, AI-DDD, AI-Program-Analysis-AST, Code-Translation, Verification, Evaluation]

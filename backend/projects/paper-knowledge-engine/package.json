@@ -1,0 +1,37 @@
+{
+  "name": "paper-knowledge-engine",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": "1.4.0"
+  },
+  "packageManager": "bun@1.4.0",
+  "trustedDependencies": [],
+  "scripts": {
+    "test": "bun test --timeout 30000",
+    "typecheck": "bun ./node_modules/typescript/bin/tsc --noEmit",
+    "dev": "bun --watch src/cli.ts",
+    "start": "bun src/cli.ts",
+    "cli": "bun src/cli.ts",
+    "task:current": "bun src/cli.ts run-task --mode current",
+    "task:weekly": "bun src/cli.ts run-task --mode weekly",
+    "schedule:config": "bun src/cli.ts schedule-config --format json",
+    "schedule:install": "bun automation/weekly/install-weekly-task.ts",
+    "schedule:status": "bun automation/weekly/install-weekly-task.ts --action Status",
+    "schedule:uninstall": "bun automation/weekly/install-weekly-task.ts --action Uninstall",
+    "evidence:publish": "bun src/cli.ts evidence-publish",
+    "reconcile": "bun src/cli.ts reconcile",
+    "opencli:prepare": "bun scripts/build-opencli-adapter.ts"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.3.0",
+    "pdf-lib": "^1.17.1",
+    "yaml": "^2.8.1",
+    "@jackwener/opencli": "1.8.6"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "26.4.0",
+    "typescript": "7.0.2"
+  }
+}

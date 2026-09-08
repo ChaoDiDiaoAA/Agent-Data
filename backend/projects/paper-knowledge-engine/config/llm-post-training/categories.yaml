@@ -1,0 +1,20 @@
+tracks:
+  pt-foundations: {pdf: 01-PT-Foundations}
+  pt-sft: {pdf: 02-PT-SFT}
+  pt-data-curation: {pdf: 03-PT-Data-Curation}
+  pt-synthetic-data: {pdf: 04-PT-Synthetic-Data}
+  pt-reward-modeling: {pdf: 05-PT-Reward-Modeling}
+  pt-preference-optimization: {pdf: 06-PT-Preference-Optimization}
+  pt-policy-optimization: {pdf: 07-PT-Policy-Optimization}
+  pt-verifiable-rewards: {pdf: 08-PT-Verifiable-Rewards}
+  pt-reasoning: {pdf: 09-PT-Reasoning}
+  pt-distillation: {pdf: 10-PT-Distillation}
+  pt-tool-agent: {pdf: 11-PT-Tool-Agent}
+  pt-multimodal: {pdf: 12-PT-Multimodal}
+  pt-safety-alignment: {pdf: 13-PT-Safety-Alignment}
+  pt-adaptation: {pdf: 14-PT-Adaptation}
+  pt-efficient-tuning: {pdf: 15-PT-Efficient-Tuning}
+  pt-training-systems: {pdf: 16-PT-Training-Systems}
+  pt-stability: {pdf: 17-PT-Stability}
+  pt-evaluation: {pdf: 18-PT-Evaluation}
+fallback_pdf: 99-Unclassified

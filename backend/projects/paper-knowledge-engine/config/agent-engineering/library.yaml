@@ -1,0 +1,33 @@
+library_kind: paper
+library_id: agent-engineering
+display_name: Agent Engineering（Agent 工程知识库）
+start_date: 2026-01-01
+overlap_hours: 48
+download_after_hard_filter: true
+current_task:
+  max_papers: 150
+  track_limits:
+    harness-control-loop: 10
+    agent-loop: 10
+    runtime-execution: 10
+    tool-mcp: 10
+    context-prompt: 10
+    memory-state-session: 10
+    guardrails-policy: 10
+    permissions-authorization: 10
+    identity-tenancy-governance: 10
+    hitl-approval: 10
+    sandbox-isolation: 10
+    testing-evaluation: 10
+    agent-evaluation-methodology: 10
+    tracing-observability: 10
+    reliability-operations: 10
+weekly_schedule:
+  enabled: true
+  task_name: paper-knowledge-engine-agent-engineering-weekly
+  day_of_week: monday
+  interval_weeks: 4
+  start_date: 2026-08-31
+  local_time: '22:30'
+  timezone: Asia/Shanghai
+  max_papers: 15

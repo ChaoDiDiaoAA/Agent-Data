@@ -1,0 +1,305 @@
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { normalizeLocalMinerUResult } from '../src/mineru/mineru-local-result.ts';
+import { assessExtraction } from '../src/mineru/mineru-quality.ts';
+import { createParseWorkspace, publishParseWorkspace } from '../src/mineru/mineru-workspace.ts';
+import { verifyArchiveV2 } from '../src/shared/archive-v2.ts';
+import { asLibraryId } from '../src/shared/identity.ts';
+import { buildLocalParseJob, runLocalParse } from '../src/mineru/mineru-local-jobs.ts';
+import { archiveContext, archiveTestPdf } from './fixtures/library-paths.ts';
+import { toMinerULocalConfig } from '../src/mineru/mineru-local-config.ts';
+import { loadEngineContext } from '../src/shared/engine-context.ts';
+import { removeOwnedTestDirectory } from './fixtures/runtime-fixtures.ts';
+
+const roots: string[] = [];
+const links: string[] = [];
+const fixtureRoot = async (name: string) => { const root = await mkdtemp(join(tmpdir(), `mineru-${name}-`)); roots.push(root); return root; };
+after(async () => {
+  // Only unlink junctions this fixture created; never recursively follow them.
+  for (const path of links) { assert.ok((await lstat(path)).isSymbolicLink()); await rm(path); }
+  for (const root of roots) await removeOwnedTestDirectory(root);
+});
+
+test('normalizes table image references in page text with the same asset mapping', async () => {
+  const root = await fixtureRoot('table-page-assets');
+  await mkdir(join(root, 'images'));
+  await writeFile(join(root, 'images/table.jpg'), 'table-image');
+  await writeFile(join(root, 'paper.md'), '# Paper');
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([{ type: 'table', page_idx: 0, table_body: '<img src="images/table.jpg">' }]));
+  await normalizeLocalMinerUResult({ outputDir: root, model: 'pipeline', cliBackend: 'pipeline', pageCount: 1 });
+  const pages = JSON.parse(await readFile(join(root, 'normalized/pages.json'), 'utf8'));
+  assert.ok(pages[0].text.includes('assets/images/table.jpg'));
+  assert.ok(!(await readFile(join(root, 'normalized/page-marked.txt'), 'utf8')).includes('src="images/'));
+});
+
+test('publication freezes strict versioned source metadata and its selected parse attempt', async () => {
+  const root = await fixtureRoot('archive-source');
+  const pdfPath = join(root, 'source.pdf');
+  const destination = join(root, 'archive', '2601.00001-v1');
+  const pdf = await archiveTestPdf();
+  await writeFile(pdfPath, pdf);
+  const job = {
+    libraryId: asLibraryId('fsd'), mineruVersion: '3.1.0',
+    libraryPaths: { dataRoot: root, workRoot: join(root, 'work'), archiveRoot: join(root, 'archive'),
+      databasePath: join(root, 'library.sqlite'), operationsRoot: join(root, 'operations'), runsRoot: join(root, 'runs'), vaultRoot: join(root, 'vault'), backupRoot: join(root, 'backup') },
+    baseId: '2601.00001', arxivId: '2601.00001v1', version: 1,
+    sha256: createHash('sha256').update(pdf).digest('hex'), fileSource: pdfPath, outputDir: destination,
+    model: 'pipeline' as const, cliBackend: 'pipeline' as const, method: 'auto' as const,
+    title: 'Frozen Archive Source', authors: ['Ada Archive'], categories: ['cs.SE'],
+    matchedTracks: ['AI-FSD'], published: '2026-01-01T00:00:00Z', updated: '2026-01-02T00:00:00Z',
+    parseAttemptId: 'attempt-selected',
+  };
+  const workspace = await createParseWorkspace(job);
+  assert.equal(workspace.root, join(root, 'work', 'parsing', 'attempt-selected'));
+  await writeFile(join(workspace.root, 'paper.md'), '# Frozen source');
+  await writeFile(join(workspace.root, 'paper_content_list.json'), JSON.stringify([{ page_idx: 0, type: 'text', text: 'source text' }]));
+  const artifact = await normalizeLocalMinerUResult({ ...job, outputDir: workspace.root, pageCount: 1 });
+  const published = await publishParseWorkspace(workspace, artifact, job, async () => undefined);
+  const { source, manifest } = await verifyArchiveV2(destination);
+  assert.equal(published.outputDir, destination);
+  assert.equal(source.parseAttemptId, 'attempt-selected');
+  assert.equal(source.arxivId, '2601.00001v1');
+  assert.deepEqual(source.authors, ['Ada Archive']);
+  assert.deepEqual(manifest.files.map((entry) => entry.path), [...manifest.files].map((entry) => entry.path).sort());
+  assert.ok(manifest.files.some((entry) => entry.path === 'pages.json'));
+  assert.equal(published.pageTextPath, undefined);
+});
+
+test('publication refuses an operations junction before creating any lock', async () => {
+  const root = await fixtureRoot('operations-link');
+  const external = await fixtureRoot('operations-external');
+  const context = archiveContext(root);
+  await symlink(external, context.libraryPaths.operationsRoot, 'junction');
+  links.push(context.libraryPaths.operationsRoot);
+  const pdf = await archiveTestPdf();
+  const fileSource = join(root, 'source.pdf'); await writeFile(fileSource, pdf);
+  let entered = false;
+  const result = await runLocalParse({ ...context, baseId: '2601.00001', version: 1,
+    fileSource, sha256: createHash('sha256').update(pdf).digest('hex'), model: 'pipeline', cliBackend: 'pipeline',
+    outputDir: join(context.libraryPaths.archiveRoot, '2601.00001-v1') }, {
+    store: { reserveParseAttempt: () => ({ attemptId: 'operations-link' }), assertParseAttemptCurrent: () => { entered = true; } },
+    runner: async job => {
+      await writeFile(join(job.outputDir!, 'paper.md'), '# Paper');
+      await writeFile(join(job.outputDir!, 'paper_content_list.json'), JSON.stringify([{ page_idx: 0, type: 'text', text: 'Paper text' }]));
+      return { exitCode: 0, cleanupConfirmed: true };
+    },
+    assessExtraction: () => ({ accepted: true }),
+  });
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(await readdir(external), []);
+  assert.equal(entered, false);
+});
+
+for (const syntax of ['inline', 'nested HTML', 'angle destination', 'reference definition']) test(`normalizer publishes link-only resources through Archive v2 (${syntax})`, async () => {
+  const nested = syntax === 'nested HTML';
+  const root = await fixtureRoot('link-only');
+  const pdf = await archiveTestPdf();
+  const fileSource = join(root, 'source.pdf'); await writeFile(fileSource, pdf);
+  const context = archiveContext(root);
+  const job = { ...context, fileSource, sha256: createHash('sha256').update(pdf).digest('hex'),
+    baseId: 'local-link', version: 1, sourceType: 'local_pdf' as const, title: 'Link paper', parserConfigKey: 'pipeline-auto',
+    model: 'pipeline', cliBackend: 'pipeline', method: 'auto', parseAttemptId: 'link-only',
+    outputDir: join(context.libraryPaths.archiveRoot, 'local-link-v1') };
+  const workspace = await createParseWorkspace(job);
+  await mkdir(join(workspace.root, 'images'));
+  await writeFile(join(workspace.root, 'images', 'figure.jpg'), 'original figure bytes');
+  const markdown = nested ? '# Paper' : syntax === 'angle destination' ? '# Paper\n[figure](<images/figure.jpg>)'
+    : syntax === 'reference definition' ? '# Paper\n[figure][fig]\n\n[fig]: <images/figure.jpg>'
+    : '# Paper\n[figure](images/figure.jpg)';
+  await writeFile(join(workspace.root, 'paper.md'), markdown);
+  await writeFile(join(workspace.root, 'paper_content_list.json'), JSON.stringify([
+    { type: 'text', page_idx: 0, text: 'Paper', ...(nested ? { table_body: '<a href=images/figure.jpg>figure</a>' } : {}) },
+  ]));
+  const artifact = await normalizeLocalMinerUResult({ ...job, outputDir: workspace.root, pageCount: 1 });
+  assert.equal(await readFile(join(workspace.root, 'assets', 'images', 'figure.jpg'), 'utf8'), 'original figure bytes');
+  const normalized = await readFile(nested ? artifact.contentListPath : artifact.markdownPath, 'utf8');
+  assert.match(normalized, /assets\/images\/figure\.jpg/);
+  await publishParseWorkspace(workspace, artifact, job, () => undefined);
+  const archive = await verifyArchiveV2(workspace.destination);
+  assert.equal(Buffer.from(archive.payloads.get('assets/images/figure.jpg')!).toString(), 'original figure bytes');
+  assert.deepEqual(archive.manifest.files.filter(file => file.path.startsWith('assets/')).map(file => file.path), ['assets/images/figure.jpg']);
+});
+
+test('pipeline reference lists survive the complete normalized-artifact path', async () => {
+  const root = await fixtureRoot('pipeline-references');
+  const contentList = [
+    { page_idx: 0, type: 'text', text: 'Main paper text.' },
+    { page_idx: 1, type: 'list', sub_type: 'ref_text', list_items: ['First reference.', 'Final reference.'] },
+  ];
+  await writeFile(join(root, 'paper.md'), 'Main paper text.\n\nFirst reference.\n\nFinal reference.');
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify(contentList));
+  const artifact = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 2 });
+  const pages = JSON.parse(await readFile(join(artifact.normalizedDir, 'pages.json'), 'utf8'));
+  assert.equal(pages[1].text, 'First reference.\n\nFinal reference.');
+  assert.equal(assessExtraction(pages, { pageCount: 2 }).accepted, true);
+  assert.match(await readFile(artifact.pageTextPath, 'utf8'), /--- PAGE 2 ---\nFirst reference\.[\s\S]*Final reference\./);
+  assert.deepEqual(JSON.parse(await readFile(artifact.contentListPath, 'utf8')), contentList);
+});
+
+test('normalizes pipeline content_list into one-based page text', async () => {
+  const root = await fixtureRoot('pipeline');
+  const markdown = '# Paper';
+  const contentList = [{ page_idx: 0, type: 'text', text: 'first' }];
+  await writeFile(join(root, 'paper.md'), markdown);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify(contentList));
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+  assert.equal(result.rawOutputDir, root);
+  assert.equal(result.normalizedDir, join(root, 'normalized'));
+  assert.equal(result.markdownPath, join(root, 'normalized', 'full.md'));
+  assert.equal(result.contentListPath, join(root, 'normalized', 'content-list.json'));
+  assert.equal(result.pageTextPath, join(root, 'normalized', 'page-marked.txt'));
+  assert.equal(result.pageCount, 1);
+  assert.equal(await readFile(result.markdownPath, 'utf8'), `${markdown}`);
+  assert.equal(await readFile(result.contentListPath, 'utf8'), `${JSON.stringify(contentList, null, 2)}\n`);
+  assert.equal(await readFile(join(result.normalizedDir, 'pages.json'), 'utf8'), `${JSON.stringify([{ pageNumber: 1, text: 'first', blockCount: 1 }], null, 2)}\n`);
+  assert.equal(await readFile(result.pageTextPath, 'utf8'), '--- PAGE 1 ---\nfirst\n');
+  const expectedHash = createHash('sha256').update(markdown).update(JSON.stringify(contentList)).digest('hex');
+  assert.equal(result.contentHash, expectedHash);
+});
+
+test('normalizes MinerU Markdown with a truncation placeholder link', async () => {
+  const root = await fixtureRoot('truncation-placeholder');
+  const markdown = '# Paper\n\n**Paddy Power**: [paddyPower.com](trunc) **Betway**.';
+  await writeFile(join(root, 'paper.md'), markdown);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([{ page_idx: 0, type: 'text', text: markdown }]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(await readFile(result.markdownPath, 'utf8'), markdown);
+  assert.equal(await readFile(result.contentListPath, 'utf8'), `${JSON.stringify([{ page_idx: 0, type: 'text', text: markdown }], null, 2)}\n`);
+});
+
+test('normalizes real MinerU image references into stable Archive assets', async () => {
+  const root = await fixtureRoot('pipeline-images');
+  const raw = join(root, '2608.09072v1', 'auto');
+  await mkdir(join(raw, 'images'), { recursive: true });
+  await writeFile(join(raw, 'paper.md'), '# Paper\n\n![Figure](images/figure.jpg)\n');
+  await writeFile(join(raw, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: 'Paper with a figure.' },
+    { page_idx: 0, type: 'image', img_path: 'images/figure.jpg' },
+  ]));
+  await writeFile(join(raw, 'images', 'figure.jpg'), 'real image bytes');
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(await readFile(result.markdownPath, 'utf8'), '# Paper\n\n![Figure](assets/images/figure.jpg)\n');
+  const contentList = JSON.parse(await readFile(result.contentListPath, 'utf8'));
+  assert.equal(contentList[1].img_path, 'assets/images/figure.jpg');
+  assert.equal(await readFile(join(root, 'assets', 'images', 'figure.jpg'), 'utf8'), 'real image bytes');
+  assert.equal(await readFile(join(raw, 'images', 'figure.jpg'), 'utf8'), 'real image bytes');
+});
+
+test('prefers VLM content_list_v2 and keeps the same normalized interface', async () => {
+  const root = await fixtureRoot('vlm');
+  await writeFile(join(root, 'paper.md'), '# VLM Paper');
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([{ page_idx: 0, type: 'text', text: 'wrong v1' }]));
+  await writeFile(join(root, 'paper_content_list_v2.json'), JSON.stringify([{ page_idx: 0, type: 'text', text: 'vlm first' }]));
+  const result = await normalizeLocalMinerUResult({ model: 'vlm', cliBackend: 'vlm-engine', outputDir: root, pageCount: 1 });
+  assert.equal(result.model, 'vlm');
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /vlm first/);
+  assert.doesNotMatch(await readFile(result.pageTextPath, 'utf8'), /wrong v1/);
+});
+
+test('normalizes nested VLM v2 pages and content fields', async () => {
+  const root = await fixtureRoot('vlm-nested');
+  await writeFile(join(root, 'paper.md'), '# Nested VLM Paper');
+  await writeFile(join(root, 'paper_content_list_v2.json'), JSON.stringify([
+    [{ type: 'paragraph', content: { paragraph_content: [{ type: 'text', content: 'nested first' }] } }],
+    [{ type: 'title', content: { title_content: [{ type: 'text', content: 'nested second' }] } }],
+  ]));
+  const result = await normalizeLocalMinerUResult({ model: 'vlm', cliBackend: 'vlm-engine', outputDir: root, pageCount: 2 });
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /--- PAGE 1 ---[\s\S]*nested first[\s\S]*--- PAGE 2 ---[\s\S]*nested second/);
+});
+
+test('extracts nested VLM list items, captions, and footnotes in order', async () => {
+  const root = await fixtureRoot('vlm-content-fields');
+  await writeFile(join(root, 'paper.md'), '# VLM Content Fields');
+  await writeFile(join(root, 'paper_content_list_v2.json'), JSON.stringify([[
+    { type: 'list', content: { list_items: [{ item_content: [{ type: 'text', content: 'list item' }] }] } },
+    { type: 'image', content: { image_footnote: [{ type: 'text', content: 'image footnote' }] } },
+    { type: 'table', content: { table_footnote: [{ type: 'text', content: 'table footnote' }] } },
+    { type: 'chart', content: { chart_footnote: [{ type: 'text', content: 'chart footnote' }] } },
+    { type: 'code', content: { code_caption: [{ type: 'text', content: 'code caption' }] } },
+    { type: 'algorithm', content: { algorithm_caption: [{ type: 'text', content: 'algorithm caption' }] } },
+    { type: 'page_footnote', content: { page_footnote_content: [{ type: 'text', content: 'page footnote' }] } },
+  ]]));
+  const result = await normalizeLocalMinerUResult({ model: 'vlm', cliBackend: 'vlm-engine', outputDir: root, pageCount: 1 });
+  assert.match(
+    await readFile(result.pageTextPath, 'utf8'),
+    /list item[\s\S]*image footnote[\s\S]*table footnote[\s\S]*chart footnote[\s\S]*code caption[\s\S]*algorithm caption[\s\S]*page footnote/,
+  );
+});
+
+test('rejects missing structured output', async () => {
+  const root = await fixtureRoot('missing');
+  await writeFile(join(root, 'paper.md'), '# inline only');
+  await assert.rejects(normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 }), /structured content list required/);
+});
+
+test('job construction propagates library paths and parser version to v2 destination', () => {
+  const context = loadEngineContext({ root: process.cwd(), libraryId: 'fsd' });
+  const config = toMinerULocalConfig(context);
+  const job = buildLocalParseJob({ baseId: '2601.00001', arxivId: '2601.00001v2', version: 2, sha256: 'a'.repeat(64), pdfPath: 'unused.pdf' }, config);
+  assert.deepEqual(job.libraryPaths, context.paths);
+  assert.equal(job.libraryId, 'fsd');
+  assert.equal(job.mineruVersion, config.expectedVersion);
+  assert.equal(job.outputDir, join(context.paths.archiveRoot, '2601.00001-v2').replaceAll('\\', '/'));
+});
+
+test('rejects internal junctions even when their targets stay inside the workspace', async () => {
+  const root = await fixtureRoot('inside-junction');
+  await mkdir(join(root, 'real'));
+  await writeFile(join(root, 'paper.md'), '![figure](linked/figure.jpg)');
+  await writeFile(join(root, 'paper_content_list.json'), '[{"page_idx":0,"text":"first"}]');
+  await writeFile(join(root, 'real', 'figure.jpg'), 'figure');
+  const link = join(root, 'linked');
+  await symlink(join(root, 'real'), link, 'junction'); links.push(link);
+  await assert.rejects(normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root }), /link|reparse/);
+});
+
+test('normalization stores identical referenced assets once and rewrites every alias', async () => {
+  const root = await fixtureRoot('duplicate-assets');
+  await mkdir(join(root, 'images'));
+  await writeFile(join(root, 'paper.md'), '![a](images/a.jpg)\n![b](images/b.jpg)');
+  await writeFile(join(root, 'paper_content_list.json'), '[{"page_idx":0,"img_path":"images/b.jpg"}]');
+  await writeFile(join(root, 'images', 'a.jpg'), 'same bytes');
+  await writeFile(join(root, 'images', 'b.jpg'), 'same bytes');
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root });
+  assert.equal(await readFile(result.markdownPath, 'utf8'), '![a](assets/images/a.jpg)\n![b](assets/images/a.jpg)');
+  await assert.rejects(lstat(join(root, 'assets', 'images', 'b.jpg')), /ENOENT/);
+});
+
+test('rejects a page count mismatch', async () => {
+  const root = await fixtureRoot('page-count');
+  await writeFile(join(root, 'paper.md'), '# Paper');
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([{ page_idx: 0, type: 'text', text: 'first' }]));
+  await assert.rejects(normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 2 }), /page count mismatch/);
+});
+
+test('rejects discovered artifacts outside the output directory', async (t) => {
+  const root = await fixtureRoot('outside');
+  const outside = await fixtureRoot('outside-target');
+  await writeFile(join(outside, 'paper.md'), '# Outside');
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([{ page_idx: 0, type: 'text', text: 'first' }]));
+  try {
+    await symlink(join(outside, 'paper.md'), join(root, 'paper.md'));
+    links.push(join(root, 'paper.md'));
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && (error.code === 'EPERM' || error.code === 'EACCES'))) throw error;
+    try {
+      await symlink(outside, join(root, 'outside'), 'junction');
+      links.push(join(root, 'outside'));
+    } catch (fallbackError) {
+      if (fallbackError instanceof Error && 'code' in fallbackError && (fallbackError.code === 'EPERM' || fallbackError.code === 'EACCES')) return t.skip('symbolic links unavailable');
+      throw fallbackError;
+    }
+  }
+  await assert.rejects(
+    normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 }),
+    /artifact outside output directory/,
+  );
+});

@@ -1,0 +1,2 @@
+import { expect, test } from 'bun:test'; import { InternalScheduler } from '../src/library/schedule/scheduler.ts';
+test('scheduler does not run while stopped', async () => { let calls = 0; const scheduler = new InternalScheduler(true, async () => { calls++; }, 60_000); expect(scheduler.nextRun().running).toBe(false); await new Promise(resolve => setTimeout(resolve, 2)); expect(calls).toBe(0); scheduler.stop(); });

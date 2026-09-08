@@ -1,0 +1,92 @@
+start_date: 2026-01-01
+excluded_domains: []
+ai_technique_terms:
+  - multi-agent
+  - multi agent
+  - multiagent
+  - multiple agents
+  - agent team
+  - agent society
+  - collaborative agents
+  - cooperating agents
+  - interacting agents
+  - communicating agents
+  - llm agents
+  - language model agents
+  - agent-to-agent
+  - agent swarm
+  - multi-agent topology
+  - multi-agent graph
+program_structure_terms: []
+engineering_task_terms:
+  - coordination
+  - collaboration
+  - task decomposition
+  - task allocation
+  - delegation
+  - handoff
+  - planning
+  - scheduling
+  - communication
+  - consensus
+  - negotiation
+  - synthesis
+  - verification
+  - fault tolerance
+  - recovery
+  - resource allocation
+  - observability
+  - human oversight
+  - evaluation
+term_variants:
+  multi-agent:
+    - multi-agent systems
+    - multi-agent system
+  multi agent:
+    - multi agent systems
+    - multi agent system
+  multiagent:
+    - multiagent systems
+    - multiagent system
+  agent team:
+    - agent teams
+  agent society:
+    - agent societies
+  agent swarm:
+    - agent swarms
+  multi-agent topology:
+    - multi-agent topologies
+  multi-agent graph:
+    - multi-agent graphs
+  delegation:
+    - delegate
+    - delegated
+  handoff:
+    - handoffs
+    - hand-off
+  fault tolerance:
+    - fault-tolerant
+  human oversight:
+    - human-in-the-loop
+    - hitl
+  evaluation:
+    - evaluations
+track_priority:
+  - mas-foundations
+  - mas-topology
+  - mas-roles-capabilities
+  - mas-lifecycle-composition
+  - mas-task-decomposition
+  - mas-delegation-handoff
+  - mas-planning-scheduling
+  - mas-communication
+  - mas-shared-state-memory
+  - mas-coordination-consensus
+  - mas-conflict-negotiation
+  - mas-synthesis-verification
+  - mas-security-governance
+  - mas-fault-tolerance
+  - mas-resource-governance
+  - mas-observability
+  - mas-human-oversight
+  - mas-evaluation-methodology

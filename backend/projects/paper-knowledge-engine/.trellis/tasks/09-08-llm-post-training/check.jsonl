@@ -1,0 +1,3 @@
+{"file": "docs/superpowers/specs/2026-09-08-llm-post-training-design.md", "reason": "Review authority for scope, source policy, boundaries, and acceptance."}
+{"file": "docs/superpowers/plans/2026-09-08-llm-post-training-implementation.md", "reason": "Review authority for task files, exact values, and validation commands."}
+{"file": "tests/README.md", "reason": "Repository test isolation and deterministic suite guidance."}

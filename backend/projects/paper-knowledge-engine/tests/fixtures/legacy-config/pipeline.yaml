@@ -1,0 +1,37 @@
+start_date: "2026-01-01"
+overlap_hours: 48
+arxiv:
+  page_size: 100
+  request_interval_seconds: 6
+  max_attempts: 6
+  max_backoff_seconds: 180
+  request_timeout_seconds: 60
+  retry_jitter_ms: 1000
+  # A system-capacity 429 is checkpointed immediately and retried only after this cooldown.
+  capacity_cooldown_seconds: 900
+  candidate_pool_multiplier: 25
+  max_results_per_shard: 200
+# Download automatically after source-based hard filtering and quota selection.
+download_after_hard_filter: true
+current_task:
+  max_papers: 10
+  # Priority allocation targets; unused capacity is filled from accepted papers.
+  # A zero target disables selection for that track, including spillover.
+  track_limits:
+    AI-FSD: 1
+    LLM-Wiki: 1
+    AI-TDD: 1
+    AI-DDD: 1
+    AI-Program-Analysis-AST: 3
+    Code-Translation: 1
+    Verification: 1
+    Evaluation: 1
+weekly_schedule:
+  enabled: true
+  task_name: paper-knowledge-engine-fsd-weekly
+  day_of_week: monday
+  interval_weeks: 4
+  start_date: "2026-08-31"
+  local_time: "22:30"
+  timezone: Asia/Shanghai
+  max_papers: 20

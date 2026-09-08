@@ -1,0 +1,73 @@
+tracks:
+  - id: mas-foundations
+    query: multi-agent systems foundations architecture organization
+    categories: [cs.MA, cs.AI, cs.CL]
+    date_modes: [submitted, updated]
+  - id: mas-topology
+    query: multi-agent topology hierarchy supervisor worker swarm graph blackboard
+    categories: [cs.MA, cs.AI]
+    date_modes: [submitted, updated]
+  - id: mas-roles-capabilities
+    query: multi-agent roles capabilities specialization discovery allocation
+    categories: [cs.MA, cs.AI]
+    date_modes: [submitted, updated]
+  - id: mas-lifecycle-composition
+    query: multi-agent lifecycle dynamic creation composition team formation
+    categories: [cs.MA, cs.AI, cs.SE]
+    date_modes: [submitted, updated]
+  - id: mas-task-decomposition
+    query: multi-agent task decomposition assignment routing dependency
+    categories: [cs.MA, cs.AI]
+    date_modes: [submitted, updated]
+  - id: mas-delegation-handoff
+    query: multi-agent delegation handoff task contract cancellation failure
+    categories: [cs.MA, cs.AI, cs.CL]
+    date_modes: [submitted, updated]
+  - id: mas-planning-scheduling
+    query: multi-agent collaborative planning scheduling parallel execution
+    categories: [cs.MA, cs.AI, cs.RO]
+    date_modes: [submitted, updated]
+  - id: mas-communication
+    query: multi-agent communication messaging protocol channel asynchronous
+    categories: [cs.MA, cs.AI, cs.CL]
+    date_modes: [submitted, updated]
+  - id: mas-shared-state-memory
+    query: multi-agent shared state memory consistency ownership isolation
+    categories: [cs.MA, cs.AI, cs.DC]
+    date_modes: [submitted, updated]
+  - id: mas-coordination-consensus
+    query: multi-agent coordination consensus synchronization voting locking
+    categories: [cs.MA, cs.AI, cs.DC, cs.GT]
+    date_modes: [submitted, updated]
+  - id: mas-conflict-negotiation
+    query: multi-agent conflict negotiation debate competition incentives alignment
+    categories: [cs.MA, cs.GT, cs.AI]
+    date_modes: [submitted, updated]
+  - id: mas-synthesis-verification
+    query: multi-agent synthesis verification critic reviewer aggregation adjudication
+    categories: [cs.MA, cs.AI, cs.CL]
+    date_modes: [submitted, updated]
+  - id: mas-security-governance
+    query: multi-agent security trust permission isolation prompt injection governance
+    categories: [cs.MA, cs.CR, cs.AI]
+    date_modes: [submitted, updated]
+  - id: mas-fault-tolerance
+    query: multi-agent fault tolerance retry timeout partial failure recovery
+    categories: [cs.MA, cs.DC, cs.SE]
+    date_modes: [submitted, updated]
+  - id: mas-resource-governance
+    query: multi-agent resource allocation token budget cost concurrency fairness
+    categories: [cs.MA, cs.DC, cs.SE]
+    date_modes: [submitted, updated]
+  - id: mas-observability
+    query: multi-agent observability tracing causal debugging replay audit
+    categories: [cs.MA, cs.SE]
+    date_modes: [submitted, updated]
+  - id: mas-human-oversight
+    query: multi-agent human oversight approval intervention takeover adjudication
+    categories: [cs.MA, cs.HC, cs.AI]
+    date_modes: [submitted, updated]
+  - id: mas-evaluation-methodology
+    query: multi-agent evaluation methodology collaboration communication cost reliability
+    categories: [cs.MA, cs.AI, cs.CL]
+    date_modes: [submitted, updated]

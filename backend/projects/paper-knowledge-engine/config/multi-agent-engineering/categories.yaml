@@ -1,0 +1,38 @@
+tracks:
+  mas-foundations:
+    pdf: 01-MAS-Foundations
+  mas-topology:
+    pdf: 02-MAS-Topology
+  mas-roles-capabilities:
+    pdf: 03-MAS-Roles-Capabilities
+  mas-lifecycle-composition:
+    pdf: 04-MAS-Lifecycle-Composition
+  mas-task-decomposition:
+    pdf: 05-MAS-Task-Decomposition
+  mas-delegation-handoff:
+    pdf: 06-MAS-Delegation-Handoff
+  mas-planning-scheduling:
+    pdf: 07-MAS-Planning-Scheduling
+  mas-communication:
+    pdf: 08-MAS-Communication
+  mas-shared-state-memory:
+    pdf: 09-MAS-Shared-State-Memory
+  mas-coordination-consensus:
+    pdf: 10-MAS-Coordination-Consensus
+  mas-conflict-negotiation:
+    pdf: 11-MAS-Conflict-Negotiation
+  mas-synthesis-verification:
+    pdf: 12-MAS-Synthesis-Verification
+  mas-security-governance:
+    pdf: 13-MAS-Security-Governance
+  mas-fault-tolerance:
+    pdf: 14-MAS-Fault-Tolerance
+  mas-resource-governance:
+    pdf: 15-MAS-Resource-Governance
+  mas-observability:
+    pdf: 16-MAS-Observability
+  mas-human-oversight:
+    pdf: 17-MAS-Human-Oversight
+  mas-evaluation-methodology:
+    pdf: 18-MAS-Evaluation-Methodology
+fallback_pdf: 99-Unclassified

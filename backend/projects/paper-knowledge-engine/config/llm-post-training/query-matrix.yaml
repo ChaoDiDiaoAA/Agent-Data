@@ -1,0 +1,295 @@
+tracks:
+  - id: pt-foundations
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"post-training" OR ti:"post training" OR ti:"posttraining")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-sft
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"instruction tuning" OR abs:"instruction tuning" OR ti:"supervised
+      fine-tuning" OR abs:"supervised fine-tuning" OR ti:"supervised finetuning"
+      OR abs:"supervised finetuning" OR ti:"SFT" OR abs:"SFT")
+    categories:
+      - cs.CL
+      - cs.LG
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-data-curation
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"instruction data" OR abs:"instruction data" OR ti:"preference data"
+      OR abs:"preference data" OR ti:"post-training data" OR abs:"post-training
+      data")
+    categories:
+      - cs.CL
+      - cs.LG
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-synthetic-data
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"synthetic instruction" OR abs:"synthetic instruction" OR
+      ti:"synthetic preference" OR abs:"synthetic preference" OR
+      ti:"self-instruct" OR abs:"self-instruct")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-reward-modeling
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"reward model" OR abs:"reward model" OR ti:"reward models" OR
+      abs:"reward models" OR ti:"reward modeling" OR abs:"reward modeling" OR
+      ti:"process supervision" OR abs:"process supervision" OR ti:"verifier
+      training" OR abs:"verifier training")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-preference-optimization
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"preference optimization" OR abs:"preference optimization" OR
+      ti:"preference optimisation" OR abs:"preference optimisation" OR ti:"DPO"
+      OR abs:"DPO" OR ti:"ORPO" OR abs:"ORPO" OR ti:"SimPO" OR abs:"SimPO")
+    categories:
+      - cs.CL
+      - cs.LG
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-policy-optimization
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"PPO" OR abs:"PPO" OR ti:"GRPO" OR abs:"GRPO" OR ti:"policy
+      optimization" OR abs:"policy optimization" OR ti:"policy optimisation" OR
+      abs:"policy optimisation")
+    categories:
+      - cs.CL
+      - cs.LG
+      - stat.ML
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-verifiable-rewards
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"verifiable reward" OR abs:"verifiable reward" OR ti:"verifiable
+      rewards" OR abs:"verifiable rewards" OR ti:"RLVR" OR abs:"RLVR" OR
+      ti:"rule-based reward" OR abs:"rule-based reward")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-reasoning
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"reasoning training" OR abs:"reasoning training" OR ti:"reasoning
+      distillation" OR abs:"reasoning distillation" OR ti:"reasoning
+      reinforcement learning" OR abs:"reasoning reinforcement learning" OR
+      ti:"reasoning post-training" OR abs:"reasoning post-training")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-distillation
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"distillation" OR abs:"distillation" OR ti:"knowledge distillation" OR
+      abs:"knowledge distillation" OR ti:"policy distillation" OR abs:"policy
+      distillation")
+    categories:
+      - cs.CL
+      - cs.LG
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-tool-agent
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"agent reinforcement learning" OR abs:"agent reinforcement learning"
+      OR ti:"agent training" OR abs:"agent training" OR ti:"tool-use training"
+      OR abs:"tool-use training" OR ti:"trajectory supervision" OR
+      abs:"trajectory supervision")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.AI
+      - cs.MA
+      - cs.SE
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-multimodal
+    query: (ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model" OR
+      ti:"multimodal language models" OR abs:"multimodal language models" OR
+      ti:"audio language model" OR abs:"audio language model" OR ti:"video
+      language model" OR abs:"video language model") AND (ti:"instruction
+      tuning" OR abs:"instruction tuning" OR ti:"vision-language alignment" OR
+      abs:"vision-language alignment" OR ti:"reinforcement learning" OR
+      abs:"reinforcement learning" OR ti:"post-training" OR abs:"post-training"
+      OR ti:"post training" OR abs:"post training")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.CV
+      - cs.SD
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-safety-alignment
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"safety alignment" OR abs:"safety alignment" OR ti:"safety
+      fine-tuning" OR abs:"safety fine-tuning" OR ti:"RLHF" OR ti:"RLAIF" OR
+      abs:"RLAIF" OR ti:"constitutional AI" OR abs:"constitutional
+      AI")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-adaptation
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"continual fine-tuning" OR abs:"continual fine-tuning" OR
+      ti:"continual finetuning" OR abs:"continual finetuning" OR ti:"domain
+      instruction tuning" OR abs:"domain instruction tuning" OR ti:"multilingual
+      instruction tuning" OR abs:"multilingual instruction tuning")
+    categories:
+      - cs.CL
+      - cs.LG
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-efficient-tuning
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"LoRA" OR abs:"LoRA" OR ti:"QLoRA" OR abs:"QLoRA" OR
+      ti:"parameter-efficient fine-tuning" OR abs:"parameter-efficient
+      fine-tuning" OR ti:"parameter efficient finetuning" OR abs:"parameter
+      efficient finetuning")
+    categories:
+      - cs.CL
+      - cs.LG
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-training-systems
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"RLHF" OR abs:"RLHF" OR ti:"GRPO" OR abs:"GRPO" OR ti:"post-training
+      system" OR abs:"post-training system" OR ti:"post-training systems" OR
+      abs:"post-training systems" OR ti:"asynchronous reinforcement learning" OR
+      abs:"asynchronous reinforcement learning")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.DC
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-stability
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"post-training stability" OR abs:"post-training stability" OR
+      ti:"reward hacking" OR abs:"reward hacking" OR ti:"entropy collapse" OR
+      abs:"entropy collapse" OR ti:"preference optimization" OR abs:"preference
+      optimization")
+    categories:
+      - cs.CL
+      - cs.LG
+      - stat.ML
+    date_modes:
+      - submitted
+      - updated
+  - id: pt-evaluation
+    query: (ti:"language model" OR abs:"language model" OR ti:"language models" OR
+      abs:"language models" OR ti:"LLM" OR abs:"LLM" OR ti:"LLMs" OR abs:"LLMs"
+      OR ti:"vision-language model" OR abs:"vision-language model" OR
+      ti:"vision-language models" OR abs:"vision-language models" OR
+      ti:"multimodal language model" OR abs:"multimodal language model") AND
+      (ti:"post-training evaluation" OR abs:"post-training evaluation" OR
+      ti:"alignment evaluation" OR abs:"alignment evaluation" OR ti:"reward
+      model evaluation" OR abs:"reward model evaluation" OR ti:"post-training
+      generalization" OR abs:"post-training generalization")
+    categories:
+      - cs.CL
+      - cs.LG
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated

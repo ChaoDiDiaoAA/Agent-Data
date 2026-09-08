@@ -1,0 +1,14 @@
+tracks:
+  AI-FSD: { pdf: 01-AI-FSD-Specification }
+  LLM-Wiki: { pdf: 02-LLM-Wiki-Code2Doc }
+  AI-TDD: { pdf: 03-AI-TDD-Test-Generation }
+  AI-DDD: { pdf: 04-AI-DDD-Domain-Modeling }
+  AI-Program-Analysis-AST: { pdf: 05-AI-Program-Analysis-AST }
+  Legacy-Modernization: { pdf: 06-Agentic-Legacy-Modernization }
+  Code-Translation: { pdf: 07-LLM-Code-Translation }
+  Architecture: { pdf: 08-AI-Architecture-Refactoring }
+  Data-API: { pdf: 09-AI-Data-API-Migration }
+  Verification: { pdf: 10-AI-Verification-Equivalence }
+  Agent-Skill: { pdf: 11-Agent-Skill-Workflow }
+  Evaluation: { pdf: 12-Evaluation-Benchmarks }
+fallback_pdf: 99-Unclassified

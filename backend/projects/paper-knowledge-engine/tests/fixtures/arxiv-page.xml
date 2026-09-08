@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/"
+      xmlns:arxiv="http://arxiv.org/schemas/atom"
+      xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>https://arxiv.org/abs/2608.23146v1</id>
+    <title>An AI-Assisted Migration Framework</title>
+    <updated>2026-08-24T11:52:33Z</updated>
+    <published>2026-08-24T11:52:33Z</published>
+    <summary>AI-assisted migration of legacy scientific applications into reusable workflows.</summary>
+    <link href="https://arxiv.org/abs/2608.23146v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2608.23146v1" rel="related" type="application/pdf" title="pdf"/>
+    <category term="cs.SE" scheme="http://arxiv.org/schemas/atom"/>
+    <arxiv:primary_category term="cs.SE"/>
+    <author><name>Nafiseh Soveizi</name></author>
+  </entry>
+  <entry>
+    <id>https://arxiv.org/abs/2601.00001v2</id>
+    <title>Repository Wiki and Code2Doc</title>
+    <updated>2026-01-03T00:00:00Z</updated>
+    <published>2026-01-01T00:00:00Z</published>
+    <summary><![CDATA[Repository-level documentation with <author><name>Summary Impostor</name></author> markup.]]></summary>
+    <link href="https://arxiv.org/pdf/2601.00001v2" rel="related" type="application/pdf"/>
+    <category term="cs.SE"/>
+    <arxiv:primary_category term="cs.SE"/>
+    <arxiv:comment><author><name>Extension Impostor</name></author></arxiv:comment>
+    <author><name> Example Author </name></author>
+    <author><name></name></author>
+    <author><name>Example Author</name></author>
+    <author><name>Second Author</name></author>
+  </entry>
+</feed>

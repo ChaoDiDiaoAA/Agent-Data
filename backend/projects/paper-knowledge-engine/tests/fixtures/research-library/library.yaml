@@ -1,0 +1,40 @@
+library_kind: research
+library_id: research-fixture
+display_name: Research Fixture
+start_date: 2026-01-01
+current_task:
+  max_sources: 30
+  track_limits:
+    harness-control-loop: 2
+    agent-loop: 2
+    runtime-execution: 2
+    tool-mcp: 2
+    context-prompt: 2
+    memory-state-session: 2
+    guardrails-policy: 2
+    permissions-authorization: 2
+    identity-tenancy-governance: 2
+    hitl-approval: 2
+    sandbox-isolation: 2
+    testing-evaluation: 2
+    agent-evaluation-methodology: 2
+    tracing-observability: 2
+    reliability-operations: 2
+  source_kind_limits:
+    paper: 30
+    technical-report: 30
+    official-doc: 30
+    specification: 30
+    repository: 30
+    release: 30
+    evaluation-method: 30
+    local-artifact: 30
+weekly_schedule:
+  enabled: true
+  task_name: paper-engine-research-fixture-weekly
+  day_of_week: monday
+  interval_weeks: 4
+  start_date: 2026-08-31
+  local_time: '22:30'
+  timezone: Asia/Shanghai
+  max_sources: 15

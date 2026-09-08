@@ -1,0 +1,2 @@
+# PDF offsets and stream lengths must survive Windows checkout unchanged.
+tests/fixtures/*.pdf binary

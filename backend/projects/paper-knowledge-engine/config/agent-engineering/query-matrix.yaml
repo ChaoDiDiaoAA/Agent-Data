@@ -1,0 +1,61 @@
+tracks:
+  - id: harness-control-loop
+    query: agent harness orchestration control loop planning execution
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: agent-loop
+    query: agent observe plan act reflect termination retry
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: runtime-execution
+    query: agent runtime model invocation execution lifecycle recovery
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: tool-mcp
+    query: agent tool calling schema registry MCP resources prompts
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: context-prompt
+    query: agent context assembly prompt hierarchy budget compression retrieval
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: memory-state-session
+    query: agent memory state session checkpoint replay branching
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: guardrails-policy
+    query: agent guardrails policy validation refusal audit
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: permissions-authorization
+    query: agent permission authorization capability resource scope secret network
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: identity-tenancy-governance
+    query: agent identity tenant organization role ownership visibility audit
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: hitl-approval
+    query: agent human in the loop approval takeover timeout recovery
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: sandbox-isolation
+    query: agent sandbox process filesystem network isolation boundary
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: testing-evaluation
+    query: agent unit integration end to end trajectory replay adversarial testing
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: agent-evaluation-methodology
+    query: agent evaluation methodology metrics judge trajectory regression red team
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: tracing-observability
+    query: agent tracing observability span event log audit replay
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: reliability-operations
+    query: agent reliability idempotency retry cost latency deployment failure analysis
+    categories: [cs.AI, cs.CL, cs.PL, cs.SE]
+    date_modes: [submitted, updated]

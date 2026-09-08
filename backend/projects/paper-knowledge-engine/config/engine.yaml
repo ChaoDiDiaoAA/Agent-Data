@@ -1,0 +1,70 @@
+engine_name: paper-knowledge-engine
+
+arxiv:
+  page_size: 100
+  request_interval_seconds: 6
+  max_attempts: 6
+  max_backoff_seconds: 180
+  request_timeout_seconds: 60
+  retry_jitter_ms: 1000
+  capacity_cooldown_seconds: 900
+  candidate_pool_multiplier: 25
+  max_results_per_shard: 200
+
+runtime:
+  process_cleanup_timeout_ms: 10000
+  diagnostic_timeout_ms: 20000
+  max_output_bytes: 33554432
+
+server:
+  host: 127.0.0.1
+  port: 8787
+  sse_heartbeat_seconds: 15
+
+mineru:
+  model_source_runtime: local
+  model: pipeline
+  allowed_models: [pipeline, vlm]
+  max_concurrency: 1
+  processing_window_size: 1
+  pipeline_batch_ratio: 1
+  pipeline_method: auto
+  pipeline_language: ch
+  formula_enabled: true
+  table_enabled: true
+  vlm_lmdeploy_backend: turbomind
+  vlm_batch_size: 1
+  vlm_cache_max_entry_count: 0.5
+  task_timeout_seconds: 3600
+  result_download_timeout_seconds: 600
+  api_host: 127.0.0.1
+  api_port: 17860
+  api_startup_timeout_seconds: 120
+  local_import:
+    recursive: true
+    max_files: 60
+    max_pdf_pages: 200
+    max_pdf_size_mb: 200
+    default_track: Local-PDF
+
+evidence:
+  schema_version: 3
+  root: Evidence
+  paper_root: papers
+  index_roots:
+    authors: indexes/authors.md
+    categories: indexes/categories.md
+    tracks: indexes/tracks.md
+    years: indexes/years.md
+  publisher_version: 3
+
+research_evidence:
+  schema_version: 1
+  root: Evidence
+  source_root: sources
+  index_roots:
+    topics: indexes/topics.md
+    source_types: indexes/source-types.md
+    lifecycles: indexes/lifecycles.md
+    concepts: indexes/concepts.md
+  publisher_version: 1

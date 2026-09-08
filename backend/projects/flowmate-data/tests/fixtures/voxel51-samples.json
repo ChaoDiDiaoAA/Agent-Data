@@ -1,0 +1,37 @@
+{
+  "samples": [
+    {
+      "_id": { "$oid": "6984bad10f763d83586fdd2d" },
+      "filepath": "data/batch1-0494.jpg",
+      "tags": [], "_media_type": "image", "_rand": 0.9993687188995425,
+      "json_annotation": "{\"invoice\":{\"client_name\":\"CLIENT A\",\"client_address\":\"REDACTED\",\"seller_name\":\"SELLER A\",\"seller_address\":\"REDACTED\",\"invoice_number\":\"TEST-A\",\"invoice_date\":\"01/01/2020\",\"due_date\":\"\"},\"items\":[{\"description\":\"ITEM A\",\"quantity\":\"1.00\",\"total_price\":\"1.10\"}],\"subtotal\":{\"tax\":\"0.10\",\"discount\":\"\",\"total\":\"1.10\"},\"payment_instructions\":{\"due_date\":\"\",\"bank_name\":\"\",\"account_number\":\"\",\"payment_method\":\"\"}}",
+      "ocr_text": "REDACTED TEST-A",
+      "_dataset_id": { "$oid": "6984bad10f763d83586fdd2c" },
+      "created_at": { "$date": "2026-02-05T15:44:17.41Z" },
+      "last_modified_at": { "$date": "2026-02-05T15:44:18.236Z" },
+      "metadata": { "_cls": "ImageMetadata", "size_bytes": 216316, "mime_type": "image/jpeg", "width": 1654, "height": 2339, "num_channels": 3 }
+    },
+    {
+      "_id": { "$oid": "6984bad10f763d83586fdd2e" },
+      "filepath": "data/batch1-0489.jpg",
+      "tags": [], "_media_type": "image", "_rand": 0.9996309090176788,
+      "json_annotation": "{\"invoice\":{\"client_name\":\"CLIENT B\",\"client_address\":\"REDACTED\",\"seller_name\":\"SELLER B\",\"seller_address\":\"REDACTED\",\"invoice_number\":\"TEST-B\",\"invoice_date\":\"01/01/2020\",\"due_date\":\"\"},\"items\":[{\"description\":\"ITEM B\",\"quantity\":\"1.00\",\"total_price\":\"2.20\"}],\"subtotal\":{\"tax\":\"0.20\",\"discount\":\"\",\"total\":\"2.20\"},\"payment_instructions\":{\"due_date\":\"\",\"bank_name\":\"\",\"account_number\":\"\",\"payment_method\":\"\"}}",
+      "ocr_text": "REDACTED TEST-B",
+      "_dataset_id": { "$oid": "6984bad10f763d83586fdd2c" },
+      "created_at": { "$date": "2026-02-05T15:44:17.411Z" },
+      "last_modified_at": { "$date": "2026-02-05T15:44:18.236Z" },
+      "metadata": { "_cls": "ImageMetadata", "size_bytes": 180382, "mime_type": "image/jpeg", "width": 1654, "height": 2339, "num_channels": 3 }
+    },
+    {
+      "_id": { "$oid": "6984bad10f763d83586fdd2f" },
+      "filepath": "data/batch1-0499.jpg",
+      "tags": [], "_media_type": "image", "_rand": 0.9993621588633077,
+      "json_annotation": "{\"invoice\":{\"client_name\":\"CLIENT C\",\"client_address\":\"REDACTED\",\"seller_name\":\"SELLER C\",\"seller_address\":\"REDACTED\",\"invoice_number\":\"TEST-C\",\"invoice_date\":\"01/01/2020\",\"due_date\":\"\"},\"items\":[{\"description\":\"ITEM C\",\"quantity\":\"1.00\",\"total_price\":\"3.30\"}],\"subtotal\":{\"tax\":\"0.30\",\"discount\":\"\",\"total\":\"3.30\"},\"payment_instructions\":{\"due_date\":\"\",\"bank_name\":\"\",\"account_number\":\"\",\"payment_method\":\"\"}}",
+      "ocr_text": "REDACTED TEST-C",
+      "_dataset_id": { "$oid": "6984bad10f763d83586fdd2c" },
+      "created_at": { "$date": "2026-02-05T15:44:17.412Z" },
+      "last_modified_at": { "$date": "2026-02-05T15:44:18.236Z" },
+      "metadata": { "_cls": "ImageMetadata", "size_bytes": 188076, "mime_type": "image/jpeg", "width": 1654, "height": 2339, "num_channels": 3 }
+    }
+  ]
+}

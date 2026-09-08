@@ -1,0 +1,11 @@
+tracks: [harness-control-loop, agent-loop, runtime-execution, tool-mcp, context-prompt, memory-state-session, guardrails-policy, permissions-authorization, identity-tenancy-governance, hitl-approval, sandbox-isolation, testing-evaluation, agent-evaluation-methodology, tracing-observability, reliability-operations]
+lifecycles: [request-intake, session-run-creation, context-construction, model-invocation, tool-execution, hitl, state-memory-commit, tracing, replay-evaluation]
+control_boundaries: [generation, execution, persistence, observation, security]
+evidence_levels: [official-specification-or-source, paper-or-technical-report, evaluation-method-or-engineering-case, engineering-article, community-discussion]
+testing_levels: [unit, component, integration, end-to-end, trajectory-replay, red-team-adversarial, security, stress]
+evaluation_dimensions:
+  objects: [model, tool, agent-loop, run, session]
+  units: [step, turn, trajectory, task, session]
+  adjudicators: [rule, program, human, model-assisted]
+  metrics: [task-success, tool-correctness, trajectory-efficiency, safety, reliability, cost, latency]
+  replay_strategies: [trace-replay, regression, red-team]

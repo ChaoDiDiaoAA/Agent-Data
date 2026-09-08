@@ -1,0 +1,93 @@
+start_date: 2026-01-01
+excluded_domains: []
+ai_technique_terms:
+  - agent
+  - autonomous agent
+  - large language model
+  - llm
+  - language model
+  - tool-using agent
+program_structure_terms:
+  - agent harness
+  - agent runtime
+  - agent loop
+  - tool calling
+  - context engineering
+  - prompt engineering
+  - memory
+  - state
+  - session
+  - guardrail
+  - sandbox
+  - tracing
+  - observability
+  - human in the loop
+engineering_task_terms:
+  - harness
+  - runtime
+  - control loop
+  - tool
+  - mcp
+  - context
+  - prompt
+  - memory
+  - state
+  - session
+  - guardrail
+  - policy
+  - permission
+  - authorization
+  - identity
+  - tenant
+  - approval
+  - sandbox
+  - testing
+  - evaluation
+  - tracing
+  - observability
+  - reliability
+  - recovery
+term_variants:
+  agent:
+    - agents
+  large language model:
+    - large language models
+  llm:
+    - llms
+  tool:
+    - tools
+  prompt:
+    - prompts
+  memory:
+    - memories
+  session:
+    - sessions
+  policy:
+    - policies
+  permission:
+    - permissions
+  tenant:
+    - tenants
+  sandbox:
+    - sandboxes
+  evaluation:
+    - evaluations
+  tracing:
+    - trace
+    - traces
+track_priority:
+  - harness-control-loop
+  - agent-loop
+  - runtime-execution
+  - tool-mcp
+  - context-prompt
+  - memory-state-session
+  - guardrails-policy
+  - permissions-authorization
+  - identity-tenancy-governance
+  - hitl-approval
+  - sandbox-isolation
+  - testing-evaluation
+  - agent-evaluation-methodology
+  - tracing-observability
+  - reliability-operations

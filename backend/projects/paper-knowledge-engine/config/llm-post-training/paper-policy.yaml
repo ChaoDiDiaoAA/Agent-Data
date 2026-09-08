@@ -1,0 +1,22 @@
+start_date: 2026-01-01
+# Calibrated against application-side VLM videogame-frame annotation; retain multimodal RL post-training coverage.
+excluded_domains: [video game, videogame]
+ai_technique_terms: [language model, large language model, llm, vision-language model, multimodal language model]
+program_structure_terms: []
+engineering_task_terms: [post-training, instruction tuning, supervised fine-tuning, sft, instruction data, preference data, synthetic instruction, synthetic preference, self-instruct, reward model, reward modeling, process supervision, verifier training, preference optimization, dpo, orpo, simpo, policy optimization, ppo, grpo, reinforcement learning, verifiable reward, rlvr, rule-based reward, reasoning training, reasoning distillation, distillation, agent training, tool-use training, trajectory supervision, vision-language alignment, safety alignment, safety fine-tuning, rlhf, rlaif, constitutional ai, continual fine-tuning, lora, qlora, parameter-efficient fine-tuning]
+term_variants:
+  language model: [language models]
+  large language model: [large language models]
+  llm: [llms]
+  vision-language model: [vision-language models, vision language model, vision language models]
+  multimodal language model: [multimodal language models]
+  post-training: [post training, posttraining]
+  supervised fine-tuning: [supervised finetuning, supervised fine tuning]
+  continual fine-tuning: [continual finetuning, continual fine tuning]
+  reward model: [reward models]
+  reward modeling: [reward modelling]
+  preference optimization: [preference optimisation]
+  policy optimization: [policy optimisation]
+  verifiable reward: [verifiable rewards]
+  parameter-efficient fine-tuning: [parameter efficient finetuning, parameter efficient fine tuning]
+track_priority: [pt-foundations, pt-sft, pt-data-curation, pt-synthetic-data, pt-reward-modeling, pt-preference-optimization, pt-policy-optimization, pt-verifiable-rewards, pt-reasoning, pt-distillation, pt-tool-agent, pt-multimodal, pt-safety-alignment, pt-adaptation, pt-efficient-tuning, pt-training-systems, pt-stability, pt-evaluation]

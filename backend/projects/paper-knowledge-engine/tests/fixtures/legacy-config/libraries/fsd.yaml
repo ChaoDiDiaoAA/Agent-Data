@@ -1,0 +1,177 @@
+library_id: fsd
+display_name: FSD 论文知识库
+start_date: "2026-01-01"
+overlap_hours: 48
+download_after_hard_filter: true
+
+current_task:
+  max_papers: 10
+  track_limits:
+    AI-FSD: 1
+    LLM-Wiki: 1
+    AI-TDD: 1
+    AI-DDD: 1
+    AI-Program-Analysis-AST: 3
+    Code-Translation: 1
+    Verification: 1
+    Evaluation: 1
+
+weekly_schedule:
+  enabled: true
+  task_name: paper-knowledge-engine-fsd-weekly
+  day_of_week: monday
+  interval_weeks: 4
+  start_date: "2026-08-31"
+  local_time: "22:30"
+  timezone: Asia/Shanghai
+  max_papers: 20
+
+tracks:
+  - id: AI-FSD
+    query: 'all:("large language model" OR "code LLM" OR "coding agent" OR AST OR "program analysis") AND all:("functional specification" OR "specification recovery" OR "requirements recovery")'
+    categories: [cs.SE, cs.PL, cs.AI, cs.CL]
+    date_modes: [submitted, updated]
+  - id: LLM-Wiki
+    query: 'all:("large language model" OR LLM OR LLMs OR RAG OR GraphRAG OR "knowledge graph") AND all:("repository documentation" OR "repository-level documentation" OR Code2Doc OR "codebase wiki" OR "repository wiki")'
+    categories: [cs.SE, cs.CL, cs.IR, cs.AI]
+    date_modes: [submitted, updated]
+  - id: AI-TDD
+    query: 'all:("large language model" OR "code LLM" OR "coding agent") AND all:("test generation" OR "characterization test" OR "test oracle" OR "test repair")'
+    categories: [cs.SE, cs.PL, cs.AI]
+    date_modes: [submitted, updated]
+  - id: AI-DDD
+    query: 'all:("large language model" OR "code LLM" OR "coding agent") AND all:("domain model" OR "business rule" OR "bounded context")'
+    categories: [cs.SE, cs.AI, cs.PL]
+    date_modes: [submitted, updated]
+  - id: AI-Program-Analysis-AST
+    query: 'all:(AST OR CST OR "control flow graph" OR "data flow graph" OR "call graph" OR "program analysis") AND all:("repository understanding" OR "specification recovery" OR "test generation" OR "architecture recovery")'
+    categories: [cs.SE, cs.PL, cs.AI]
+    date_modes: [submitted, updated]
+  - id: Code-Translation
+    query: 'all:("large language model" OR "code LLM" OR "coding agent" OR "program analysis") AND all:("program translation" OR "language migration" OR "framework migration")'
+    categories: [cs.SE, cs.PL, cs.AI]
+    date_modes: [submitted, updated]
+  - id: Verification
+    query: 'all:("large language model" OR "code LLM" OR AST OR "program analysis") AND all:("semantic equivalence" OR "behavior preservation" OR "differential testing")'
+    categories: [cs.SE, cs.PL, cs.AI]
+    date_modes: [submitted, updated]
+  - id: Evaluation
+    query: 'all:("large language model" OR "code LLM" OR "coding agent") AND all:("repository benchmark" OR "coding agent benchmark" OR "migration benchmark")'
+    categories: [cs.SE, cs.AI, cs.CL]
+    date_modes: [submitted, updated]
+
+paper_policy:
+  start_date: "2026-01-01"
+  excluded_domains:
+    - autonomous driving
+    - natural language translation without code
+  ai_technique_terms:
+    - large language model
+    - llm
+    - code llm
+    - coding agent
+    - llm agent
+    - tool-using agent
+    - retrieval-augmented generation
+    - rag
+    - graph rag
+    - llm wiki
+    - knowledge graph
+    - ai-assisted program analysis
+  program_structure_terms:
+    - abstract syntax tree
+    - ast
+    - concrete syntax tree
+    - cst
+    - control flow graph
+    - cfg
+    - data flow graph
+    - dfg
+    - call graph
+    - program dependency graph
+    - pdg
+    - symbol table
+    - type information
+    - intermediate representation
+    - ir
+    - static analysis
+    - dynamic analysis
+    - symbolic execution
+  engineering_task_terms:
+    - repository understanding
+    - repository wiki
+    - repository documentation
+    - repository-level documentation
+    - codebase wiki
+    - code2doc
+    - specification recovery
+    - requirements recovery
+    - test generation
+    - test repair
+    - test oracle
+    - characterization test
+    - domain model
+    - business rule
+    - bounded context
+    - legacy modernization
+    - architecture recovery
+    - module decomposition
+    - program translation
+    - language migration
+    - framework migration
+    - api migration
+    - dependency migration
+    - database migration
+    - schema migration
+    - semantic equivalence
+    - behavior preservation
+    - differential testing
+    - coding agent benchmark
+    - repository benchmark
+  term_variants:
+    large language model: [large language models]
+    llm: [llms]
+    code llm: [code llms]
+    coding agent: [coding agents]
+    llm agent: [llm agents]
+    tool-using agent: [tool-using agents]
+    knowledge graph: [knowledge graphs]
+    graph rag: [graphrag]
+    abstract syntax tree: [abstract syntax trees]
+    ast: [asts]
+    concrete syntax tree: [concrete syntax trees]
+    cst: [csts]
+    control flow graph: [control flow graphs]
+    cfg: [cfgs]
+    data flow graph: [data flow graphs]
+    dfg: [dfgs]
+    call graph: [call graphs]
+    program dependency graph: [program dependency graphs]
+    pdg: [pdgs]
+    symbol table: [symbol tables]
+    intermediate representation: [intermediate representations]
+    requirements recovery: [requirement recovery]
+    test oracle: [test oracles]
+    characterization test: [characterization tests]
+    domain model: [domain models]
+    business rule: [business rules]
+    bounded context: [bounded contexts]
+    coding agent benchmark: [coding agent benchmarks]
+    repository benchmark: [repository benchmarks]
+  track_priority: [AI-FSD, LLM-Wiki, AI-TDD, AI-DDD, AI-Program-Analysis-AST, Code-Translation, Verification, Evaluation]
+
+categories:
+  tracks:
+    AI-FSD: { pdf: 01-AI-FSD-Specification }
+    LLM-Wiki: { pdf: 02-LLM-Wiki-Code2Doc }
+    AI-TDD: { pdf: 03-AI-TDD-Test-Generation }
+    AI-DDD: { pdf: 04-AI-DDD-Domain-Modeling }
+    AI-Program-Analysis-AST: { pdf: 05-AI-Program-Analysis-AST }
+    Legacy-Modernization: { pdf: 06-Agentic-Legacy-Modernization }
+    Code-Translation: { pdf: 07-LLM-Code-Translation }
+    Architecture: { pdf: 08-AI-Architecture-Refactoring }
+    Data-API: { pdf: 09-AI-Data-API-Migration }
+    Verification: { pdf: 10-AI-Verification-Equivalence }
+    Agent-Skill: { pdf: 11-Agent-Skill-Workflow }
+    Evaluation: { pdf: 12-Evaluation-Benchmarks }
+  fallback_pdf: 99-Unclassified

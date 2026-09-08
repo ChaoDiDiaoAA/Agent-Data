@@ -1,0 +1,32 @@
+tracks:
+  harness-control-loop:
+    pdf: 01-Agent-Harness-Control-Loop
+  agent-loop:
+    pdf: 02-Agent-Loop
+  runtime-execution:
+    pdf: 03-Agent-Runtime-Execution
+  tool-mcp:
+    pdf: 04-Agent-Tool-MCP
+  context-prompt:
+    pdf: 05-Agent-Context-Prompt
+  memory-state-session:
+    pdf: 06-Agent-Memory-State-Session
+  guardrails-policy:
+    pdf: 07-Agent-Guardrails-Policy
+  permissions-authorization:
+    pdf: 08-Agent-Permissions-Authorization
+  identity-tenancy-governance:
+    pdf: 09-Agent-Identity-Tenancy-Governance
+  hitl-approval:
+    pdf: 10-Agent-HITL-Approval
+  sandbox-isolation:
+    pdf: 11-Agent-Sandbox-Isolation
+  testing-evaluation:
+    pdf: 12-Agent-Testing-Evaluation
+  agent-evaluation-methodology:
+    pdf: 13-Agent-Evaluation-Methodology
+  tracing-observability:
+    pdf: 14-Agent-Tracing-Observability
+  reliability-operations:
+    pdf: 15-Agent-Reliability-Operations
+fallback_pdf: 99-Unclassified

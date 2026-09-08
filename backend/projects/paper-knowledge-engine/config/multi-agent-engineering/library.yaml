@@ -1,0 +1,36 @@
+library_kind: paper
+library_id: multi-agent-engineering
+display_name: Multi-Agent Engineering（Multi-Agent 工程知识库）
+start_date: 2026-01-01
+overlap_hours: 48
+download_after_hard_filter: true
+current_task:
+  max_papers: 90
+  track_limits:
+    mas-foundations: 5
+    mas-topology: 5
+    mas-roles-capabilities: 5
+    mas-lifecycle-composition: 5
+    mas-task-decomposition: 5
+    mas-delegation-handoff: 5
+    mas-planning-scheduling: 5
+    mas-communication: 5
+    mas-shared-state-memory: 5
+    mas-coordination-consensus: 5
+    mas-conflict-negotiation: 5
+    mas-synthesis-verification: 5
+    mas-security-governance: 5
+    mas-fault-tolerance: 5
+    mas-resource-governance: 5
+    mas-observability: 5
+    mas-human-oversight: 5
+    mas-evaluation-methodology: 5
+weekly_schedule:
+  enabled: true
+  task_name: paper-knowledge-engine-multi-agent-engineering-weekly
+  day_of_week: monday
+  interval_weeks: 4
+  start_date: 2026-08-31
+  local_time: '22:30'
+  timezone: Asia/Shanghai
+  max_papers: 18

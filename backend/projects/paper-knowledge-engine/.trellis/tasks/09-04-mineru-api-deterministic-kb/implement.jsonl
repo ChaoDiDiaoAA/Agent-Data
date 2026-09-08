@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-04-mineru-api-deterministic-kb/research/current-state.md", "reason": "现有生产链、已验证能力、工作树边界和具体缺陷"}
+{"file": "docs/adr/0001-scope-mineru-api-to-one-operation.md", "reason": "任务级 MinerU API 生命周期决策"}
+{"file": "docs/adr/0002-publish-mineru-markdown-as-managed-projection.md", "reason": "Archive 与 Obsidian Markdown 投影决策"}
+{"file": "CONTEXT.md", "reason": "领域术语与边界"}
+{"file": "docs/adr/0003-separate-managed-evidence-from-human-knowledge.md", "reason": "保持 L2/L3 所有权与实施顺序边界"}

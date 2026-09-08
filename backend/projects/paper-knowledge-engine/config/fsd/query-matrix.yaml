@@ -1,0 +1,91 @@
+tracks:
+  - id: AI-FSD
+    query: all:("large language model" OR "code LLM" OR "coding agent" OR AST OR
+      "program analysis") AND all:("functional specification" OR "specification
+      recovery" OR "requirements recovery")
+    categories:
+      - cs.SE
+      - cs.PL
+      - cs.AI
+      - cs.CL
+    date_modes:
+      - submitted
+      - updated
+  - id: LLM-Wiki
+    query: all:("large language model" OR LLM OR LLMs OR RAG OR GraphRAG OR
+      "knowledge graph") AND all:("repository documentation" OR
+      "repository-level documentation" OR Code2Doc OR "codebase wiki" OR
+      "repository wiki")
+    categories:
+      - cs.SE
+      - cs.CL
+      - cs.IR
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: AI-TDD
+    query: all:("large language model" OR "code LLM" OR "coding agent") AND
+      all:("test generation" OR "characterization test" OR "test oracle" OR
+      "test repair")
+    categories:
+      - cs.SE
+      - cs.PL
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: AI-DDD
+    query: all:("large language model" OR "code LLM" OR "coding agent") AND
+      all:("domain model" OR "business rule" OR "bounded context")
+    categories:
+      - cs.SE
+      - cs.AI
+      - cs.PL
+    date_modes:
+      - submitted
+      - updated
+  - id: AI-Program-Analysis-AST
+    query: all:(AST OR CST OR "control flow graph" OR "data flow graph" OR "call
+      graph" OR "program analysis") AND all:("repository understanding" OR
+      "specification recovery" OR "test generation" OR "architecture recovery")
+    categories:
+      - cs.SE
+      - cs.PL
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: Code-Translation
+    query: all:("large language model" OR "code LLM" OR "coding agent" OR "program
+      analysis") AND all:("program translation" OR "language migration" OR
+      "framework migration")
+    categories:
+      - cs.SE
+      - cs.PL
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: Verification
+    query: all:("large language model" OR "code LLM" OR AST OR "program analysis")
+      AND all:("semantic equivalence" OR "behavior preservation" OR
+      "differential testing")
+    categories:
+      - cs.SE
+      - cs.PL
+      - cs.AI
+    date_modes:
+      - submitted
+      - updated
+  - id: Evaluation
+    query: all:("large language model" OR "code LLM" OR "coding agent") AND
+      all:("repository benchmark" OR "coding agent benchmark" OR "migration
+      benchmark")
+    categories:
+      - cs.SE
+      - cs.AI
+      - cs.CL
+    date_modes:
+      - submitted
+      - updated

@@ -1,0 +1,5 @@
+pdf_root: "D:\\paper\\paper-knowledge-engine\\fsd"
+vault_root: "D:\\obsidian\\data\\paper-knowledge-engine\\fsd"
+state_root: "../../../data/paper-libraries/fsd"
+temp_root: "../../../data/paper-libraries/fsd/work"
+backup_root: "../../../backups/paper-libraries/fsd"

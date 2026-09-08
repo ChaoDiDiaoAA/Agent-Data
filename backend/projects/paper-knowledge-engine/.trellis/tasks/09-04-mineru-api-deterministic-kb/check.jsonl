@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-04-mineru-api-deterministic-kb/research/current-state.md", "reason": "复审现有缺陷和保护工作树边界"}
+{"file": "docs/adr/0001-scope-mineru-api-to-one-operation.md", "reason": "验证生命周期符合任务级决策"}
+{"file": "docs/adr/0002-publish-mineru-markdown-as-managed-projection.md", "reason": "验证发布产物符合投影决策"}
+{"file": "CONTEXT.md", "reason": "验证代码和文档术语一致"}
+{"file": "docs/adr/0003-separate-managed-evidence-from-human-knowledge.md", "reason": "防止当前实现越界写入人工知识层"}

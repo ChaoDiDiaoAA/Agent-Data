@@ -1,0 +1,9 @@
+schema_version: 3
+root: "Evidence"
+paper_root: "papers"
+index_roots:
+  authors: "indexes/authors.md"
+  categories: "indexes/categories.md"
+  tracks: "indexes/tracks.md"
+  years: "indexes/years.md"
+publisher_version: 3

@@ -1,0 +1,6 @@
+# The workspace's MinerU checkout ignore also matches this source directory on Windows.
+!/src/mineru/
+!/src/mineru/*.ts
+# Likewise, library state modules are source code, not generated state data.
+!/src/library/state/
+!/src/library/state/*.ts
