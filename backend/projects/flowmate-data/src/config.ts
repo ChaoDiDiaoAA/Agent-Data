@@ -148,7 +148,7 @@ export function loadSourceConfig(path: string): SourceConfig {
 
 export function validateWorkbenchConfig(value: unknown): WorkbenchConfig {
   const config = closedObject(value, ['schema_version', 'sample', 'knowledge', 'release', 'backup']);
-  const sample = closedObject(config.sample, ['source_id', 'dataset_id', 'selection_id', 'acquire_limit', 'parse_limit', 'publish_snapshot']);
+  const sample = closedObject(config.sample, ['source_id', 'dataset_id', 'selection_id', 'acquire_limit', 'publish_snapshot']);
   const knowledge = closedObject(config.knowledge, ['source_ids', 'parse_source_ids']);
   const release = closedObject(config.release, ['version', 'include_originals']);
   const backup = closedObject(config.backup, ['verify', 'restore_smoke']);
@@ -162,7 +162,6 @@ export function validateWorkbenchConfig(value: unknown): WorkbenchConfig {
       dataset_id: safeConfigId(sample.dataset_id),
       selection_id: safeConfigId(sample.selection_id),
       acquire_limit: positiveInteger(sample.acquire_limit),
-      parse_limit: positiveInteger(sample.parse_limit),
       publish_snapshot: booleanValue(sample.publish_snapshot),
     },
     knowledge: { source_ids: sourceIds, parse_source_ids: parseSourceIds },

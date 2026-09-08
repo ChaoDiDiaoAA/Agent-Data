@@ -182,7 +182,7 @@ test('CLI dispatches probe/acquire and preserves usage exit for unsupported comm
   const customWorkbenchPath = join(configuredPaths.dataRoot, '..', 'workbench.json');
   await writeFile(customWorkbenchPath, JSON.stringify({
     schema_version: 1,
-    sample: { source_id: 'voxel51-invoice-ocr', dataset_id: 'voxel51-hq-invoice-ocr', selection_id: 'cli-default', acquire_limit: 1, parse_limit: 1, publish_snapshot: false },
+    sample: { source_id: 'voxel51-invoice-ocr', dataset_id: 'voxel51-hq-invoice-ocr', selection_id: 'cli-default', acquire_limit: 1, publish_snapshot: false },
     knowledge: { source_ids: [], parse_source_ids: [] },
     release: { version: 'public-invoice-p0-v1', include_originals: false },
     backup: { verify: false, restore_smoke: false },

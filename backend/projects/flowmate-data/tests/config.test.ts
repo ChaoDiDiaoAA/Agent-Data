@@ -45,7 +45,7 @@ const validWorkbench: WorkbenchConfig = {
   schema_version: 1,
   sample: {
     source_id: 'voxel51-invoice-ocr', dataset_id: 'voxel51-hq-invoice-ocr', selection_id: 'initial-20',
-    acquire_limit: 20, parse_limit: 1, publish_snapshot: true,
+    acquire_limit: 20, publish_snapshot: true,
   },
   knowledge: { source_ids: [], parse_source_ids: [] },
   release: { version: 'public-invoice-p0-v1', include_originals: false },
@@ -172,5 +172,9 @@ describe('workbench configuration', () => {
 
   test('rejects unknown workbench fields', () => {
     expect(() => validateWorkbenchConfig({ ...validWorkbench, unexpected: true })).toThrow('UNKNOWN_FIELD');
+  });
+
+  test('rejects a separate parse limit because the current task has one quantity', () => {
+    expect(() => validateWorkbenchConfig({ ...validWorkbench, sample: { ...validWorkbench.sample, parse_limit: 1 } })).toThrow('UNKNOWN_FIELD');
   });
 });

@@ -15,7 +15,7 @@ const validPaths = {
 
 const temporaryDirectories: string[] = [];
 
-async function menuFixture(acquireLimit: number, parseLimit: number): Promise<{ pathsPath: string; configPath: string }> {
+async function menuFixture(acquireLimit: number): Promise<{ pathsPath: string; configPath: string }> {
   const directory = await mkdtemp(join(tmpdir(), 'flowmate-menu-'));
   temporaryDirectories.push(directory);
   const pathsPath = join(directory, 'paths.json');
@@ -28,7 +28,6 @@ async function menuFixture(acquireLimit: number, parseLimit: number): Promise<{ 
       dataset_id: 'voxel51-hq-invoice-ocr',
       selection_id: 'initial-20',
       acquire_limit: acquireLimit,
-      parse_limit: parseLimit,
       publish_snapshot: false,
     },
     knowledge: { source_ids: [], parse_source_ids: [] },
@@ -47,8 +46,8 @@ function fakeOutput(lines: string[]): MenuOptions['output'] {
   };
 }
 
-async function runChoice(choice: string, acquireLimit = 7, parseLimit = 3): Promise<{ commands: string[][]; output: string }> {
-  const { pathsPath, configPath } = await menuFixture(acquireLimit, parseLimit);
+async function runChoice(choice: string, acquireLimit = 7): Promise<{ commands: string[][]; output: string }> {
+  const { pathsPath, configPath } = await menuFixture(acquireLimit);
   const answers = [choice, '0'];
   const commands: string[][] = [];
   const lines: string[] = [];
@@ -70,34 +69,40 @@ afterEach(async () => {
 });
 
 describe('interactive CLI menu', () => {
-  test('reads acquire_limit from workbench config and does not add a manual limit', async () => {
-    const result = await runChoice('3', 7, 3);
+  test('shows one task quantity for acquisition and parsing', async () => {
+    const result = await runChoice('1', 7);
 
     expect(result.output).toContain('数据集发票总量：8181');
     expect(result.output).toContain('可采集的带标注发票：1489');
-    expect(result.output).toContain('本次获取数量（来自 config）：7');
-    expect(result.output).toContain('3. 获取发票（7 条）');
-    expect(result.commands).toHaveLength(1);
-    expect(result.commands[0]).toEqual(expect.arrayContaining(['acquire', 'voxel51-invoice-ocr']));
-    expect(result.commands[0]).not.toContain('--limit');
+    expect(result.output).toContain('当前任务数量（获取与解析）：7 条');
+    expect(result.output).toContain('执行当前任务会获取并解析同一批 7 条发票');
+    expect(result.output).toContain('2. 执行当前任务（获取并解析 7 条）');
+    expect(result.output).not.toContain('parse_limit');
   });
 
-  test('reads parse_limit from workbench config and does not add a manual limit', async () => {
-    const result = await runChoice('5', 7, 3);
+  test('runs the complete current task with the configured quantity and no manual limit', async () => {
+    const result = await runChoice('2', 7);
 
-    expect(result.output).toContain('本次解析数量（来自 config）：3');
-    expect(result.output).toContain('5. MinerU 解析（3 条）');
-    expect(result.commands).toHaveLength(1);
-    expect(result.commands[0]).toEqual(expect.arrayContaining(['parse']));
-    expect(result.commands[0]).not.toContain('--limit');
+    expect(result.commands).toHaveLength(9);
+    expect(result.commands[0]).toEqual(expect.arrayContaining(['source', 'probe', 'voxel51-invoice-ocr']));
+    expect(result.commands[1]).toEqual(expect.arrayContaining(['acquire', 'voxel51-invoice-ocr']));
+    expect(result.commands[2]).toEqual(expect.arrayContaining(['labels', 'map', 'voxel51-hq-invoice-ocr']));
+    expect(result.commands[3]).toEqual(expect.arrayContaining(['parse']));
+    expect(result.commands[4]).toEqual(expect.arrayContaining(['catalog', 'build']));
+    expect(result.commands[5]).toEqual(expect.arrayContaining(['release', 'build', 'public-invoice-p0-v1']));
+    expect(result.commands[6]).toEqual(expect.arrayContaining(['release', 'verify', 'public-invoice-p0-v1']));
+    expect(result.commands[7]).toEqual(expect.arrayContaining(['verify']));
+    expect(result.commands[8]).toEqual(expect.arrayContaining(['backup', 'create']));
+    expect(result.commands.every(command => !command.includes('--limit'))).toBe(true);
   });
 
-  test('maps verification and backup entries to the correct commands', async () => {
-    const verification = await runChoice('8');
+  test('maps verify and backup entries to the correct commands', async () => {
+    const verification = await runChoice('3');
+    expect(verification.commands).toHaveLength(2);
     expect(verification.commands[0]).toEqual(expect.arrayContaining(['release', 'verify', 'public-invoice-p0-v1']));
     expect(verification.commands[1]).toEqual(expect.arrayContaining(['verify']));
 
-    const backup = await runChoice('9');
+    const backup = await runChoice('4');
     expect(backup.commands).toHaveLength(1);
     expect(backup.commands[0]).toEqual(expect.arrayContaining(['backup', 'create']));
   });

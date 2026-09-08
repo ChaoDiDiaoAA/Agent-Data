@@ -47,8 +47,7 @@ bun run typecheck
 | `sample.source_id` | 样本来源登记 ID，对应 `config/sources/<source_id>.json` | `voxel51-invoice-ocr` |
 | `sample.dataset_id` | 处理数据和 Obsidian 的数据集分区 | `voxel51-hq-invoice-ocr` |
 | `sample.selection_id` | 固定选样清单 ID；同一 ID 重跑读取已提交清单 | `initial-20` |
-| `sample.acquire_limit` | 首次最多获取多少条带标注样本 | `20` |
-| `sample.parse_limit` | 每次默认交给 MinerU 解析多少条 | `1` |
+| `sample.acquire_limit` | 当前任务获取并交给 MinerU 解析的带标注样本数 | `20` |
 | `sample.publish_snapshot` | 标签映射后是否同步发布 `D:\paper\Invoice` 结构化镜像 | `true` |
 | `knowledge.source_ids` | 已登记的知识来源列表 | `[]`（当前不启用额外知识来源） |
 | `knowledge.parse_source_ids` | 已登记且允许解析的知识来源 | `[]` |
@@ -75,7 +74,7 @@ bun src/cli.ts
 bun src/cli.ts menu
 ```
 
-菜单会从 `config/workbench.local.json` 读取 `sample.acquire_limit` 和 `sample.parse_limit`，显示当前来源总量及可标注数量，并在执行采集、解析或完整 P0 流程时使用这些值。菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`；修改配置后重新运行命令即可生效。
+菜单会从 `config/workbench.local.json` 读取唯一的 `sample.acquire_limit`，显示当前来源总量及可标注数量。菜单的“执行当前任务”会用同一个数量完成获取、标签映射、MinerU 解析、Obsidian、Release、校验和备份；菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
 
 直接子命令仍可用于调试、自动化和兼容已有脚本，但属于高级模式。直接模式可显式传入 `--paths`、`--config`，并在确有需要时用 `--limit` 临时覆盖配置：
 
@@ -84,6 +83,6 @@ bun src/cli.ts source probe voxel51-invoice-ocr --paths config/paths.local.json 
 bun src/cli.ts acquire voxel51-invoice-ocr --limit 5 --paths config/paths.local.json --config config/workbench.local.json
 ```
 
-`selected`、`downloaded`、`processed`、`cataloged`、`completed` 表示样本状态；`failed` 可从上一个成功状态恢复。`policies/withdrawals.json` 记录来源撤回条目，目录重建会标记为 `withdrawn`，Release 会拒绝再次发布。Release 默认不复制 `redistribution=unknown/denied` 的原件。真实 MinerU smoke 需要本机可用的 MinerU runtime，单元测试使用 fake session，不依赖 GPU；实际验收数量由 `sample.acquire_limit` 和 `sample.parse_limit` 决定。
+`selected`、`downloaded`、`processed`、`cataloged`、`completed` 表示样本状态；`failed` 可从上一个成功状态恢复。`policies/withdrawals.json` 记录来源撤回条目，目录重建会标记为 `withdrawn`，Release 会拒绝再次发布。Release 默认不复制 `redistribution=unknown/denied` 的原件。真实 MinerU smoke 需要本机可用的 MinerU runtime，单元测试使用 fake session；实际当前任务数量由 `sample.acquire_limit` 决定。
 
 `verify` 命令会校验当前样本、标签、结构化镜像、解析 receipt 并重建目录；输出中的 `projection_valid` 表示这些当前文件检查通过。重复采集是否新增 0 条和 FSD 数据是否未变化需要运行前后证据，因此会列在 `pending` 中，不能由一次静态校验伪造为完成。
