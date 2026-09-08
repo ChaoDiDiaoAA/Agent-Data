@@ -17,6 +17,7 @@ const libraryMenuOptions = new Map([
   ['fsd', { order: 0, label: 'FSD 论文知识库' }],
   ['agent-engineering', { order: 1, label: 'Agent Engineering' }],
   ['multi-agent-engineering', { order: 2, label: 'Multi-Agent Engineering' }],
+  ['llm-post-training', { order: 3, label: 'LLM Post-Training' }],
 ]);
 
 const menu = [
