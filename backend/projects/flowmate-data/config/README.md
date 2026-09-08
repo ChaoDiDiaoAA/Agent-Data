@@ -217,7 +217,7 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | `revision` | 版本解析方式；`kind=huggingface-api`，`url` 是读取完整 commit SHA 的 API 地址 |
 | `record_locator` | 数据记录定位规则 |
 | `allowed_origins` | 初始请求允许的 origin |
-| `redirect_origins` | 下载时允许跳转到的 CDN origin；每一跳都检查 |
+| `redirect_origins` | 下载时允许跳转到的 CDN origin；每一跳都检查。Voxel51 当前登记 `https://cdn-lfs.hf.co`、`https://cas-bridge.xethub.hf.co` 和 `https://us.aws.cdn.hf.co` |
 | `declared_license` | 来源声明的许可证名称 |
 | `license_evidence` | 许可证证据页面；支持 `{revision}` 占位符 |
 | `retention` | 是否允许本地留存：`allowed`、`unknown`、`denied` |
@@ -242,6 +242,13 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | `file_url_template` | `https://huggingface.co/datasets/Voxel51/high-quality-invoice-images-for-ocr/resolve/{revision}/{path}` | `{revision}` 替换为完整 SHA，`{path}` 替换为图片或索引路径 |
 
 `samples.json` 中只有 `json_annotation` 非空且可解析为对象的记录才可选。程序只选 `workbench.sample.acquire_limit` 条，不根据图片文件名排序，也不按目录顺序猜测标注配对。
+
+Voxel51 图片的 `resolve` URL 当前会从 `https://huggingface.co` 返回 302，落到
+`https://us.aws.cdn.hf.co` 后再返回图片；索引或其他文件可能使用前两个 CDN
+origin。三个 origin 都必须逐字登记在 `redirect_origins` 中，签名查询参数只用于
+请求，不写入回执或日志。若来源后续出现新的跳转 origin，采集会在写入原件前以
+`REDIRECT_ORIGIN_NOT_ALLOWED` 失败；先核验它确实属于该来源，再把精确的 HTTPS
+origin 加入本文件并补充回归测试，不能改成通配符或自动接受新域名。
 
 ## 菜单与参数覆盖优先级
 

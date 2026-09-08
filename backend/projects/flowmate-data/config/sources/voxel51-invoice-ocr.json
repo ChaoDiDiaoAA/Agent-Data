@@ -15,7 +15,7 @@
     "file_url_template": "https://huggingface.co/datasets/Voxel51/high-quality-invoice-images-for-ocr/resolve/{revision}/{path}"
   },
   "allowed_origins": ["https://huggingface.co"],
-  "redirect_origins": ["https://cdn-lfs.hf.co", "https://cas-bridge.xethub.hf.co"],
+  "redirect_origins": ["https://cdn-lfs.hf.co", "https://cas-bridge.xethub.hf.co", "https://us.aws.cdn.hf.co"],
   "declared_license": "odbl",
   "license_evidence": "https://huggingface.co/datasets/Voxel51/high-quality-invoice-images-for-ocr/blob/{revision}/README.md",
   "retention": "allowed",

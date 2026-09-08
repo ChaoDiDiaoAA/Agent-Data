@@ -225,6 +225,24 @@ test('acquisition rejects image magic and blocked CDN redirects without recordin
   }
 });
 
+test('acquisition follows the Voxel51 AWS CDN origin registered by the source', async () => {
+  const configuredPaths = await paths();
+  const config = loadSourceConfig(sourcePath);
+  const image = Buffer.from([0xff, 0xd8, 0xff, 7]);
+  const cdnOrigin = 'https://us.aws.cdn.hf.co';
+  const transport = createSourceHttp(config, { fetch: async url => {
+    if (url === config.revision.url) return Response.json({ sha: revision });
+    if (url.endsWith('/samples.json')) return new Response(indexBytes, { headers: { 'content-type': 'application/json' } });
+    if (new URL(url).origin === cdnOrigin) return new Response(image, { headers: { 'content-type': 'image/jpeg' } });
+    return new Response(null, { status: 302, headers: { location: `${cdnOrigin}/xet-bridge-us/test.jpg?token=secret` } });
+  } });
+
+  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 1, transport }))
+    .resolves.toMatchObject({ revision, added: 1, reused: 0 });
+  expect(transport.redirect_chain).toEqual([{ from_origin: 'https://huggingface.co', to_origin: cdnOrigin }]);
+  expect(await readFile(join(configuredPaths.originalRoot, 'datasets/voxel51-hq-invoice-ocr/samples/voxel51-84b83a4d92669a6dec10/original.jpg'))).toEqual(image);
+});
+
 test('recovers a legacy orphan index after upstream main advances without manual cleanup', async () => {
   const configuredPaths = await paths();
   const config = loadSourceConfig(sourcePath);
