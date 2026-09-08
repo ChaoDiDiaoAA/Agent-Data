@@ -1,7 +1,7 @@
 import { readFile, lstat, readdir } from 'node:fs/promises';
 import { isAbsolute, join, parse, posix, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { archivePath, assertRealPath, realTree, verifyArchiveV2, MARKDOWN_INLINE_LINK_PATTERN, type VerifiedArchiveV2 } from '../shared/archive-v2.ts';
+import { archivePath, assertRealPath, realTree, verifyArchiveV2, isLikelyChemicalNotation, MARKDOWN_INLINE_LINK_PATTERN, type VerifiedArchiveV2 } from '../shared/archive-v2.ts';
 import { EVIDENCE_LAYOUT_V3 } from './layout-paths.ts';
 import { renderEvidenceV3 } from './layout-v3.ts';
 import { hashCanonical } from '../shared/manifest.ts';
@@ -183,7 +183,10 @@ function activeReferenceDefinitions(text: string): Link[] {
 function links(markdown: string): Link[] {
   const { text, tags } = linkContent(markdown), result: Link[] = [];
   for (const match of text.matchAll(/!?\[\[([^\]|]+)(?:\|(?:\\.|[^\]])*)?\]\]/g)) result.push({ value: match[1]!, wiki: true });
-  for (const match of text.matchAll(MARKDOWN_INLINE_LINK_PATTERN)) result.push({ value: match[2] ?? match[3]!, wiki: false });
+  for (const match of text.matchAll(MARKDOWN_INLINE_LINK_PATTERN)) {
+    const value = match[2] ?? match[3]!;
+    if (!isLikelyChemicalNotation(text, match.index!, value)) result.push({ value, wiki: false });
+  }
   result.push(...activeReferenceDefinitions(text));
   for (const tag of tags) {
     for (const [name, value] of tag.attributes) {

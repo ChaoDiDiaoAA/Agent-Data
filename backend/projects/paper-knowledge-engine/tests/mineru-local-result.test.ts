@@ -36,6 +36,22 @@ test('normalizes table image references in page text with the same asset mapping
   assert.ok(!(await readFile(join(root, 'normalized/page-marked.txt'), 'utf8')).includes('src="images/'));
 });
 
+test('normalizes split chemical SMILES without inventing Archive resources', async () => {
+  const root = await fixtureRoot('chemical-smiles');
+  const markdown = '# Paper\n\n[CH3:19][C\n\n:4](=[O:23])[C@@H:13]1';
+  const contentList = [
+    { type: 'text', page_idx: 0, text: '[CH3:19][C' },
+    { type: 'text', page_idx: 0, text: ':4](=[O:23])[C@@H:13]1' },
+  ];
+  await writeFile(join(root, 'paper.md'), markdown);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify(contentList));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(await readFile(result.markdownPath, 'utf8'), markdown);
+  assert.deepEqual(JSON.parse(await readFile(result.contentListPath, 'utf8')), contentList);
+});
+
 test('publication freezes strict versioned source metadata and its selected parse attempt', async () => {
   const root = await fixtureRoot('archive-source');
   const pdfPath = join(root, 'source.pdf');

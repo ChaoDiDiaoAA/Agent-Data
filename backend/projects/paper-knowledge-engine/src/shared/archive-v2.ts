@@ -244,6 +244,50 @@ function referencePath(value: string): string | null {
 /** Shared complete-link grammar: citation-followed-by-prose is not a partial destination. */
 export const MARKDOWN_INLINE_LINK_PATTERN = /(\]\(\s*)(?:<([^>]+)>|([^\s)]+))((?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\))/g;
 
+// MinerU sometimes emits atom-mapped or chiral SMILES in ordinary text.  The
+// `](` sequence in `[C:4](=[O:23])` is syntactically close to a Markdown link,
+// but its destination is a chemical bond/atom rather than an Archive path.
+const SMILES_ATOM_LABEL_PATTERN = /^(?:\d{1,3})?(?:[A-Z][a-z]?|[bcnops])(?:@@?|@)?H?\d*(?:[+-]\d*)?(?::\d+)?$/;
+function isSmilesAtomLabel(value: string): boolean {
+  return SMILES_ATOM_LABEL_PATTERN.test(value);
+}
+function isSmilesAtomDestination(value: string): boolean {
+  const destination = value.trim();
+  if (isSmilesAtomLabel(destination)) return true;
+  return /^\[[^\]\r\n]+\]$/.test(destination) && isSmilesAtomLabel(destination.slice(1, -1));
+}
+function isSmilesBondDestination(value: string): boolean {
+  const match = /^([=#\\-])(.+)$/.exec(value.trim());
+  return match !== null && isSmilesAtomDestination(match[2]!);
+}
+
+/** Return true for a Markdown-looking sequence that is actually SMILES text. */
+export function isLikelyChemicalNotation(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  const value = destination.trim();
+  // Structured MinerU text can split one mapped atom across adjacent records,
+  // leaving a continuation such as `:4](=[O:23])` with no opening bracket.
+  // Only suppress that split form when both sides still look chemical.
+  if (open < 0) {
+    const token = text.slice(0, matchIndex).trim().split(/\s+/).pop()?.replace(/^\[/, '') ?? '';
+    return isSmilesBondDestination(value) && (isSmilesAtomLabel(token) || /^:?\d+$/.test(token));
+  }
+  const label = text.slice(open + 1, matchIndex);
+  const normalizedLabel = label.replace(/\s+/g, '');
+  if (label.includes(']') || !isSmilesAtomLabel(normalizedLabel)) return false;
+  if (isSmilesBondDestination(value)) return true;
+  if (!isSmilesAtomDestination(value)) return false;
+  // Atom maps, isotope/hydrogen counts, and chirality are strong chemistry
+  // signals.  For a bare atom label, require an adjacent SMILES atom/bond so
+  // a legitimate Markdown link such as `[C](assets/file.pdf)` stays intact.
+  if (/[:@H\d]/.test(normalizedLabel)) return true;
+  const previous = text[open - 1] ?? '';
+  const destinationStart = text.indexOf(value, matchIndex + 1);
+  const close = destinationStart < 0 ? -1 : text.indexOf(')', destinationStart + value.length);
+  const after = close < 0 ? '' : text[close + 1] ?? '';
+  return /[A-Za-z0-9)\]=#-]/.test(previous) || /[A-Za-z0-9[\]=#-]/.test(after);
+}
+
 function normalizeMarkdownReferenceLabel(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
@@ -282,12 +326,19 @@ function mapTextResourcesSegment(text: string, visit: (value: string) => string)
   const destinations: { start: number; end: number }[] = [];
   for (const pattern of [inlinePattern, definitionPattern]) for (const match of text.matchAll(pattern)) {
     const isActiveDefinition = pattern === definitionPattern && !activeLabels.has(normalizeMarkdownReferenceLabel(match[2]!));
-    if (match[2] !== undefined && !isActiveDefinition) destinations.push({ start: match.index + match[1].length, end: match.index + match[0].length });
+    const destination = match[2] ?? match[3];
+    if (match[2] !== undefined && !isActiveDefinition && destination !== undefined
+      && !isLikelyChemicalNotation(text, match.index, destination)) {
+      destinations.push({ start: match.index + match[1].length, end: match.index + match[0].length });
+    }
   }
   const html = mapHtmlResources(text, visit, destinations);
   const inline = html.replace(inlinePattern,
-    (_all, prefix: string, bracketed: string | undefined, bare: string, suffix: string) =>
-      prefix + (bracketed !== undefined ? `<${visit(bracketed)}>` : visit(bare)) + suffix);
+    (all: string, prefix: string, bracketed: string | undefined, bare: string, suffix: string, offset: number) => {
+      const destination = bracketed ?? bare;
+      if (isLikelyChemicalNotation(html, offset, destination)) return all;
+      return prefix + (bracketed !== undefined ? `<${visit(bracketed)}>` : visit(bare)) + suffix;
+    });
   return inline.replace(definitionPattern,
     (all: string, prefix: string, label: string, bracketed: string | undefined, bare: string) => {
       if (!activeLabels.has(normalizeMarkdownReferenceLabel(label))) return all;

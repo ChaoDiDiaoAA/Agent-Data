@@ -22,6 +22,22 @@ test('citation followed by parenthesized prose is not a partial Markdown link', 
   expect(rewriteArchiveReferences('[PDF](assets/a.pdf "source")', [], new Map([['assets/a.pdf', 'source.pdf']])).fullMarkdown).toBe('[PDF](source.pdf "source")');
 });
 
+test('does not treat chemical SMILES notation as Markdown asset links', () => {
+  const prose = [
+    '[CH3:19][C:4](=[O:23])[C@@H:13]1[CH2:9][CH2:10]',
+    '[CH3:19][C\n\n:4](=[O:23])[C@@H:13]1',
+    'Starting molecule: COc1ccccc1SCC(=O)N[C@@H](C)c1ccon1',
+  ].join('\n');
+  const content = [
+    { type: 'text', text: prose },
+    { type: 'text', text: ':4](=[O:23])[C@@H:13]1' },
+  ];
+
+  expect(archiveReferences(prose, content)).toEqual([]);
+  expect(rewriteArchiveReferences(prose, content, new Map()).fullMarkdown).toBe(prose);
+  expect(archiveReferences('[C](assets/chemical.pdf)', [])).toEqual(['assets/chemical.pdf']);
+});
+
 test('ignores MinerU truncation placeholders without weakening missing-resource checks', () => {
   const prose = '**Paddy Power**: [paddyPower.com](trunc) **Betway**: [betway.com](https://www.betway.com)';
   expect(archiveReferences(prose, [])).toEqual([]);

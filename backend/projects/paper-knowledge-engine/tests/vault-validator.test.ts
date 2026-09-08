@@ -58,6 +58,7 @@ test('validator checks code-free local heading/block links without false broken-
       '', '[heading](pages.md#page-1)', '[block](pages.md#^page-1)', '[[Evidence/papers/2601.00001-v1/pages#PAGE 1]]',
       '`[code](absent.md)`', '```markdown', '[example](absent.md)', '```',
       'Gemma 4 31B [37](a larger cloud model).', '[page](pages.md "page text")',
+      '[CH3:19][C:4](=[O:23])[C@@H:13]1',
       '[parent](../../indexes/authors.md)', '<img srcset="assets/figure.png 1x, assets/figure.png 2x">',
     ].join('\n'));
     const report = await validateVault({ vaultRoot: f.input.vaultRoot, sources: f.sources });
