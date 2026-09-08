@@ -34,6 +34,21 @@ test('HTTP follows an explicitly allowed HTTPS redirect origin', async () => {
   expect(requests).toEqual(['https://source.example/file', 'https://cdn.example/file']);
 });
 
+test('HTTP permits encoded slashes in redirect query metadata', async () => {
+  const requests: string[] = [];
+  const client = createHttpClient({ fetch: async url => {
+    requests.push(url);
+    return requests.length === 1
+      ? new Response(null, { status: 307, headers: { location: 'https://source.example/api/resolve-cache?x=%2Fdatasets%2Fexample%2Ffile&etag=abc' } })
+      : new Response('cached');
+  } });
+
+  const result = await client.get('https://source.example/datasets/example/file', scope());
+
+  expect(Buffer.from(result.bytes).toString()).toBe('cached');
+  expect(requests).toHaveLength(2);
+});
+
 test('HTTP checks every redirect hop against the domain and source policy', async () => {
   const client = createHttpClient({ fetch: async () => new Response(null, { status: 302, headers: { location: 'https://cdn.example/file' } }) });
   const redirectScope = { allowedRedirectOrigins: ['https://cdn.example'] };

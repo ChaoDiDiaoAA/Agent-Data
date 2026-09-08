@@ -74,7 +74,8 @@ export function createHttpClient(options: { fetch?: HttpFetch } = {}) {
               const location = response.headers.get('location');
               if (!location || redirects >= 5) throw new Error();
               // Validate traversal before URL resolution erases it.
-              if (/(?:^|\/)\.{1,2}(?:\/|$)/.test(decodeURIComponent(location)) || /%2f|%5c|\\/i.test(location)) throw new Error();
+              const locationPath = location.split(/[?#]/, 1)[0]!;
+              if (/(?:^|\/)\.{1,2}(?:\/|$)/.test(decodeURIComponent(locationPath)) || /%2f|%5c|\\/i.test(locationPath)) throw new Error();
               const next = approvedHttpsUrl(new URL(location, url).href, scope);
               if (!allowsRedirect(scope, url, next)) throw new Error();
               url = next;

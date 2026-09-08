@@ -9,7 +9,7 @@ export function assertRevision(revision: string): void {
 }
 
 /** Capture only origins, never signed CDN query strings. Shared HTTP retains all other policy checks. */
-export function createSourceHttp(config: SourceConfig, options: { fetch?: HttpFetch } = {}): SourceTransport {
+export function createSourceHttp(config: SourceConfig, options: { fetch?: HttpFetch; network?: HttpScope['network'] } = {}): SourceTransport {
   const redirect_chain: RedirectHop[] = [];
   const transport = options.fetch ?? ((url, init) => fetch(url, init));
   const client = createHttpClient({ fetch: async (url, init) => {
@@ -34,7 +34,8 @@ export function createSourceHttp(config: SourceConfig, options: { fetch?: HttpFe
     redirect_chain,
     http: { async get(url, scope) {
       if (!config.allowed_origins.includes(new URL(url).origin)) throw new Error('SOURCE_ORIGIN_NOT_ALLOWED');
-      return client.get(url, scope);
+      const requestScope = options.network === undefined || scope.network !== undefined ? scope : { ...scope, network: options.network };
+      return client.get(url, requestScope);
     } },
   };
 }

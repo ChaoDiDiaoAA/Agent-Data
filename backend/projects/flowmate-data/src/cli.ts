@@ -4,11 +4,12 @@ import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { loadPaths, loadSourceConfig, loadWorkbenchConfig, resolveOwnedPath } from './config.ts';
 import type { SourceTransport } from './sources/dataset-records.ts';
+import { createSourceHttp } from './sources/dataset-records.ts';
 import { acquireVoxel51Selection, probeVoxel51 } from './sources/voxel51.ts';
 import { mapVoxel51Selection } from './labels/voxel51.ts';
 import { publishStructuredSnapshot } from './structured-snapshot.ts';
 import { parseSelection } from './process-samples.ts';
-import { canonicalJson, hashCanonical, realTree, verifyNormalizedOutput, withRunLock, type ParseDependencies } from './engine-bridge.ts';
+import { canonicalJson, hashCanonical, loadSharedEngineNetwork, realTree, verifyNormalizedOutput, withRunLock, type ParseDependencies } from './engine-bridge.ts';
 import { acquirePublicFiles, parsePublicKnowledge } from './sources/public-files.ts';
 import { rebuildCatalog } from './catalog.ts';
 import { buildRelease, loadReleaseRecords, loadReleaseSourceConfig, verifyRelease } from './release.ts';
@@ -266,6 +267,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
   const workbench = loadWorkbenchConfig(flags.get('--config') ?? defaultWorkbenchPath);
   const sampleSourceConfig = loadSourceConfig(sourceConfigPath(workbench.sample.source_id));
   if (sampleSourceConfig.source_id !== workbench.sample.source_id || sampleSourceConfig.dataset_id !== workbench.sample.dataset_id) throw new Error('WORKBENCH_SAMPLE_SOURCE_MISMATCH');
+  const sourceTransport = options.transport ?? (probe || acquire ? createSourceHttp(sampleSourceConfig, { network: loadSharedEngineNetwork(paths.paperEngineRoot) }) : undefined);
   const selectionId = flags.get('--selection') ?? workbench.sample.selection_id;
   const acquireLimit = limitText === undefined ? workbench.sample.acquire_limit : Number(limitText);
   const parseLimit = limitText === undefined ? workbench.sample.acquire_limit : Number(limitText);
@@ -372,8 +374,8 @@ export async function runCli(arguments_: string[], options: { transport?: Source
     return 0;
   }
   const config = sampleSourceConfig;
-  const result = probe ? await probeVoxel51(config, { transport: options.transport })
-    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, limit: acquireLimit, transport: options.transport })
+  const result = probe ? await probeVoxel51(config, { transport: sourceTransport })
+    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, limit: acquireLimit, transport: sourceTransport })
     : await withRunLock(resolveOwnedPath(paths.dataRoot, 'work/run.lock'), async () => {
       const mapping = await mapVoxel51Selection({ paths, datasetId: workbench.sample.dataset_id, selectionId, lockHeld: true });
       const snapshots = publishSnapshot ? await Promise.all(mapping.sample_ids.map(sampleId => publishStructuredSnapshot({ paths, datasetId: workbench.sample.dataset_id, sampleId, lockHeld: true }))) : [];

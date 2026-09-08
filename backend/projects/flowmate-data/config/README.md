@@ -139,7 +139,7 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 - 机器记录和解析结果保存到 `dataRoot`。
 - Obsidian 只保存由机器记录重建的 Markdown，不保存原图、PDF 或结构化镜像副本。
 - 不使用 `raw/<sha256>/` 目录；SHA-256 写在记录、快照和 manifest 中，用于校验和身份追踪。
-- MinerU 的共享配置继续保存在 `paperEngineRoot/config/engine.yaml` 和 `paperEngineRoot/config/machine.local.yaml`；Flowmate 的 `workbench.local.json` 只负责来源、当前任务数量、Release 和备份默认值。
+- 来源探测和原始文件下载会复用 `paperEngineRoot/config/machine.local.yaml` 的 `network.http_proxy`；直连不稳定时必须先启动该代理。MinerU 的共享配置继续保存在 `paperEngineRoot/config/engine.yaml` 和 `paperEngineRoot/config/machine.local.yaml`；Flowmate 的 `workbench.local.json` 只负责来源、当前任务数量、Release 和备份默认值。
 
 ## 文件二：`workbench.local.json`
 
