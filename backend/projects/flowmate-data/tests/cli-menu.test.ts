@@ -69,6 +69,14 @@ afterEach(async () => {
 });
 
 describe('interactive CLI menu', () => {
+  test('defers source and task details until option 1 is selected', async () => {
+    const result = await runChoice('0', 7);
+
+    expect(result.output).toContain('1. 查看来源和任务配置');
+    expect(result.output).not.toContain('路径配置：');
+    expect(result.output).not.toContain('当前来源：');
+  });
+
   test('shows one task quantity for acquisition and parsing', async () => {
     const result = await runChoice('1', 7);
 

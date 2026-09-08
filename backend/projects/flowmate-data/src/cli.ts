@@ -158,7 +158,6 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
   });
 
   try {
-    writeMenu(output, menuConfigSummary(pathsPath, configPath, workbench, source));
     for (;;) {
       writeMenu(output, menuLabel(workbench));
       const choice = (await ask('请输入编号：')).trim().toLowerCase();
