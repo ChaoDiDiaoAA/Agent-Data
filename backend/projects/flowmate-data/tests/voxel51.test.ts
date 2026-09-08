@@ -74,6 +74,21 @@ test('resolves the full API SHA and fails closed on an unregistered redirect wit
   await expect(resolveHuggingFaceRevision(config, { http: blocked.http })).rejects.toThrow('REDIRECT_ORIGIN_NOT_ALLOWED: https://unregistered.hf.co');
 });
 
+test('passes the shared machine proxy to source HTTP requests', async () => {
+  const config = loadSourceConfig(sourcePath);
+  let proxy: string | undefined;
+  const transport = createSourceHttp(config, {
+    network: { httpProxy: 'http://127.0.0.1:7897' },
+    fetch: async (url, init) => {
+      proxy = init.proxy;
+      if (url === config.revision.url) return Response.json({ sha: revision });
+      return new Response(JSON.stringify(fixture), { headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await resolveHuggingFaceRevision(config, { http: transport.http });
+  expect(proxy).toBe('http://127.0.0.1:7897');
+});
+
 test('probe reads API and pinned index metadata and reports scrubbed permitted redirects, without images', async () => {
   const config = loadSourceConfig(sourcePath);
   const transport = createSourceHttp(config, { fetch: async url => {
@@ -182,7 +197,7 @@ test('CLI dispatches probe/acquire and preserves usage exit for unsupported comm
   const customWorkbenchPath = join(configuredPaths.dataRoot, '..', 'workbench.json');
   await writeFile(customWorkbenchPath, JSON.stringify({
     schema_version: 1,
-    sample: { source_id: 'voxel51-invoice-ocr', dataset_id: 'voxel51-hq-invoice-ocr', selection_id: 'cli-default', acquire_limit: 1, parse_limit: 1, publish_snapshot: false },
+    sample: { source_id: 'voxel51-invoice-ocr', dataset_id: 'voxel51-hq-invoice-ocr', selection_id: 'cli-default', acquire_limit: 1, publish_snapshot: false },
     knowledge: { source_ids: [], parse_source_ids: [] },
     release: { version: 'public-invoice-p0-v1', include_originals: false },
     backup: { verify: false, restore_smoke: false },

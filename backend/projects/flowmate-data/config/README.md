@@ -15,9 +15,8 @@ bun src/cli.ts
 ```
 
 也可以运行 `bun src/cli.ts menu` 显式进入同一个菜单。菜单会读取本机的
-`config/workbench.local.json`：`sample.acquire_limit` 决定获取多少条带标注发票，
-`sample.parse_limit` 决定每次交给 MinerU 解析多少条。菜单会在进入时显示这两个值，
-不会再要求手工输入数量，也不会为菜单生成 `--limit` 参数；修改配置后重新运行命令即可。
+`config/workbench.local.json`：`sample.acquire_limit` 同时决定当前任务获取和交给 MinerU 解析多少条带标注发票。
+菜单会在进入时显示这个任务数量，不会再要求手工输入数量，也不会为菜单生成 `--limit` 参数；修改配置后重新运行命令即可。
 
 `paths.local.json` 和 `workbench.local.json` 都是本机文件，不提交到 Git。仓库不再保留 `*.example.json` 模板；首次使用按下面的完整结构创建这两个文件：
 
@@ -44,7 +43,6 @@ bun src/cli.ts
     "dataset_id": "voxel51-hq-invoice-ocr",
     "selection_id": "initial-20",
     "acquire_limit": 20,
-    "parse_limit": 1,
     "publish_snapshot": true
   },
   "knowledge": {
@@ -92,30 +90,30 @@ Voxel51 是当前唯一登记的原始数据来源。数据集卡片声明总计
 
 ### 获取多少
 
-样本数量由 `config/workbench.local.json` 的两个字段控制：
+样本数量由 `config/workbench.local.json` 的一个字段控制：
 
 | 参数 | 作用 | 当前默认值 |
 |---|---|---:|
-| `sample.acquire_limit` | 首次从样本数据集选取并下载多少条有标注样本 | `20` |
-| `sample.parse_limit` | 每次默认交给 MinerU 解析多少条已采集样本 | `1` |
+| `sample.acquire_limit` | 当前任务从样本数据集选取、下载并交给 MinerU 解析多少条有标注样本 | `20` |
 
-例如，要获取 50 条、每次解析 3 条，修改为：
+例如，要获取并解析 50 条，修改为：
 
 ```json
 {
   "sample": {
-    "acquire_limit": 50,
-    "parse_limit": 3
+    "acquire_limit": 50
   }
 }
 ```
 
-实际配置文件必须保留完整 JSON 结构，不能只保存这两个字段。命令行 `--limit` 会临时覆盖对应命令的数量：
+实际配置文件必须保留完整 JSON 结构，不能只保存这个字段。命令行 `--limit` 会临时覆盖对应命令的数量：
 
 ```powershell
 bun src/cli.ts acquire voxel51-invoice-ocr --limit 50 --paths config/paths.local.json --config config/workbench.local.json
 bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/workbench.local.json
 ```
+
+上面的 `--limit` 只适合高级模式下临时覆盖单个子命令；菜单执行当前任务时始终使用同一个 `sample.acquire_limit`，因此获取和解析数量一致。
 
 当前没有启用额外知识来源；`knowledge.source_ids` 和 `knowledge.parse_source_ids` 必须保持空数组。保留 `public-files` 读取器代码是为了复用和后续扩展，不代表当前会下载其他来源。
 
@@ -141,7 +139,7 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 - 机器记录和解析结果保存到 `dataRoot`。
 - Obsidian 只保存由机器记录重建的 Markdown，不保存原图、PDF 或结构化镜像副本。
 - 不使用 `raw/<sha256>/` 目录；SHA-256 写在记录、快照和 manifest 中，用于校验和身份追踪。
-- MinerU 的共享配置继续保存在 `paperEngineRoot/config/engine.yaml` 和 `paperEngineRoot/config/machine.local.yaml`；Flowmate 的 `workbench.local.json` 只负责来源、数量、解析数量、Release 和备份默认值。
+- 来源探测和原始文件下载会复用 `paperEngineRoot/config/machine.local.yaml` 的 `network.http_proxy`；直连不稳定时必须先启动该代理。MinerU 的共享配置继续保存在 `paperEngineRoot/config/engine.yaml` 和 `paperEngineRoot/config/machine.local.yaml`；Flowmate 的 `workbench.local.json` 只负责来源、当前任务数量、Release 和备份默认值。
 
 ## 文件二：`workbench.local.json`
 
@@ -164,8 +162,7 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | `source_id` | 样本来源登记 ID；程序读取 `sources/<source_id>.json` | `voxel51-invoice-ocr` |
 | `dataset_id` | 数据集分区名；写入 `D:\paper\Invoice\datasets\<dataset_id>`、`dataRoot` 和 Obsidian | `voxel51-hq-invoice-ocr` |
 | `selection_id` | 固定选样清单 ID；第一次采集提交清单，之后按同一清单重试 | `initial-20` |
-| `acquire_limit` | 首次选取并下载的有标注样本数 | `20` |
-| `parse_limit` | `parse` 命令默认处理的样本数 | `1` |
+| `acquire_limit` | 当前任务选取、下载并默认交给 `parse` 命令处理的有标注样本数 | `20` |
 | `publish_snapshot` | `labels map` 默认是否将标签结构化镜像发布到 `originalRoot` | `true` |
 
 `selection_id` 不是目录名数量，也不是随机种子。它对应 `dataRoot/datasets/<dataset_id>/selections/<selection_id>.json`，其中保存 revision、record ID、图片路径、标注定位和 selection hash。已提交 selection 存在时，重复采集不会重新选择另一批记录。
@@ -262,10 +259,10 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 # 只探测 revision 和索引元数据，不下载图片
 bun src/cli.ts source probe voxel51-invoice-ocr --paths config/paths.local.json --config config/workbench.local.json
 
-# 按 workbench.sample.acquire_limit 获取；这里临时改成 5 条
+# 按 workbench.sample.acquire_limit 获取；这里临时改成 5 条（高级模式）
 bun src/cli.ts acquire voxel51-invoice-ocr --limit 5 --paths config/paths.local.json --config config/workbench.local.json
 
-# 按 workbench.sample.parse_limit 解析；这里临时改成 2 条
+# 按同一个 workbench.sample.acquire_limit 解析；这里临时改成 2 条（高级模式）
 bun src/cli.ts parse --limit 2 --paths config/paths.local.json --config config/workbench.local.json
 
 ```

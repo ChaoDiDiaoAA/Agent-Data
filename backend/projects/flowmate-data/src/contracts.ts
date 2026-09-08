@@ -44,7 +44,6 @@ export interface WorkbenchConfig {
     dataset_id: string;
     selection_id: string;
     acquire_limit: number;
-    parse_limit: number;
     publish_snapshot: boolean;
   };
   knowledge: {

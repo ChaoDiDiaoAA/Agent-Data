@@ -4,11 +4,12 @@ import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { loadPaths, loadSourceConfig, loadWorkbenchConfig, resolveOwnedPath } from './config.ts';
 import type { SourceTransport } from './sources/dataset-records.ts';
+import { createSourceHttp } from './sources/dataset-records.ts';
 import { acquireVoxel51Selection, probeVoxel51 } from './sources/voxel51.ts';
 import { mapVoxel51Selection } from './labels/voxel51.ts';
 import { publishStructuredSnapshot } from './structured-snapshot.ts';
 import { parseSelection } from './process-samples.ts';
-import { canonicalJson, hashCanonical, realTree, verifyNormalizedOutput, withRunLock, type ParseDependencies } from './engine-bridge.ts';
+import { canonicalJson, hashCanonical, loadSharedEngineNetwork, realTree, verifyNormalizedOutput, withRunLock, type ParseDependencies } from './engine-bridge.ts';
 import { acquirePublicFiles, parsePublicKnowledge } from './sources/public-files.ts';
 import { rebuildCatalog } from './catalog.ts';
 import { buildRelease, loadReleaseRecords, loadReleaseSourceConfig, verifyRelease } from './release.ts';
@@ -79,21 +80,21 @@ function writeMenu(output: MenuOutput, value: string): void {
 function menuConfigSummary(pathsPath: string, configPath: string, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): string {
   const total = source.record_count === undefined ? '未配置' : String(source.record_count);
   const annotated = source.annotated_record_count === undefined ? '未配置' : String(source.annotated_record_count);
-  const acquireLimit = String(workbench.sample.acquire_limit);
-  const parseLimit = String(workbench.sample.parse_limit);
+  const taskLimit = String(workbench.sample.acquire_limit);
   const limitWarning = source.annotated_record_count !== undefined && workbench.sample.acquire_limit > source.annotated_record_count
     ? '警告：workbench.sample.acquire_limit 超过可标注数量，采集会被拒绝。'
     : '';
   return [
-    'FlowmateData（公开发票工作台）',
+    'FlowmateData（Bun CLI）',
     `路径配置：${pathsPath}`,
     `运行配置：${configPath}`,
-    `来源：${source.source_id}`,
-    `数据集：${source.dataset_id ?? '未配置'}`,
+    `当前来源：${source.source_id}`,
+    `当前数据集：${source.dataset_id ?? '未配置'}`,
     `数据集发票总量：${total}`,
     `可采集的带标注发票：${annotated}`,
-    `本次获取数量（来自 config）：${acquireLimit}`,
-    `本次解析数量（来自 config）：${parseLimit}`,
+    `当前任务数量（获取与解析）：${taskLimit} 条`,
+    `执行当前任务会获取并解析同一批 ${taskLimit} 条发票。`,
+    '任务完成后会继续构建 Obsidian、Release、校验结果并创建备份。',
     ...(limitWarning ? [limitWarning] : []),
   ].join('\n');
 }
@@ -103,35 +104,35 @@ function menuCommand(args: string[], pathsPath: string, configPath: string): str
 }
 
 function menuLabel(workbench: ReturnType<typeof loadWorkbenchConfig>): string {
+  const taskLimit = String(workbench.sample.acquire_limit);
   return [
-    '',
-    '请选择操作（数量全部读取 workbench.local.json，不在菜单中手工输入）：',
-    '1. 查看来源和配置数量',
-    '2. 探测 Voxel51 来源',
-    `3. 获取发票（${workbench.sample.acquire_limit} 条）`,
-    '4. 映射标签并发布结构化镜像',
-    `5. MinerU 解析（${workbench.sample.parse_limit} 条）`,
-    '6. 构建 Obsidian 目录',
-    `7. 构建 Release（${workbench.release.version}）`,
-    '8. 校验当前数据和 Release',
-    `9. 创建备份（verify=${workbench.backup.verify}, restore_smoke=${workbench.backup.restore_smoke}）`,
-    '10. 执行完整 P0 流程',
+    '=========================',
+    `当前任务数量（获取与解析）：${taskLimit} 条`,
+    '1. 查看来源和任务配置',
+    `2. 执行当前任务（获取并解析 ${taskLimit} 条）`,
+    '3. 校验当前任务',
+    `4. 创建备份（verify=${workbench.backup.verify}, restore_smoke=${workbench.backup.restore_smoke}）`,
     '0. 退出',
   ].join('\n');
 }
 
-function menuSequence(pathsPath: string, configPath: string, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): string[][] {
+interface MenuStep {
+  label: string;
+  commands: string[][];
+}
+
+function menuTaskSteps(pathsPath: string, configPath: string, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): MenuStep[] {
   const common = (args: string[]) => menuCommand(args, pathsPath, configPath);
+  const taskLimit = workbench.sample.acquire_limit;
   return [
-    common(['source', 'probe', source.source_id]),
-    common(['acquire', source.source_id]),
-    common(['labels', 'map', workbench.sample.dataset_id]),
-    common(['parse']),
-    common(['catalog', 'build']),
-    common(['release', 'build', workbench.release.version]),
-    common(['release', 'verify', workbench.release.version]),
-    common(['verify']),
-    common(['backup', 'create']),
+    { label: '探测公开来源', commands: [common(['source', 'probe', source.source_id])] },
+    { label: `获取并固定 ${taskLimit} 条发票`, commands: [common(['acquire', source.source_id])] },
+    { label: `映射 ${taskLimit} 条标签并发布结构化镜像`, commands: [common(['labels', 'map', workbench.sample.dataset_id])] },
+    { label: `MinerU 解析同一批 ${taskLimit} 条发票`, commands: [common(['parse'])] },
+    { label: '构建 Obsidian 目录', commands: [common(['catalog', 'build'])] },
+    { label: `构建 Release（${workbench.release.version}）`, commands: [common(['release', 'build', workbench.release.version])] },
+    { label: '校验 Release 和当前任务', commands: [common(['release', 'verify', workbench.release.version]), common(['verify'])] },
+    { label: '创建备份', commands: [common(['backup', 'create'])] },
   ];
 }
 
@@ -158,7 +159,6 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
   });
 
   try {
-    writeMenu(output, menuConfigSummary(pathsPath, configPath, workbench, source));
     for (;;) {
       writeMenu(output, menuLabel(workbench));
       const choice = (await ask('请输入编号：')).trim().toLowerCase();
@@ -167,39 +167,36 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
         writeMenu(output, menuConfigSummary(pathsPath, configPath, workbench, source));
         continue;
       }
-      if (!['2', '3', '4', '5', '6', '7', '8', '9', '10'].includes(choice)) {
+      if (!['2', '3', '4'].includes(choice)) {
         writeMenu(output, '无效选项，请重新选择。');
         continue;
       }
 
-      const sequence = menuSequence(pathsPath, configPath, workbench, source);
-      const commandsByChoice: Record<string, string[][]> = {
-        '2': [sequence[0]!],
-        '3': [sequence[1]!],
-        '4': [sequence[2]!],
-        '5': [sequence[3]!],
-        '6': [sequence[4]!],
-        '7': [sequence[5]!],
-        '8': [sequence[6]!, sequence[7]!],
-        '9': [sequence[8]!],
-        '10': sequence,
+      const steps = menuTaskSteps(pathsPath, configPath, workbench, source);
+      const stepsByChoice: Record<string, MenuStep[]> = {
+        '2': steps,
+        '3': [steps[6]!],
+        '4': [steps[7]!],
       };
-      const commands = commandsByChoice[choice]!;
       let failed = false;
-      for (const command of commands) {
-        let code: number;
-        try {
-          code = await invoke(command);
-        } catch (error) {
-          writeMenu(output, `操作失败：${error instanceof Error ? error.message : 'VOXEL51_FAILED'}。`);
-          failed = true;
-          break;
+      for (const step of stepsByChoice[choice]!) {
+        writeMenu(output, `\n${step.label}`);
+        for (const command of step.commands) {
+          let code: number;
+          try {
+            code = await invoke(command);
+          } catch (error) {
+            writeMenu(output, `操作失败：${error instanceof Error ? error.message : 'VOXEL51_FAILED'}。`);
+            failed = true;
+            break;
+          }
+          if (code !== 0) {
+            writeMenu(output, `操作失败，退出码：${code}。`);
+            failed = true;
+            break;
+          }
         }
-        if (code !== 0) {
-          writeMenu(output, `操作失败，退出码：${code}。`);
-          failed = true;
-          break;
-        }
+        if (failed) break;
       }
       if (!failed) writeMenu(output, '操作完成。');
     }
@@ -270,9 +267,10 @@ export async function runCli(arguments_: string[], options: { transport?: Source
   const workbench = loadWorkbenchConfig(flags.get('--config') ?? defaultWorkbenchPath);
   const sampleSourceConfig = loadSourceConfig(sourceConfigPath(workbench.sample.source_id));
   if (sampleSourceConfig.source_id !== workbench.sample.source_id || sampleSourceConfig.dataset_id !== workbench.sample.dataset_id) throw new Error('WORKBENCH_SAMPLE_SOURCE_MISMATCH');
+  const sourceTransport = options.transport ?? (probe || acquire ? createSourceHttp(sampleSourceConfig, { network: loadSharedEngineNetwork(paths.paperEngineRoot) }) : undefined);
   const selectionId = flags.get('--selection') ?? workbench.sample.selection_id;
   const acquireLimit = limitText === undefined ? workbench.sample.acquire_limit : Number(limitText);
-  const parseLimit = limitText === undefined ? workbench.sample.parse_limit : Number(limitText);
+  const parseLimit = limitText === undefined ? workbench.sample.acquire_limit : Number(limitText);
   const releaseVersion = positional[2] ?? workbench.release.version;
   const knowledgeSourceIds = knowledgeAction
     ? (positional.length > 2 ? positional.slice(2) : knowledgeAction === 'parse' ? workbench.knowledge.parse_source_ids : workbench.knowledge.source_ids)
@@ -376,8 +374,8 @@ export async function runCli(arguments_: string[], options: { transport?: Source
     return 0;
   }
   const config = sampleSourceConfig;
-  const result = probe ? await probeVoxel51(config, { transport: options.transport })
-    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, limit: acquireLimit, transport: options.transport })
+  const result = probe ? await probeVoxel51(config, { transport: sourceTransport })
+    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, limit: acquireLimit, transport: sourceTransport })
     : await withRunLock(resolveOwnedPath(paths.dataRoot, 'work/run.lock'), async () => {
       const mapping = await mapVoxel51Selection({ paths, datasetId: workbench.sample.dataset_id, selectionId, lockHeld: true });
       const snapshots = publishSnapshot ? await Promise.all(mapping.sample_ids.map(sampleId => publishStructuredSnapshot({ paths, datasetId: workbench.sample.dataset_id, sampleId, lockHeld: true }))) : [];

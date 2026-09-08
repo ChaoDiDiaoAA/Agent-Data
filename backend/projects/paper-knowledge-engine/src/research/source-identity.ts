@@ -28,7 +28,12 @@ export function requireVersionId(value: unknown): string {
 }
 
 export function normalizeSourceUrl(value: string): string {
-  if (typeof value !== 'string' || /[\x00-\x20\x7f\\]/.test(value) || /(?:^|\/)\.{1,2}(?:\/|$)/.test(decodeURIComponent(value)) || /%2f|%5c/i.test(value)) throw new TypeError('unsafe source URL');
+  if (typeof value !== 'string' || /[\x00-\x20\x7f\\]/.test(value)) throw new TypeError('unsafe source URL');
+  const schemeEnd = value.indexOf('://');
+  const pathStart = schemeEnd < 0 ? -1 : value.indexOf('/', schemeEnd + 3);
+  const rawPath = pathStart < 0 ? '' : value.slice(pathStart).split(/[?#]/, 1)[0]!;
+  const decodedRawPath = decodeURIComponent(rawPath);
+  if (/(?:^|\/)\.{1,2}(?:\/|$)/.test(decodedRawPath) || /%2f|%5c/i.test(rawPath)) throw new TypeError('unsafe source URL');
   const url = new URL(value);
   const host = url.hostname;
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || !host.includes('.') || host.endsWith('.local') || host.endsWith('.localhost') || host.endsWith('.') || host.includes(':') || /^(0|10|127|169\.254|172\.(1[6-9]|2\d|3[01])|192\.168|192\.0|198\.(18|19)|22[4-9]|23\d|24\d|25\d)\./.test(host)) throw new TypeError('unsafe source URL');

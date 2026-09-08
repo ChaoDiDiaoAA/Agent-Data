@@ -27,6 +27,9 @@ import type { FlowmatePaths } from './contracts.ts';
 export type { MinerULocalConfig, ProcessContext };
 export { realTree };
 export { withRunLock };
+export function loadSharedEngineNetwork(root: string): HttpScope['network'] {
+  return loadSharedEngineRuntime({ root }).machine.network;
+}
 export interface ParsedFile { path: string; sha256: string; bytes: number }
 export interface ParseReceipt {
   sampleId: string;
