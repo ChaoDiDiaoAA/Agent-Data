@@ -65,14 +65,24 @@ bun run typecheck
 
 ## 推荐运行方式
 
-先按 [config/README.md](config/README.md) 创建三个本地配置并确认路径，然后只需从项目根目录运行一个命令：
+先按 [config/README.md](config/README.md) 创建三个本地配置并确认路径。为避免和
+`paper-knowledge-engine/src/cli.ts` 混淆，推荐使用 Flowmate 的绝对入口；当前目录不影响启动：
 
 ```powershell
-cd D:\agent-data\backend\projects\flowmate-data
-bun src/cli.ts
+& bun 'D:\agent-data\backend\projects\flowmate-data\src\cli.ts'
 # 也可以显式写出菜单模式
-bun src/cli.ts menu
+& bun 'D:\agent-data\backend\projects\flowmate-data\src\cli.ts' menu
 ```
+
+如果使用相对入口，必须先进入 Flowmate 项目根目录：
+
+```powershell
+Set-Location 'D:\agent-data\backend\projects\flowmate-data'
+bun src/cli.ts
+```
+
+不要在 `D:\agent-data\backend\projects\paper-knowledge-engine` 目录执行
+`bun src/cli.ts`；那是论文知识引擎的方向库菜单，不会启动 Flowmate。
 
 菜单会从 `config/workbench.local.json` 读取唯一的 `sample.acquire_limit`，显示当前来源总量及可标注数量。菜单的“执行当前任务”会用同一个数量完成获取、标签映射、MinerU 解析、Obsidian、Release、校验和备份；菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
 

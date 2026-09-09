@@ -10,11 +10,18 @@ bun src/cli.ts <command> --paths config/paths.local.json --config config/workben
 日常运行推荐直接使用菜单：
 
 ```powershell
-cd D:\agent-data\backend\projects\flowmate-data
-bun src/cli.ts
+& bun 'D:\agent-data\backend\projects\flowmate-data\src\cli.ts'
 ```
 
-也可以运行 `bun src/cli.ts menu` 显式进入同一个菜单。菜单会读取本机的
+也可以运行下面的命令显式进入同一个菜单：
+
+```powershell
+& bun 'D:\agent-data\backend\projects\flowmate-data\src\cli.ts' menu
+```
+
+如果使用相对入口，必须先执行 `Set-Location 'D:\agent-data\backend\projects\flowmate-data'`。
+在 `paper-knowledge-engine` 目录运行同名的 `bun src/cli.ts` 会进入论文方向库菜单，不会启动 Flowmate。
+菜单会读取本机的
 `config/workbench.local.json`：`sample.acquire_limit` 同时决定当前任务获取和交给 MinerU 解析多少条带标注发票。
 菜单会在进入时显示这个任务数量，不会再要求手工输入数量，也不会为菜单生成 `--limit` 参数；修改配置后重新运行命令即可。
 
