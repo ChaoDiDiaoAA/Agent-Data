@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, resolve, win32 } from 'node:path';
+import { unzipSync, zipSync } from 'fflate';
 import { resolveOwnedPath } from './config.ts';
 import { canonicalJson, realTree, withRunLock } from './engine-bridge.ts';
 import { writeCanonicalJson } from './file-store.ts';
+import { recoverPublications } from './publication.ts';
 import type { FlowmatePaths } from './contracts.ts';
 
 const backupSchema = 'flowmate-public-backup/1' as const;
@@ -11,7 +13,7 @@ const withdrawalSchema = 'flowmate-withdrawals/1' as const;
 export const withdrawalListRelativePath = 'policies/withdrawals.json' as const;
 
 export interface BackupFile { path: string; sha256: string; bytes: number }
-export interface BackupManifest { schema: typeof backupSchema; backup_id: string; created_at: string; content_hash: string; files: BackupFile[] }
+export interface BackupManifest { schema: typeof backupSchema; backup_id: string; created_at: string; content_hash: string; archive: BackupFile; files: BackupFile[] }
 export interface BackupResult { path: string; manifest: BackupManifest; files: BackupFile[] }
 export interface BackupDestinationRoots { originalRoot: string; dataRoot: string; vaultRoot: string }
 export interface RestoreBackupInput { backup: string; destinationRoots: BackupDestinationRoots; currentRoots: BackupDestinationRoots }
@@ -24,7 +26,7 @@ function fail(code: string): never { throw new Error(code); }
 function digest(bytes: Uint8Array): string { return createHash('sha256').update(bytes).digest('hex'); }
 function safeId(value: string): void { if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) fail('BACKUP_INVALID_ID'); }
 function safeRelative(value: string): string {
-  if (!value || value.includes('\\') || value.includes(':') || posix.isAbsolute(value) || value.split('/').some(part => !part || part === '.' || part === '..')) fail('BACKUP_PATH_INVALID');
+  if (typeof value !== 'string' || !value || /[\\:\u0000-\u001f\u007f]/u.test(value) || posix.isAbsolute(value) || value.split('/').some(part => !part || part === '.' || part === '..' || /[. ]$/.test(part) || /[<>"|?*]/.test(part) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) fail('BACKUP_PATH_INVALID');
   return value;
 }
 function safeWithdrawalValue(value: unknown, code = 'BACKUP_WITHDRAWAL_LIST_INVALID'): string {
@@ -74,25 +76,19 @@ export async function saveWithdrawalList(dataRoot: string, list: WithdrawalList,
   if (options.lockHeld) { await operation(); return; }
   await withRunLock(resolveOwnedPath(dataRoot, 'work/run.lock'), operation, { jobId: 'flowmate-withdrawals' });
 }
-function backupPath(root: string, value: string): string { return resolveOwnedPath(root, safeRelative(value)); }
 async function exists(path: string): Promise<boolean> { try { await lstat(path); return true; } catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return false; throw error; } }
 async function walk(source: string, prefix: string, include: (path: string) => Promise<boolean>, output: Array<{ relative: string; source: string }>): Promise<void> {
   if (!(await exists(source))) return;
+  if ((await lstat(source)).isSymbolicLink()) fail('BACKUP_SYMLINK_REJECTED');
   for (const entry of await readdir(source, { withFileTypes: true })) {
     const current = join(source, entry.name);
     const relativePath = `${prefix}/${entry.name}`;
+    if (/^payload\/(data|original)\/work$/i.test(relativePath)) continue;
     if (entry.isSymbolicLink()) fail('BACKUP_SYMLINK_REJECTED');
     if (entry.isDirectory()) await walk(current, relativePath, include, output);
     else if (entry.isFile() && await include(current)) output.push({ relative: relativePath.replaceAll('\\', '/'), source: current });
     else if (!entry.isDirectory() && !entry.isFile()) fail('BACKUP_FILE_INVALID');
   }
-}
-async function writeStagedFile(staging: string, relativePath: string, source: string): Promise<BackupFile> {
-  const target = backupPath(staging, relativePath);
-  const bytes = await readFile(source);
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, bytes, { flag: 'wx' });
-  return { path: relativePath, sha256: digest(bytes), bytes: bytes.byteLength };
 }
 async function generatedCatalog(path: string): Promise<boolean> {
   if (!path.toLowerCase().endsWith('.md')) return false;
@@ -149,29 +145,33 @@ async function assertRestoreRoots(destinationRoots: BackupDestinationRoots, curr
 
 async function createBackupUnlocked(paths: FlowmatePaths, backupId: string): Promise<BackupResult> {
   safeId(backupId);
+  await recoverPublications(paths);
   const staging = resolveOwnedPath(paths.backupRoot, `.work/${crypto.randomUUID()}`);
   await mkdir(staging, { recursive: true });
   try {
     const sources: Array<{ relative: string; source: string }> = [];
     await walk(paths.originalRoot, 'payload/original', async () => true, sources);
-    await walk(resolveOwnedPath(paths.dataRoot, 'datasets'), 'payload/data/datasets', async () => true, sources);
-    await walk(resolveOwnedPath(paths.dataRoot, 'releases'), 'payload/data/releases', async () => true, sources);
+    await walk(paths.dataRoot, 'payload/data', async () => true, sources);
     const policyPath = withdrawalListPath(paths.dataRoot);
     if (await exists(policyPath)) {
       await loadWithdrawalList(policyPath);
-      sources.push({ relative: `payload/data/${withdrawalListRelativePath}`, source: policyPath });
     }
     await walk(paths.vaultRoot, 'payload/vault', async path => !(await generatedCatalog(path)), sources);
     const files: BackupFile[] = [];
-    for (const source of sources.sort((left, right) => left.relative.localeCompare(right.relative))) files.push(await writeStagedFile(staging, source.relative, source.source));
+    const payload: Record<string, Uint8Array> = Object.create(null);
+    for (const source of sources.sort((left, right) => left.relative.localeCompare(right.relative))) {
+      safeRelative(source.relative);
+      const bytes = await readFile(source.source);
+      payload[source.relative] = bytes;
+      files.push({ path: source.relative, sha256: digest(bytes), bytes: bytes.byteLength });
+    }
     const contentHash = digest(Buffer.from(canonicalJson({ backup_id: backupId, files })));
-    const manifest: BackupManifest = { schema: backupSchema, backup_id: backupId, created_at: new Date().toISOString(), content_hash: contentHash, files };
+    const archiveBytes = zipSync(payload, { level: 6 });
+    const manifest: BackupManifest = { schema: backupSchema, backup_id: backupId, created_at: new Date().toISOString(), content_hash: contentHash, archive: { path: 'data.zip', sha256: digest(archiveBytes), bytes: archiveBytes.byteLength }, files };
+    await writeFile(join(staging, 'data.zip'), archiveBytes, { flag: 'wx' });
     await writeFile(join(staging, 'manifest.json'), canonicalJson(manifest), { flag: 'wx' });
-    const checksums = { schema: backupSchema, files: [...files, { path: 'manifest.json', sha256: digest(Buffer.from(canonicalJson(manifest))), bytes: Buffer.byteLength(canonicalJson(manifest)) }].sort((left, right) => left.path.localeCompare(right.path)) };
-    await writeFile(join(staging, 'checksums.json'), canonicalJson(checksums), { flag: 'wx' });
     await verifyBackup(staging);
     await mkdir(paths.backupRoot, { recursive: true });
-    const destination = resolveOwnedPath(paths.backupRoot, `${manifest.created_at.slice(0, 10)}-${contentHash.slice(0, 12)}`);
     for (const entry of await readdir(paths.backupRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name === '.work') continue;
       const candidate = join(paths.backupRoot, entry.name, 'manifest.json');
@@ -187,8 +187,15 @@ async function createBackupUnlocked(paths: FlowmatePaths, backupId: string): Pro
         }
       }
     }
-    if (await exists(destination)) fail('BACKUP_DESTINATION_CONFLICT');
-    // A backup directory is published only after its manifest and every checksum is verified.
+    // Allocate the next free second so independent backups never overwrite one another.
+    let timestamp = new Date(manifest.created_at).getTime();
+    let destination: string;
+    do {
+      const name = new Date(timestamp).toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+      destination = resolveOwnedPath(paths.backupRoot, name);
+      timestamp += 1000;
+    } while (await exists(destination));
+    // Publish only after the archive and every payload checksum are verified.
     await mkdir(dirname(destination), { recursive: true });
     try { await rename(staging, destination); }
     catch (error) {
@@ -198,6 +205,7 @@ async function createBackupUnlocked(paths: FlowmatePaths, backupId: string): Pro
     return { path: destination, manifest, files };
   } finally {
     await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+    await rmdir(dirname(staging)).catch(() => undefined);
   }
 }
 
@@ -206,39 +214,76 @@ export async function createBackup(paths: FlowmatePaths, backupId: string): Prom
   return withRunLock(lockPath, () => createBackupUnlocked(paths, backupId), { jobId: `backup:${backupId}` });
 }
 
-export async function verifyBackup(path: string): Promise<BackupResult> {
+function validateFile(file: BackupFile): void {
+  if (!file || typeof file !== 'object' || typeof file.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(file.sha256) || !Number.isSafeInteger(file.bytes) || file.bytes < 0) fail('BACKUP_MANIFEST_INVALID');
+  safeRelative(file.path);
+}
+
+async function readVerifiedBackup(path: string): Promise<BackupResult & { payload: Record<string, Uint8Array> }> {
+  // realTree rejects symlinks before any archive or manifest is read.
+  const actual = await realTree(path);
+  if (actual.length !== 2 || !actual.includes('manifest.json') || !actual.includes('data.zip')) fail('BACKUP_FILE_SET_MISMATCH');
   const manifestBytes = await readFile(join(path, 'manifest.json'));
-  const manifest = JSON.parse(manifestBytes.toString('utf8')) as BackupManifest;
-  if (manifestBytes.toString('utf8') !== canonicalJson(manifest) || manifest.schema !== backupSchema || !Array.isArray(manifest.files) || !/^[0-9a-f]{64}$/.test(manifest.content_hash)) fail('BACKUP_MANIFEST_INVALID');
-  const checksumBytes = await readFile(join(path, 'checksums.json'));
-  const checksums = JSON.parse(checksumBytes.toString('utf8')) as { schema?: string; files?: BackupFile[] };
-  if (checksumBytes.toString('utf8') !== canonicalJson(checksums) || checksums.schema !== backupSchema || !Array.isArray(checksums.files) || checksums.files.some(file => file.path === 'checksums.json')) fail('BACKUP_CHECKSUMS_INVALID');
-  const actual = new Set((await realTree(path)).filter(name => !name.endsWith('/')));
-  const expected = new Set(['manifest.json', 'checksums.json', ...checksums.files.map(file => file.path)]);
-  if (actual.size !== expected.size || [...actual].some(file => !expected.has(file))) fail('BACKUP_FILE_SET_MISMATCH');
-  const manifestFiles = new Set(manifest.files.map(file => file.path));
-  const checksumPayload = checksums.files.filter(file => file.path !== 'manifest.json');
-  if (manifestFiles.size !== checksumPayload.length || checksumPayload.some(file => !manifestFiles.has(file.path))) fail('BACKUP_FILE_SET_MISMATCH');
-  for (const file of checksums.files) {
-    safeRelative(file.path);
-    const bytes = await readFile(backupPath(path, file.path));
-    if (digest(bytes) !== file.sha256 || bytes.byteLength !== file.bytes) fail('BACKUP_CHECKSUM_MISMATCH');
+  let manifest: BackupManifest;
+  try { manifest = JSON.parse(manifestBytes.toString('utf8')) as BackupManifest; }
+  catch { fail('BACKUP_MANIFEST_INVALID'); }
+  if (!manifest || manifestBytes.toString('utf8') !== canonicalJson(manifest) || manifest.schema !== backupSchema || !Array.isArray(manifest.files) || typeof manifest.content_hash !== 'string' || !/^[0-9a-f]{64}$/.test(manifest.content_hash) || typeof manifest.created_at !== 'string' || !Number.isFinite(Date.parse(manifest.created_at))) fail('BACKUP_MANIFEST_INVALID');
+  safeId(manifest.backup_id);
+  validateFile(manifest.archive);
+  if (manifest.archive.path !== 'data.zip') fail('BACKUP_MANIFEST_INVALID');
+  const expected = new Map<string, BackupFile>();
+  const destinationNames = new Set<string>();
+  for (const file of manifest.files) {
+    validateFile(file);
+    if (!/^payload\/(original|data|vault)\/.+/.test(file.path) || /^payload\/(original|data)\/work(?:\/|$)/i.test(file.path)) fail('BACKUP_PAYLOAD_INVALID');
+    if (destinationNames.has(file.path.toLowerCase())) fail('BACKUP_FILE_SET_MISMATCH');
+    destinationNames.add(file.path.toLowerCase());
+    expected.set(file.path, file);
   }
-  const manifestChecksum = checksums.files.find(file => file.path === 'manifest.json');
-  if (!manifestChecksum || manifestChecksum.sha256 !== digest(manifestBytes)) fail('BACKUP_MANIFEST_CHECKSUM_MISMATCH');
+  for (const name of destinationNames) {
+    const parts = name.split('/');
+    for (let i = 1; i < parts.length; i += 1) if (destinationNames.has(parts.slice(0, i).join('/'))) fail('BACKUP_FILE_SET_MISMATCH');
+  }
   if (digest(Buffer.from(canonicalJson({ backup_id: manifest.backup_id, files: manifest.files }))) !== manifest.content_hash) fail('BACKUP_CONTENT_HASH_MISMATCH');
-  return { path, manifest, files: manifest.files };
+  const archive = await readFile(join(path, 'data.zip'));
+  if (archive.byteLength !== manifest.archive.bytes || digest(archive) !== manifest.archive.sha256) fail('BACKUP_CHECKSUM_MISMATCH');
+  if (archive.byteLength < 22) fail('BACKUP_ARCHIVE_INVALID');
+  const seen = new Set<string>();
+  let payload: Record<string, Uint8Array>;
+  try {
+    payload = unzipSync(archive, { filter: entry => {
+      safeRelative(entry.name);
+      const file = expected.get(entry.name);
+      if (!file || seen.has(entry.name)) fail('BACKUP_FILE_SET_MISMATCH');
+      if (entry.originalSize !== file.bytes) fail('BACKUP_CHECKSUM_MISMATCH');
+      seen.add(entry.name);
+      return true;
+    } });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('BACKUP_')) throw error;
+    fail('BACKUP_ARCHIVE_INVALID');
+  }
+  if (seen.size !== expected.size || Object.keys(payload).length !== expected.size) fail('BACKUP_FILE_SET_MISMATCH');
+  for (const file of manifest.files) {
+    const bytes = payload[file.path];
+    if (!bytes || bytes.byteLength !== file.bytes || digest(bytes) !== file.sha256) fail('BACKUP_CHECKSUM_MISMATCH');
+  }
+  return { path, manifest, files: manifest.files, payload };
+}
+
+export async function verifyBackup(path: string): Promise<BackupResult> {
+  const { payload: _payload, ...result } = await readVerifiedBackup(path);
+  return result;
 }
 
 async function verifyRestoredFileSet(backup: string, roots: BackupDestinationRoots, currentList?: WithdrawalList): Promise<void> {
-  const verified = await verifyBackup(backup);
+  const verified = await readVerifiedBackup(backup);
   const expected = new Set<string>();
   for (const file of verified.manifest.files) {
     const destination = await destinationForPayload(roots, file.path);
-    const payloadPath = file.path === `payload/data/${withdrawalListRelativePath}` && currentList
-      ? undefined
-      : backupPath(backup, file.path);
-    const bytes = payloadPath ? await readFile(payloadPath) : Buffer.from(canonicalJson(currentList));
+    const bytes = file.path === `payload/data/${withdrawalListRelativePath}` && currentList
+      ? Buffer.from(canonicalJson(currentList))
+      : verified.payload[file.path]!;
     if (!(await exists(destination))) fail('BACKUP_RESTORE_MISSING');
     const restored = await readFile(destination);
     if (digest(restored) !== digest(bytes) || restored.byteLength !== bytes.byteLength) fail('BACKUP_RESTORE_CHECKSUM_MISMATCH');
@@ -293,10 +338,9 @@ async function restoreBackupUnlocked(input: RestoreBackupInput): Promise<void> {
   const currentPolicy = withdrawalListPath(input.currentRoots.dataRoot);
   const hasCurrentPolicy = await exists(currentPolicy);
   const currentList = hasCurrentPolicy ? await loadWithdrawalList(currentPolicy) : undefined;
-  const verified = await verifyBackup(input.backup);
+  const verified = await readVerifiedBackup(input.backup);
   for (const file of verified.manifest.files) {
     const destination = await destinationForPayload(input.destinationRoots, file.path);
-    const source = backupPath(input.backup, file.path);
     if (file.path === `payload/data/${withdrawalListRelativePath}` && currentList) continue;
     if (await exists(destination)) {
       const existing = await readFile(destination);
@@ -304,7 +348,7 @@ async function restoreBackupUnlocked(input: RestoreBackupInput): Promise<void> {
       continue;
     }
     await mkdir(dirname(destination), { recursive: true });
-    await writeFile(destination, await readFile(source), { flag: 'wx' });
+    await writeFile(destination, verified.payload[file.path]!, { flag: 'wx' });
   }
   if (currentList) {
     await saveWithdrawalList(input.destinationRoots.dataRoot, currentList, { lockHeld: true });

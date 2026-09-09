@@ -1,3 +1,6 @@
+import { compactJsonFileHash } from './readable-json.ts';
+import { recoverPublications } from './publication.ts';
+import { sampleDirectory, datasetTasks } from './layout.ts';
 import { createHash } from 'node:crypto';
 import { lstat, link as hardLink, mkdir, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
@@ -53,7 +56,7 @@ interface PortableRef { root: 'release'; path: string }
 
 function fail(code: string): never { throw new Error(code); }
 function digest(bytes: Uint8Array): string { return createHash('sha256').update(bytes).digest('hex'); }
-function derivedSampleId(recordId: string, revision: string): string { return `voxel51-${digest(Buffer.from(`voxel51-hq-invoice-ocr\n${revision}\n${recordId}`)).slice(0, 20)}`; }
+
 function safeId(value: string, code = 'RELEASE_INVALID_ID'): void {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) fail(code);
 }
@@ -92,8 +95,8 @@ async function copyTree(root: string, relativeRoot: string, sourceRoot: string):
   return files;
 }
 async function datasetMetadata(paths: FlowmatePaths, source: ReleaseManifest['source']): Promise<Buffer | undefined> {
-  const revisionPath = resolveOwnedPath(paths.dataRoot, `datasets/${source.dataset_id}/revisions/${source.revision}/dataset.json`);
-  return (await optionalFile(revisionPath)) ?? optionalFile(resolveOwnedPath(paths.dataRoot, `datasets/${source.dataset_id}/dataset.json`));
+  const revisionPath = resolveOwnedPath(paths.dataRoot, `${datasetTasks(source.dataset_id)}/revisions/${source.revision}/dataset.json`);
+  return (await optionalFile(revisionPath)) ?? optionalFile(resolveOwnedPath(paths.dataRoot, `${datasetTasks(source.dataset_id)}/dataset.json`));
 }
 async function promoteNoReplace(staging: string, destination: string): Promise<void> {
   try { await mkdir(destination); }
@@ -146,24 +149,25 @@ function assertPortable(value: unknown): void {
 
 async function selectionRecords(paths: FlowmatePaths, selectionId: string, config: SourceConfig): Promise<{ records: SampleRecord[]; selectionHash: string; revision: string }> {
   safeId(selectionId, 'RELEASE_INVALID_SELECTION');
-  const selectionPath = resolveOwnedPath(paths.dataRoot, `datasets/voxel51-hq-invoice-ocr/selections/${selectionId}.json`);
+  const selectionPath = resolveOwnedPath(paths.dataRoot, `tasks/voxel51/selections/${selectionId}.json`);
   const value = JSON.parse(await readFile(selectionPath, 'utf8')) as { schema_version?: number; source_id?: string; dataset_id?: string; selection_id?: string; index_url?: string; index_sha256?: string; selection_hash?: string; revision?: string; records?: Array<{ sample_id?: string; source_record_id?: string; image_path?: string; annotation_locator?: string; annotation_sha256?: string }> };
   const { selection_hash: selectionHash, ...content } = value;
   if (value.schema_version !== 1 || value.source_id !== config.source_id || value.dataset_id !== config.dataset_id || value.selection_id !== selectionId
     || typeof selectionHash !== 'string' || selectionHash !== hashCanonical(content) || typeof value.revision !== 'string' || !Array.isArray(value.records)
     || !config.record_locator || value.index_url !== config.record_locator.file_url_template.replace('{revision}', value.revision).replace('{path}', config.record_locator.index_path)) fail('RELEASE_SELECTION_INVALID');
-  const indexPath = resolveOwnedPath(paths.dataRoot, `datasets/${config.dataset_id}/selections/${selectionId}.index.json`);
+  const indexPath = resolveOwnedPath(paths.dataRoot, `${datasetTasks(config.dataset_id!)}/selections/${selectionId}.index.json`);
   const indexBytes = await readFile(indexPath);
   if (typeof value.index_sha256 !== 'string' || digest(indexBytes) !== value.index_sha256) fail('RELEASE_SELECTION_INVALID');
   const indexRecords = readVoxel51Index(indexBytes);
   const byLocator = new Map(indexRecords.map(record => [record.annotation_locator, record]));
   const all = await loadSampleRecords(paths, 'voxel51-hq-invoice-ocr');
   const byId = new Map(all.map(record => [record.sample_id, record]));
+  const registry = JSON.parse(await readFile(resolveOwnedPath(paths.dataRoot, `${datasetTasks(config.dataset_id!)}/ids.json`), 'utf8')) as { ids: Record<string, string> };
   const records = value.records.map(entry => {
     if (typeof entry.sample_id !== 'string' || !byId.has(entry.sample_id)) fail('RELEASE_SELECTION_RECORD_MISSING');
     const source = byLocator.get((entry as { annotation_locator?: string }).annotation_locator ?? '');
     if (!source || source.source_record_id !== (entry as { source_record_id?: string }).source_record_id || source.image_path !== (entry as { image_path?: string }).image_path
-      || hashCanonical(source.raw) !== (entry as { annotation_sha256?: string }).annotation_sha256 || entry.sample_id !== derivedSampleId(source.source_record_id, value.revision!)) fail('RELEASE_SELECTION_RECORD_MISMATCH');
+      || hashCanonical(source.raw) !== (entry as { annotation_sha256?: string }).annotation_sha256 || (!/^[0-9]{6,}$/.test(entry.sample_id) || registry.ids[source.source_record_id] !== entry.sample_id)) fail('RELEASE_SELECTION_RECORD_MISMATCH');
     const record = byId.get(entry.sample_id)!;
     if (record.dataset_id !== config.dataset_id || record.dataset_revision !== value.revision || record.source_record_id !== source.source_record_id) fail('RELEASE_SELECTION_RECORD_MISMATCH');
     return record;
@@ -179,6 +183,11 @@ export async function buildRelease(input: ReleaseBuildInput): Promise<ReleaseRes
 
 async function buildReleaseUnlocked(input: ReleaseBuildInput): Promise<ReleaseResult> {
   safeId(input.version);
+  await recoverPublications(input.paths);
+  if (input.selectionId) {
+    const selected = await selectionRecords(input.paths, input.selectionId, input.sourceConfig ?? await loadReleaseSourceConfig());
+    input = { ...input, records: selected.records, selectionHash: selected.selectionHash };
+  }
   if (input.records.length === 0) fail('RELEASE_EMPTY_SELECTION');
   const records = [...input.records].sort((left, right) => `${left.dataset_id}/${left.sample_id}`.localeCompare(`${right.dataset_id}/${right.sample_id}`));
   const withdrawals = await loadWithdrawalList(withdrawalListPath(input.paths.dataRoot));
@@ -198,7 +207,7 @@ async function buildReleaseUnlocked(input: ReleaseBuildInput): Promise<ReleaseRe
       if (!record.allowed_uses.every(value => value === 'development' || value === 'regression')) fail('RELEASE_GROUP_INVALID');
       safeId(record.sample_id, 'RELEASE_SAMPLE_ID_INVALID');
       const base = `payload/samples/${record.sample_id}`;
-      const recordSource = resolveOwnedPath(input.paths.dataRoot, `datasets/${record.dataset_id}/samples/${record.sample_id}/record.json`);
+      const recordSource = resolveOwnedPath(input.paths.dataRoot, `${sampleDirectory(record.dataset_id, record.sample_id)}/record.json`);
       const recordBytes = await readFile(recordSource);
       let recordValue: unknown;
       try { recordValue = JSON.parse(recordBytes.toString('utf8')); } catch { fail('RELEASE_RECORD_INVALID'); }
@@ -217,7 +226,7 @@ async function buildReleaseUnlocked(input: ReleaseBuildInput): Promise<ReleaseRe
         const verified = await verifyNormalizedOutput(parsedSource);
         if (record.content_sha256 !== verified.contentHash) fail('RELEASE_PARSED_HASH_MISMATCH');
         entryBase.parsed = `${base}/parsed`;
-        payloadFiles.push(...await copyTree(staging, entryBase.parsed, parsedSource));
+        for (const file of verified.files) payloadFiles.push(await copyPayload(staging, `${entryBase.parsed}/${file.path}`, resolveOwnedPath(parsedSource, file.path)));
         if (record.parser_key) parserKeys.add(record.parser_key);
       }
       if (input.includeOriginals) {
@@ -227,7 +236,7 @@ async function buildReleaseUnlocked(input: ReleaseBuildInput): Promise<ReleaseRe
         payloadFiles.push(await copyPayload(staging, entryBase.original, originalSource));
         if (record.annotation_ref) {
           const annotationSource = referencePath(input.paths, record.annotation_ref.root, record.annotation_ref.path);
-          if (!record.annotation_sha256 || await sha256File(annotationSource) !== record.annotation_sha256) fail('RELEASE_ANNOTATION_HASH_MISMATCH');
+          if (!record.annotation_sha256 || await compactJsonFileHash(annotationSource, record.annotation_sha256) !== record.annotation_sha256) fail('RELEASE_ANNOTATION_HASH_MISMATCH');
           entryBase.annotation = `${base}/annotation.json`;
           payloadFiles.push(await copyPayload(staging, entryBase.annotation, annotationSource));
         }
@@ -331,7 +340,9 @@ export async function verifyRelease(path: string): Promise<{ manifest: ReleaseMa
   return { manifest, files: checksums.files };
 }
 
-export async function loadReleaseRecords(paths: FlowmatePaths, selectionId?: string): Promise<{ records: SampleRecord[]; selectionHash?: string }> {
+export async function loadReleaseRecords(paths: FlowmatePaths, selectionId?: string, options: { lockHeld?: boolean } = {}): Promise<{ records: SampleRecord[]; selectionHash?: string }> {
+  if (!options.lockHeld) return withRunLock(resolveOwnedPath(paths.dataRoot, 'work/run.lock'), () => loadReleaseRecords(paths, selectionId, { lockHeld: true }), { jobId: 'flowmate-release-records' });
+  await recoverPublications(paths);
   if (!selectionId) return { records: await loadSampleRecords(paths, 'voxel51-hq-invoice-ocr') };
   const selected = await selectionRecords(paths, selectionId, await loadReleaseSourceConfig());
   return { records: selected.records, selectionHash: selected.selectionHash };

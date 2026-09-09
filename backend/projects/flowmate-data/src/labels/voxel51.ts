@@ -1,3 +1,6 @@
+import { compactJsonFileHash } from '../readable-json.ts';
+import { recoverPublications } from '../publication.ts';
+import { sampleDirectory, datasetTasks } from '../layout.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { resolveOwnedPath } from '../config.ts';
@@ -121,10 +124,11 @@ export function committedSelection(bytes: Uint8Array, datasetId: string, selecti
 export async function mapVoxel51Selection(input: { paths: FlowmatePaths; datasetId: string; selectionId: string; lockHeld?: boolean }): Promise<{ mapped: number; provided: number; missing: number; ambiguous: number; sample_ids: string[] }> {
   if (!input.lockHeld) return withRunLock(resolveOwnedPath(input.paths.dataRoot, 'work/run.lock'), () => mapVoxel51Selection({ ...input, lockHeld: true }), { jobId: `flowmate-labels-${input.selectionId}` });
   const { paths, datasetId, selectionId } = input;
+  await recoverPublications(paths);
   safeId(datasetId); safeId(selectionId);
   if (datasetId !== 'voxel51-hq-invoice-ocr') fail('VOXEL51_SOURCE_IDENTITY_MISMATCH');
   const records = await loadSampleRecords(paths, datasetId);
-  const selected = resolveOwnedPath(paths.dataRoot, `datasets/${datasetId}/selections/${selectionId}.json`);
+  const selected = resolveOwnedPath(paths.dataRoot, `${datasetTasks(datasetId)}/selections/${selectionId}.json`);
   let selectionBytes: Uint8Array;
   try {
     selectionBytes = await readFile(selected);
@@ -136,9 +140,9 @@ export async function mapVoxel51Selection(input: { paths: FlowmatePaths; dataset
   const totals: Record<FieldStatus, number> = { provided: 0, missing: 0, ambiguous: 0 };
   for (const record of selectedRecords) {
     const source = annotationPath(paths, record);
-    if (await sha256File(source) !== record.annotation_sha256) fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
+    if (await compactJsonFileHash(source, record.annotation_sha256) !== record.annotation_sha256) fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
     const label = mapVoxel51Label(JSON.parse(await readFile(source, 'utf8')));
-    const relativeLabel = `datasets/${datasetId}/samples/${record.sample_id}/label.json`;
+    const relativeLabel = `${sampleDirectory(datasetId, record.sample_id)}/fields.json`;
     const labelPath = resolveOwnedPath(paths.dataRoot, relativeLabel);
     await writeCanonicalJson(labelPath, label);
     const labelSha = await sha256File(labelPath);

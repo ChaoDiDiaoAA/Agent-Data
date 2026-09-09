@@ -1,3 +1,6 @@
+import { compactJsonHash, prettyJson } from './readable-json.ts';
+import { recoverPublications, publicationPaths, commitPublication } from './publication.ts';
+import { sampleDirectory, datasetTasks } from './layout.ts';
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -10,6 +13,7 @@ import type { SampleRecord } from './task-store.ts';
 interface SnapshotFile { path: string; sha256: string; bytes: number }
 export interface StructuredSnapshot {
   schema_version: 1;
+  json_format?: 'pretty-2';
   record_sha256: string;
   label_sha256?: string;
   label_kind?: 'dataset_annotation' | 'human_reviewed';
@@ -33,173 +37,154 @@ function verifyAttemptIdentity(source: SampleRecord, startedAt: string | undefin
   } catch { fail('SNAPSHOT_ATTEMPT_MISMATCH'); }
 }
 
-function selectedAttempt(source: SampleRecord): string | undefined {
-  if (source.parser_key === undefined && source.parse_attempt_id === undefined && source.content_sha256 === undefined && source.derived_ref === undefined) return undefined;
-  if (typeof source.parser_key !== 'string' || !source.parser_key.startsWith('mineru@') || !/^attempt-[0-9a-f]{64}$/.test(source.parse_attempt_id ?? '') || !/^[0-9a-f]{64}$/.test(source.content_sha256 ?? '')) fail('SNAPSHOT_ATTEMPT_MISMATCH');
-  const normalized = `parsed/${source.parse_attempt_id}/normalized`;
-  if (source.derived_ref?.root !== 'data' || source.derived_ref.path !== `datasets/${source.dataset_id}/samples/${source.sample_id}/${normalized}`) fail('SNAPSHOT_ATTEMPT_MISMATCH');
-  return normalized;
+interface SnapshotInput { paths: FlowmatePaths; datasetId: string; sampleId: string; parsed?: ParseReceipt; record?: SampleRecord; lockHeld?: boolean }
+export interface KnowledgeSnapshotInput {
+  paths: FlowmatePaths; sourceId: string; sourceVersion: string; fileId: string; recordPath: string;
+  normalizedDir: string; sourceUrl: string; licenseEvidence: string; applicablePeriod: string; lockHeld?: boolean;
 }
-
 function labelMetadata(source: SampleRecord) {
   if (source.label_kind === 'none') {
     if (source.label_ref || source.label_sha256 || source.mapping_version) fail('SNAPSHOT_RECORD_INVALID');
     return {};
   }
-  if (!source.label_ref || source.label_ref.root !== 'data' || source.label_ref.path !== `datasets/${source.dataset_id}/samples/${source.sample_id}/label.json` || !/^[0-9a-f]{64}$/.test(source.label_sha256 ?? '') || !['dataset_annotation', 'human_reviewed'].includes(source.label_kind) || typeof source.mapping_version !== 'string') fail('SNAPSHOT_RECORD_INVALID');
+  if (source.label_ref?.root !== 'data' || source.label_ref.path !== `${sampleDirectory(source.dataset_id, source.sample_id)}/fields.json` || !/^[0-9a-f]{64}$/.test(source.label_sha256 ?? '') || !['dataset_annotation', 'human_reviewed'].includes(source.label_kind) || typeof source.mapping_version !== 'string') fail('SNAPSHOT_RECORD_INVALID');
   return { label_sha256: source.label_sha256!, label_kind: source.label_kind as 'dataset_annotation' | 'human_reviewed', mapping_version: source.mapping_version };
 }
-
 async function verifyDirectory(path: string): Promise<StructuredSnapshot> {
-  const manifestBytes = await readFile(join(path, 'snapshot.json'));
-  let manifest: StructuredSnapshot;
-  try { manifest = JSON.parse(manifestBytes.toString('utf8')) as StructuredSnapshot; } catch { return fail('SNAPSHOT_INVALID'); }
-  if (manifestBytes.toString('utf8') !== canonicalJson(manifest) || manifest.schema_version !== 1 || !Array.isArray(manifest.files) || !/^[0-9a-f]{64}$/.test(manifest.record_sha256)) fail('SNAPSHOT_INVALID');
+  const bytes = await readFile(join(path, 'snapshot.json'));
+  const manifest = JSON.parse(bytes.toString('utf8')) as StructuredSnapshot;
+  if (![canonicalJson(manifest), prettyJson(manifest)].includes(bytes.toString('utf8')) || manifest.schema_version !== 1 || (manifest.json_format !== undefined && manifest.json_format !== 'pretty-2') || !Array.isArray(manifest.files)) fail('SNAPSHOT_INVALID');
   const names = (await realTree(path)).filter(name => !name.endsWith('/')).sort();
   if (new Set(manifest.files.map(file => file.path)).size !== manifest.files.length || names.join(',') !== [...manifest.files.map(file => file.path), 'snapshot.json'].sort().join(',')) fail('SNAPSHOT_FILE_SET_MISMATCH');
   for (const file of manifest.files) {
-    if (!file || typeof file.path !== 'string' || !/^[0-9a-f]{64}$/.test(file.sha256) || !Number.isSafeInteger(file.bytes) || file.bytes < 0) fail('SNAPSHOT_INVALID');
     const body = await readFile(resolveOwnedPath(path, file.path));
     if (hash(body) !== file.sha256 || body.byteLength !== file.bytes) fail('SNAPSHOT_FILE_HASH_MISMATCH');
   }
-  const recordFile = manifest.files.find(file => file.path === 'record.json')!;
-  const labelFile = manifest.files.find(file => file.path === 'label.json');
-  if (!recordFile || recordFile.sha256 !== manifest.record_sha256 || labelFile?.sha256 !== manifest.label_sha256) fail('SNAPSHOT_SOURCE_HASH_MISMATCH');
   const source = record(JSON.parse(await readFile(join(path, 'record.json'), 'utf8')));
   const labels = labelMetadata(source);
-  if (labels.label_sha256 !== manifest.label_sha256 || labels.label_kind !== manifest.label_kind || labels.mapping_version !== manifest.mapping_version) fail('SNAPSHOT_SOURCE_HASH_MISMATCH');
-  if (labelFile) JSON.parse(await readFile(join(path, 'label.json'), 'utf8'));
-  const normalized = selectedAttempt(source);
+  const sourceHash = async (name: string) => manifest.json_format === 'pretty-2' ? compactJsonHash(await readFile(join(path, name)), name === 'record.json' ? manifest.record_sha256 : manifest.label_sha256) : manifest.files.find(f => f.path === name)?.sha256;
+  if (await sourceHash('record.json') !== manifest.record_sha256 || (labels.label_sha256 && await sourceHash('fields.json') !== manifest.label_sha256) || (!labels.label_sha256 && manifest.files.some(f => f.path === 'fields.json')) || canonicalJson(labels) !== canonicalJson({ ...(manifest.label_sha256 ? { label_sha256: manifest.label_sha256, label_kind: manifest.label_kind, mapping_version: manifest.mapping_version } : {}) })) fail('SNAPSHOT_SOURCE_HASH_MISMATCH');
   if (source.parser_key !== manifest.parser_key || source.parse_attempt_id !== manifest.parse_attempt_id || source.content_sha256 !== manifest.content_sha256) fail('SNAPSHOT_ATTEMPT_MISMATCH');
-  const allowed = new Set(['record.json', ...(labelFile ? ['label.json'] : [])]);
-  if (normalized) {
+  if (source.derived_ref) {
+    if (source.derived_ref.root !== 'data' || source.derived_ref.path !== sampleDirectory(source.dataset_id, source.sample_id)) fail('SNAPSHOT_ATTEMPT_MISMATCH');
     verifyAttemptIdentity(source, manifest.parse_started_at);
-    const verified = await verifyNormalizedOutput(resolveOwnedPath(path, normalized));
+    const verified = await verifyNormalizedOutput(path);
     if (verified.contentHash !== manifest.content_sha256) fail('SNAPSHOT_CONTENT_HASH_MISMATCH');
-    for (const file of verified.files) allowed.add(`${normalized}/${file.path}`);
-  } else if (manifest.parse_started_at !== undefined) fail('SNAPSHOT_ATTEMPT_MISMATCH');
-  if (manifest.files.some(file => !allowed.has(file.path)) || allowed.size !== manifest.files.length) fail('SNAPSHOT_FILE_SET_MISMATCH');
-  return manifest;
-}
-
-export async function verifyStructuredSnapshot(path: string): Promise<StructuredSnapshot> { return verifyDirectory(path); }
-
-/** Restores a verified prior snapshot before discarding a corrupt current directory. */
-export async function recoverStructuredSnapshot(destination: string): Promise<void> {
-  const previous = `${destination}.previous`;
-  const hasDestination = await exists(destination);
-  const hasPrevious = await exists(previous);
-  if (!hasPrevious) return;
-  let previousValid = false;
-  try { await verifyDirectory(previous); previousValid = true; } catch { /* An invalid candidate remains until a verified replacement is published. */ }
-  if (!previousValid) return;
-  if (!hasDestination) { await rename(previous, destination); return; }
-  try {
-    await verifyDirectory(destination);
-    await rm(previous, { recursive: true, force: true });
-  } catch {
-    await rm(destination, { recursive: true, force: true });
-    await rename(previous, destination);
-  }
-}
-
-interface SnapshotInput { paths: FlowmatePaths; datasetId: string; sampleId: string; parsed?: ParseReceipt; lockHeld?: boolean }
-export interface KnowledgeSnapshotInput {
-  paths: FlowmatePaths;
-  sourceId: string;
-  sourceVersion: string;
-  fileId: string;
-  recordPath: string;
-  normalizedDir: string;
-  sourceUrl: string;
-  licenseEvidence: string;
-  applicablePeriod: string;
-  lockHeld?: boolean;
-}
-
-async function sourceFiles(input: SnapshotInput) {
-  const { paths, datasetId, sampleId } = input;
-  const recordPath = resolveOwnedPath(paths.dataRoot, `datasets/${datasetId}/samples/${sampleId}/record.json`);
-  const recordBytes = await readFile(recordPath);
-  const source = record(JSON.parse(recordBytes.toString('utf8')));
-  if (source.dataset_id !== datasetId || source.sample_id !== sampleId) fail('SNAPSHOT_RECORD_INVALID');
-  const labels = labelMetadata(source);
-  const payload = new Map<string, Uint8Array>([['record.json', recordBytes]]);
-  if (labels.label_sha256) {
-    const labelPath = resolveOwnedPath(paths.dataRoot, source.label_ref!.path);
-    const labelBytes = await readFile(labelPath);
-    if (hash(labelBytes) !== labels.label_sha256 || await sha256File(labelPath) !== labels.label_sha256) fail('SNAPSHOT_LABEL_HASH_MISMATCH');
-    try { JSON.parse(labelBytes.toString('utf8')); } catch { fail('SNAPSHOT_LABEL_INVALID'); }
-    payload.set('label.json', labelBytes);
-  }
-  const normalized = selectedAttempt(source);
-  let startedAt: string | undefined;
-  if (input.parsed && (!normalized || input.parsed.sampleId !== sampleId || input.parsed.attemptId !== source.parse_attempt_id || input.parsed.parserKey !== source.parser_key || input.parsed.contentHash !== source.content_sha256 || input.parsed.originalSha256 !== source.original_sha256)) fail('SNAPSHOT_ATTEMPT_MISMATCH');
-  if (normalized) {
-    const directory = resolveOwnedPath(paths.dataRoot, source.derived_ref!.path);
-    if (input.parsed && input.parsed.normalizedDir !== directory) fail('SNAPSHOT_ATTEMPT_MISMATCH');
-    const verified = await verifyNormalizedOutput(directory);
-    if (verified.contentHash !== source.content_sha256) fail('SNAPSHOT_CONTENT_HASH_MISMATCH');
-    const receipt: ParseReceipt = JSON.parse(await readFile(join(directory, '..', 'receipt.json'), 'utf8'));
-    if (receipt.sampleId !== sampleId || receipt.attemptId !== source.parse_attempt_id || receipt.parserKey !== source.parser_key || receipt.originalSha256 !== source.original_sha256 || receipt.contentHash !== source.content_sha256 || receipt.normalizedDir !== directory) fail('SNAPSHOT_ATTEMPT_MISMATCH');
+  } else if (manifest.parse_started_at || manifest.parse_attempt_id) fail('SNAPSHOT_ATTEMPT_MISMATCH');
+  const allowed = new Set(['record.json', 'receipt.json', ...(labels.label_sha256 ? ['fields.json'] : [])]);
+  if (source.derived_ref) {
+    for (const name of ['content.md', 'content.json', 'pages.json', 'parse.json']) allowed.add(name);
+    const receipt: ParseReceipt = JSON.parse(await readFile(join(path, 'parse.json'), 'utf8'));
+    if (receipt.sampleId !== source.sample_id || receipt.parserKey !== source.parser_key || receipt.attemptId !== source.parse_attempt_id || receipt.originalSha256 !== source.original_sha256 || receipt.contentHash !== source.content_sha256 || receipt.startedAt !== manifest.parse_started_at) fail('SNAPSHOT_ATTEMPT_MISMATCH');
     verifyAttemptIdentity(source, receipt.startedAt);
-    if (input.parsed) verifyAttemptIdentity(source, input.parsed.startedAt);
-    startedAt = receipt.startedAt;
+    const verified = await verifyNormalizedOutput(path);
     if (canonicalJson(receipt.files) !== canonicalJson(verified.files)) fail('SNAPSHOT_FILE_HASH_MISMATCH');
-    if (input.parsed && canonicalJson(input.parsed.files) !== canonicalJson(verified.files)) fail('SNAPSHOT_FILE_HASH_MISMATCH');
-    for (const file of verified.files) {
-      const body = await readFile(resolveOwnedPath(directory, file.path));
-      if (hash(body) !== file.sha256) fail('SNAPSHOT_FILE_HASH_MISMATCH');
-      payload.set(`${normalized}/${file.path}`, body);
+    for (const file of verified.files) if (file.path.startsWith('assets/')) allowed.add(file.path);
+  } else if (source.parser_key !== undefined || source.content_sha256 !== undefined || source.parse_attempt_id !== undefined) fail('SNAPSHOT_ATTEMPT_MISMATCH');
+  for (const ref of [source.original_ref, source.annotation_ref]) if (ref) {
+    const file = ref.path.split('/').at(-1)!;
+    if (ref.root !== 'original' || ref.path !== `${sampleDirectory(source.dataset_id, source.sample_id)}/${file}` || (ref === source.original_ref ? !/^original\.(jpg|jpeg|png|pdf)$/.test(file) : file !== 'annotation.json')) fail('SNAPSHOT_RECORD_INVALID');
+    allowed.add(file);
+  }
+  if (manifest.files.some(file => !allowed.has(file.path))) fail('SNAPSHOT_FILE_SET_MISMATCH');
+  for (const [ref, sha] of [[source.original_ref, source.original_sha256], [source.annotation_ref, source.annotation_sha256]] as const) {
+    if (ref) {
+      const file = manifest.files.find(file => file.path === ref.path.split('/').at(-1));
+      if (file && (ref === source.annotation_ref ? compactJsonHash(await readFile(join(path, file.path)), sha) : file.sha256) !== sha) fail('SNAPSHOT_SOURCE_HASH_MISMATCH');
     }
   }
-  return { source, recordBytes, labels, payload, startedAt };
+  return manifest;
 }
-
+export async function verifyStructuredSnapshot(path: string): Promise<StructuredSnapshot> { return verifyDirectory(path); }
+export async function recoverStructuredSnapshot(destination: string): Promise<void> {
+  const previous = `${destination}.previous`;
+  if (!await exists(previous)) return;
+  try { await verifyDirectory(previous); } catch { return; }
+  if (!await exists(destination)) { await rename(previous, destination); return; }
+  try { await verifyDirectory(destination); await rm(previous, { recursive: true, force: true }); }
+  catch { await rm(destination, { recursive: true, force: true }); await rename(previous, destination); }
+}
 async function publishSampleStructuredSnapshot(input: SnapshotInput): Promise<{ snapshot_path: string; snapshot: StructuredSnapshot }> {
   const { paths, datasetId, sampleId } = input;
   safeId(datasetId); safeId(sampleId);
-  const source = await sourceFiles(input);
-  const relative = `datasets/${datasetId}/samples/${sampleId}/structured`;
-  const destination = resolveOwnedPath(paths.originalRoot, relative);
-  const previous = resolveOwnedPath(paths.originalRoot, `${relative}.previous`);
-  const staging = resolveOwnedPath(paths.dataRoot, `work/snapshots/${sampleId}`);
-  await recoverStructuredSnapshot(destination);
-  await rm(staging, { recursive: true, force: true });
-  await mkdir(staging, { recursive: true });
-  const files: SnapshotFile[] = [];
-  for (const [path, body] of [...source.payload.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    const destination = resolveOwnedPath(staging, path);
-    await mkdir(dirname(destination), { recursive: true });
-    await writeFile(destination, body, { flag: 'wx' });
-    files.push({ path, sha256: hash(body), bytes: body.byteLength });
+  await recoverPublications(paths);
+  const relative = sampleDirectory(datasetId, sampleId);
+  const dataDir = resolveOwnedPath(paths.dataRoot, relative);
+  await recoverStructuredSnapshot(resolveOwnedPath(paths.originalRoot, relative));
+  const source = input.record ?? record(JSON.parse(await readFile(join(dataDir, 'record.json'), 'utf8')));
+  if (source.dataset_id !== datasetId || source.sample_id !== sampleId) fail('SNAPSHOT_RECORD_INVALID');
+  const labels = labelMetadata(source);
+  const payload = new Map<string, Uint8Array>();
+  const recordBytes = Buffer.from(canonicalJson(source));
+  payload.set('record.json', recordBytes);
+  for (const name of ['receipt.json', 'fields.json']) {
+    if (name === 'fields.json' && !labels.label_sha256) continue;
+    const file = join(dataDir, name);
+    if (!await exists(file)) { if (name === 'fields.json') fail('SNAPSHOT_LABEL_HASH_MISMATCH'); continue; }
+    const body = await readFile(file);
+    if (name === 'fields.json' && hash(body) !== labels.label_sha256) fail('SNAPSHOT_LABEL_HASH_MISMATCH');
+    payload.set(name, body);
   }
-  const snapshot: StructuredSnapshot = { schema_version: 1, record_sha256: hash(source.recordBytes), ...source.labels,
-    ...(source.source.parse_attempt_id ? { parser_key: source.source.parser_key!, parse_attempt_id: source.source.parse_attempt_id, parse_started_at: source.startedAt!, content_sha256: source.source.content_sha256! } : {}), files };
-  await writeFile(join(staging, 'snapshot.json'), canonicalJson(snapshot), { flag: 'wx' });
-  await verifyDirectory(staging);
-  await mkdir(dirname(destination), { recursive: true });
-  if (await exists(destination)) {
-    // A verified prior was restored by recovery above.  Remove only an invalid stale
-    // candidate before retaining the current verified directory as the new fallback.
-    await rm(previous, { recursive: true, force: true });
-    await rename(destination, previous);
+  let startedAt: string | undefined;
+  if (source.derived_ref) {
+    if (source.derived_ref.root !== 'data' || source.derived_ref.path !== relative) fail('SNAPSHOT_ATTEMPT_MISMATCH');
+    const receipt: ParseReceipt = input.parsed ?? JSON.parse(await readFile(join(dataDir, 'parse.json'), 'utf8'));
+    if (receipt.sampleId !== sampleId || receipt.attemptId !== source.parse_attempt_id || receipt.parserKey !== source.parser_key || receipt.originalSha256 !== source.original_sha256 || receipt.contentHash !== source.content_sha256) fail('SNAPSHOT_ATTEMPT_MISMATCH');
+    verifyAttemptIdentity(source, receipt.startedAt);
+    startedAt = receipt.startedAt;
+    const expectedWork = resolveOwnedPath(paths.dataRoot, `work/p/${sampleId}/${receipt.attemptId.slice(8,24)}`);
+    if (receipt.normalizedDir !== dataDir && (receipt.outputDir !== expectedWork || receipt.normalizedDir !== join(expectedWork, 'normalized'))) fail('SNAPSHOT_ATTEMPT_MISMATCH');
+    const stored: ParseReceipt = JSON.parse(await readFile(receipt.normalizedDir === dataDir ? join(dataDir, 'parse.json') : join(receipt.outputDir, 'receipt.json'), 'utf8'));
+    if (canonicalJson(stored) !== canonicalJson(receipt)) fail('SNAPSHOT_ATTEMPT_MISMATCH');
+    const directory = receipt.normalizedDir;
+    const verified = await verifyNormalizedOutput(directory);
+    if (verified.contentHash !== source.content_sha256) fail('SNAPSHOT_CONTENT_HASH_MISMATCH');
+    const convert = (name: string) => name === 'full.md' ? 'content.md' : name === 'content-list.json' ? 'content.json' : name;
+    const expected = receipt.files.filter(file => file.path !== 'page-marked.txt').map(file => ({ ...file, path: convert(file.path) }));
+    const actual = verified.files.filter(file => file.path !== 'page-marked.txt').map(file => ({ ...file, path: convert(file.path) }));
+    if (canonicalJson([...expected].sort((a,b)=>a.path.localeCompare(b.path))) !== canonicalJson([...actual].sort((a,b)=>a.path.localeCompare(b.path)))) fail('SNAPSHOT_FILE_HASH_MISMATCH');
+    for (const file of verified.files.filter(file => file.path !== 'page-marked.txt')) payload.set(convert(file.path), await readFile(resolveOwnedPath(directory, file.path)));
+    payload.set('parse.json', Buffer.from(canonicalJson({ ...receipt, outputDir: dataDir, normalizedDir: dataDir, files: actual.sort((a,b)=>a.path.localeCompare(b.path)) })));
+  } else if (input.parsed || source.parse_attempt_id) fail('SNAPSHOT_ATTEMPT_MISMATCH');
+  const transaction = await publicationPaths(paths, datasetId, sampleId);
+  await rm(transaction.dataWork, { recursive: true, force: true });
+  await rm(transaction.originalWork, { recursive: true, force: true });
+  const mirrorPayload = new Map(payload);
+  for (const [ref, sha] of [[source.original_ref, source.original_sha256], [source.annotation_ref, source.annotation_sha256]] as const) {
+    if (!ref) continue;
+    if (ref.root !== 'original') fail('SNAPSHOT_RECORD_INVALID');
+    const body = await readFile(resolveOwnedPath(paths.originalRoot, ref.path));
+    if ((ref === source.annotation_ref ? compactJsonHash(body, sha) : hash(body)) !== sha) fail('SNAPSHOT_SOURCE_HASH_MISMATCH');
+    mirrorPayload.set(ref.path.split('/').at(-1)!, body);
   }
-  try {
-    await rename(staging, destination);
-    await verifyDirectory(destination);
-  } catch (error) {
-    if (await exists(previous)) {
-      try {
-        await verifyDirectory(previous);
-        if (await exists(destination)) await rm(destination, { recursive: true, force: true });
-        await rename(previous, destination);
-      } catch { /* Leave the verified fallback in place for the next recovery attempt. */ }
+  for (const [name, body] of mirrorPayload) {
+    if (name.endsWith('.json')) mirrorPayload.set(name, Buffer.from(prettyJson(JSON.parse(Buffer.from(body).toString('utf8')))));
+  }
+  if (mirrorPayload.has('parse.json')) {
+    const parsed = JSON.parse(Buffer.from(mirrorPayload.get('parse.json')!).toString('utf8'));
+    parsed.files = parsed.files.map((file: SnapshotFile) => {
+      const body = mirrorPayload.get(file.path)!;
+      return { ...file, sha256: hash(body), bytes: body.byteLength };
+    });
+    mirrorPayload.set('parse.json', Buffer.from(prettyJson(parsed)));
+  }
+  const manifestBase = { schema_version: 1 as const, record_sha256: hash(recordBytes), ...labels,
+    ...(source.parse_attempt_id ? { parser_key: source.parser_key!, parse_attempt_id: source.parse_attempt_id, parse_started_at: startedAt!, content_sha256: source.content_sha256! } : {}) };
+  async function stage(name: string, content: Map<string, Uint8Array>) {
+    const directory = name === 'd' ? transaction.swaps[0]!.stage : transaction.swaps[1]!.stage; await mkdir(directory, { recursive: true });
+    const files: SnapshotFile[] = [];
+    for (const [path, body] of [...content].sort(([a],[b])=>a.localeCompare(b))) {
+      const target = resolveOwnedPath(directory, path); await mkdir(dirname(target), { recursive: true }); await writeFile(target, body, { flag: 'wx' });
+      files.push({ path, sha256: hash(body), bytes: body.byteLength });
     }
-    throw error;
+    const manifest: StructuredSnapshot = { ...manifestBase, ...(name === 'o' ? { json_format: 'pretty-2' as const } : {}), files };
+    await writeFile(join(directory, 'snapshot.json'), name === 'o' ? prettyJson(manifest) : canonicalJson(manifest)); await verifyDirectory(directory);
+    return { directory, manifest };
   }
-  await rm(previous, { recursive: true, force: true });
-  return { snapshot_path: destination, snapshot };
+  const machine = await stage('d', payload); const mirror = await stage('o', mirrorPayload);
+  const destination = resolveOwnedPath(paths.originalRoot, relative);
+  await commitPublication(paths, datasetId, sampleId, verifyDirectory);
+  return { snapshot_path: destination, snapshot: mirror.manifest };
 }
 
 function knowledgeId(value: string): void { if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) fail('KNOWLEDGE_SNAPSHOT_INVALID_ID'); }

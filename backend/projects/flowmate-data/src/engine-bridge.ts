@@ -173,7 +173,7 @@ export function deriveParseAttemptId(input: Pick<ParseReceipt, 'parserKey' | 'or
 
 export function createFlowmateMinerURuntime(paths: FlowmatePaths) {
   const workRoot = resolveOwnedPath(paths.dataRoot, 'work');
-  const datasetsRoot = resolveOwnedPath(paths.dataRoot, 'datasets');
+  const datasetsRoot = paths.dataRoot;
   const mineruConfigPath = resolveOwnedPath(paths.projectRoot, 'config/mineru.local.json');
   const configured = loadFlowmateMineruConfig(mineruConfigPath, paths.projectRoot, paths.dataRoot);
   const mineruConfig = { ...configured.mineru, tempRoot: workRoot, outputRoot: datasetsRoot };
@@ -191,18 +191,19 @@ export function createFlowmateMinerURuntime(paths: FlowmatePaths) {
 
 /** Verify real files, required structured artifacts and every local reference. */
 export async function verifyNormalizedOutput(normalizedDir: string): Promise<{ contentHash: string; files: ParsedFile[] }> {
-  const names = await realTree(normalizedDir);
+  const compact = await Bun.file(join(normalizedDir, 'content.md')).exists();
+  const names = (await realTree(normalizedDir)).filter(name => !compact || ['content.md', 'content.json', 'pages.json'].includes(name) || name.startsWith('assets/'));
   const files: ParsedFile[] = [];
   for (const name of names.filter(name => !name.endsWith('/'))) {
     const path = resolveOwnedPath(normalizedDir, name);
     const body = await readFile(path);
     files.push({ path: name, sha256: digest(body), bytes: body.byteLength });
   }
-  for (const required of ['full.md', 'content-list.json', 'pages.json', 'page-marked.txt']) {
+  for (const required of compact ? ['content.md', 'content.json', 'pages.json'] : ['full.md', 'content-list.json', 'pages.json', 'page-marked.txt']) {
     if (!files.some(file => file.path === required && file.bytes > 0)) throw new Error('NORMALIZED_ARTIFACT_MISSING');
   }
-  const markdown = await readFile(join(normalizedDir, 'full.md'), 'utf8');
-  const content: unknown = JSON.parse(await readFile(join(normalizedDir, 'content-list.json'), 'utf8'));
+  const markdown = await readFile(join(normalizedDir, compact ? 'content.md' : 'full.md'), 'utf8');
+  const content: unknown = JSON.parse(await readFile(join(normalizedDir, compact ? 'content.json' : 'content-list.json'), 'utf8'));
   const pages: unknown = JSON.parse(await readFile(join(normalizedDir, 'pages.json'), 'utf8'));
   if (!Array.isArray(content) || !Array.isArray(pages) || pages.length === 0) throw new Error('NORMALIZED_ARTIFACT_INVALID');
   const references = archiveReferences(markdown, content);
@@ -219,7 +220,7 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
   if (!isAbsolute(input.sourcePath) || !['.jpg', '.jpeg', '.png', '.pdf'].includes(extname(input.sourcePath).toLowerCase())) throw new Error('PARSE_SOURCE_INVALID');
   if (![config.tempRoot, config.outputRoot, input.outputDir, lockPath, processContext.safetyRoot].every(value => typeof value === 'string' && isAbsolute(value))) throw new Error('PARSE_PATH_INVALID');
   if (resolve(lockPath) !== resolve(config.tempRoot, 'run.lock') || resolve(processContext.safetyRoot) !== resolve(config.tempRoot, 'processes')
-    || resolve(config.tempRoot) !== resolve(dirname(config.outputRoot), 'work') || config.libraryId || config.libraryPaths) throw new Error('PARSE_PATH_INVALID');
+    || (resolve(config.tempRoot) !== resolve(config.outputRoot, 'work') && resolve(config.tempRoot) !== resolve(dirname(config.outputRoot), 'work')) || config.libraryId || config.libraryPaths) throw new Error('PARSE_PATH_INVALID');
   const outputParent = resolveOwnedPath(config.outputRoot, relative(config.outputRoot, input.outputDir));
   if (outputParent === resolve(config.outputRoot)) throw new Error('PARSE_PATH_INVALID');
   if (!/^[0-9a-f]{40}$/i.test(config.expectedCommit)) throw new Error('PARSER_SOURCE_SHA_INVALID');
@@ -228,7 +229,7 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
     const originalSha256 = digest(await readFile(input.sourcePath));
     const startedAt = (dependencies.now ?? (() => new Date()))().toISOString();
     const attemptId = deriveParseAttemptId({ parserKey, originalSha256, startedAt });
-    const outputDir = resolveOwnedPath(outputParent, attemptId);
+    const outputDir = resolveOwnedPath(outputParent, attemptId.slice(8, 24));
     await mkdir(outputParent, { recursive: true });
     try { await mkdir(outputDir); } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') throw new Error('ATTEMPT_EXISTS');
@@ -241,7 +242,7 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
     // runner's shallow path check.  Keep the external extraction workspace
     // short, then publish only the normalized, self-contained artifacts to
     // the immutable attempt directory.
-    const mineruOutputDir = resolveOwnedPath(config.tempRoot, `m/${attemptId}`);
+    const mineruOutputDir = resolveOwnedPath(config.tempRoot, `m/${crypto.randomUUID().slice(0, 8)}`);
     await mkdir(dirname(mineruOutputDir), { recursive: true });
     await mkdir(mineruOutputDir, { recursive: false });
     let session: ReturnType<typeof createMineruApiSession> | undefined;
@@ -261,6 +262,10 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
       catch (error) { if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error; }
       const normalizedDir = join(outputDir, 'normalized');
       await rename(normalized.normalizedDir, normalizedDir);
+      for (const name of ['content-list.json', 'pages.json']) {
+        const path = join(normalizedDir, name);
+        await writeFile(path, JSON.stringify(JSON.parse(await readFile(path, 'utf8')), null, 2) + '\n');
+      }
       const verified = await verifyNormalizedOutput(normalizedDir);
       if (verified.contentHash !== normalized.contentHash || digest(await readFile(input.sourcePath)) !== originalSha256) throw new Error('PARSE_HASH_MISMATCH');
       receipt = { sampleId: input.sampleId, parserKey, attemptId, originalSha256, startedAt, outputDir, normalizedDir, ...verified };

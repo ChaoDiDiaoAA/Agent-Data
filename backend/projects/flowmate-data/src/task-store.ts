@@ -1,3 +1,4 @@
+import { sampleDirectory, datasetTasks } from './layout.ts';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { resolveOwnedPath } from './config.ts';
@@ -53,11 +54,11 @@ function fail(code: string): never {
 }
 
 function recordsDirectory(paths: FlowmatePaths, datasetId: string): string {
-  return resolveOwnedPath(paths.dataRoot, `datasets/${datasetId}/samples`);
+  return resolveOwnedPath(paths.dataRoot, `${sampleDirectory(datasetId, "placeholder").split("/")[0]}`);
 }
 
 function recordPath(paths: FlowmatePaths, record: Pick<SampleRecord, 'dataset_id' | 'sample_id'>): string {
-  return resolveOwnedPath(paths.dataRoot, `datasets/${record.dataset_id}/samples/${record.sample_id}/record.json`);
+  return resolveOwnedPath(paths.dataRoot, `${sampleDirectory(record.dataset_id, record.sample_id)}/record.json`);
 }
 
 function recordFromJson(value: unknown): SampleRecord {
@@ -79,7 +80,7 @@ export async function loadSampleRecords(paths: FlowmatePaths, datasetId: string)
     throw error;
   }
   const records = await Promise.all(entries.filter(entry => entry.isDirectory()).map(async entry => {
-    const path = resolveOwnedPath(paths.dataRoot, `datasets/${datasetId}/samples/${entry.name}/record.json`);
+    const path = resolveOwnedPath(paths.dataRoot, `${sampleDirectory(datasetId, entry.name)}/record.json`);
     try { return recordFromJson(JSON.parse(await readFile(path, 'utf8'))); }
     catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return undefined;

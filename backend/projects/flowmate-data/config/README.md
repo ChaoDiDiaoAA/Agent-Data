@@ -247,12 +247,12 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | 参数 | 作用 | 当前值 |
 |---|---|---|
 | `source_id` | 样本来源登记 ID；程序读取 `sources/<source_id>.json` | `voxel51-invoice-ocr` |
-| `dataset_id` | 数据集分区名；写入 `D:\paper\Invoice\datasets\<dataset_id>`、`dataRoot` 和 Obsidian | `voxel51-hq-invoice-ocr` |
+| `dataset_id` | 数据集身份标识，保存在记录中；该来源的磁盘目录使用短名 `voxel51` | `voxel51-hq-invoice-ocr` |
 | `selection_id` | 固定选样清单 ID；第一次采集提交清单，之后按同一清单重试 | `initial-20` |
 | `acquire_limit` | 当前任务选取、下载并默认交给 `parse` 命令处理的有标注样本数 | `20` |
 | `publish_snapshot` | `labels map` 默认是否将标签结构化镜像发布到 `originalRoot` | `true` |
 
-`selection_id` 不是目录名数量，也不是随机种子。它对应 `dataRoot/datasets/<dataset_id>/selections/<selection_id>.json`，其中保存 revision、record ID、图片路径、标注定位和 selection hash。已提交 selection 存在时，重复采集不会重新选择另一批记录。
+`selection_id` 不是目录名数量，也不是随机种子。它对应 `dataRoot/tasks/voxel51/selections/<selection_id>.json`，其中保存 revision、record ID、图片路径、标注定位和 selection hash。已提交 selection 存在时，重复采集不会重新选择另一批记录。发票编号单独持久化，增加任务数量不会重排已有编号。
 
 ### `knowledge` 参数
 
@@ -286,16 +286,20 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | `verify` | `backup create` 完成后是否立即验证 manifest、文件集合和 SHA-256 |
 | `restore_smoke` | 是否恢复到 `backupRoot/.restore-smoke-<uuid>` 独立目录，验证文件、结构化镜像并重建 Obsidian 卡片；成功后清理临时目录 |
 
+正式备份保存在 `backupRoot/YYYYMMDD-HHMMSS/`（UTC 时间；同秒冲突顺延），目录中只有 `manifest.json` 和
+`data.zip`。清单记录归档及内部文件校验信息；`verify` 检查归档完整性，
+`restore_smoke` 实际恢复到独立目录并验证。`work` 中的临时文件和进程状态不进入备份。
+
 ## 文件三：`mineru.local.json`
 
 这个文件只描述 Flowmate 调用 MinerU 所需的本机运行环境，不描述来源和样本数量。
 它的 `mineru` 对象沿用共享 MinerU runner 的字段名称，但值由 Flowmate 单独维护；
 `tempRoot`、`outputRoot` 和论文库身份不会从文件读取，而是固定派生为
-`dataRoot/work`、`dataRoot/datasets`，并且不设置 `libraryId/libraryPaths`。
-MinerU API 下载结果先写入短路径 `dataRoot/work/m/<attempt-id>`，规整并校验后只将
-`normalized` 目录移动到 `dataRoot/datasets/.../parsed/<attempt-id>/`；成功或失败都会清理
-这个临时目录。这样可避免 MinerU 在 Windows 解压图片时因数据集、样本和 attempt 路径过深而触发
-`[Errno 2] No such file or directory`，同时保留最终解析结果和 receipt 的既有路径契约。
+`dataRoot/work` 和程序数据根，并且不设置 `libraryId/libraryPaths`。
+MinerU API 下载结果先写入 `dataRoot/work` 下的短临时目录，规整并校验后发布到
+`dataRoot/voxel51/000001/`。解析结果平铺保存为 `content.json`、`pages.json`、
+`content.md` 和必要附属文件，解析批次和校验信息保存在 JSON 中。
+`originalRoot/voxel51/000001/` 保存同一份解析副本和原件。失败不会将未校验的结果当作成功结果发布。
 
 ### 顶层参数
 

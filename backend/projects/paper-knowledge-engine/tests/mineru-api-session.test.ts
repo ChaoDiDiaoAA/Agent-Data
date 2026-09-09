@@ -10,6 +10,8 @@ import type { ManagedProcessResult, ManagedProcessSpec, ProcessContext, runManag
 import { createMineruApiSession } from '../src/mineru/mineru-api-session.ts';
 import { buildMinerUProcessEnv } from '../src/mineru/mineru-cli-runner.ts';
 import { makeRuntimeFixture } from './fixtures/runtime-fixtures.ts';
+import { existsSync } from 'node:fs';
+import { processJobName } from '../src/runtime/process.ts';
 
 type ManagedProcessOptions = Parameters<typeof runManagedProcess>[1];
 type ClientRunResult = MinerUExecution;
@@ -203,6 +205,41 @@ async function within<T>(promise: Promise<T>, ms = 1500): Promise<T> {
       timer = setTimeout(() => reject(new Error('fixture deadline exceeded')), ms);
     })]);
   } finally { clearTimeout(timer); }
+}
+
+for (const state of ['dead', 'live', 'invalid'] as const) {
+  test(`MinerU preflights ${state} client safety records before launching API`, async () => {
+    await withSessionFixture(async ({ config, processContext }) => {
+      const exited = Bun.spawn([process.execPath, '-e', ''], { stdout: 'ignore', stderr: 'ignore' });
+      await exited.exited;
+      const id = crypto.randomUUID();
+      const path = join(processContext.safetyRoot, 'active.json');
+      await mkdir(processContext.safetyRoot, { recursive: true });
+      await writeFile(path, state === 'invalid' ? '{broken' : JSON.stringify({
+        v: 1, id, jobName: processJobName(id), executable: process.execPath,
+        ownerPid: state === 'live' ? process.pid : exited.pid, pid: exited.pid,
+        startedAt: new Date().toISOString(), createdAt: new Date().toISOString(), cleanupState: 'running',
+      }));
+      const processes = createManagedProcessDouble({ onLaunch(launch) {
+        launch.signal?.addEventListener('abort', () => launch.resolve({ reason: 'cancelled' }), { once: true });
+      } });
+      const session = createMineruApiSession({ config, processContext, dependencies: {
+        checkPortAvailable: async () => { assert.equal(existsSync(path), false); },
+        fetchHealth: async () => healthyPayload(config), managedProcess: processes.managedProcess,
+      } });
+      try {
+        if (state === 'dead') {
+          await session.ensureReady();
+          assert.equal(existsSync(path), false);
+          assert.equal(processes.launches.length, 1);
+        } else {
+          await assert.rejects(session.ensureReady(), { code: 'PROCESS_CLEANUP_UNCONFIRMED' });
+          assert.equal(existsSync(path), true);
+          assert.equal(processes.launches.length, 0);
+        }
+      } finally { await session.dispose(); }
+    });
+  });
 }
 
 test('MinerU sessions sharing one installation serialize the model resource', async () => {

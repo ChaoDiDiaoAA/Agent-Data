@@ -1,3 +1,4 @@
+import { sampleDirectory, datasetTasks, datasetAlias } from '../src/layout.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -30,7 +31,7 @@ async function writeSelection(paths: FlowmatePaths, datasetId: string, selection
     ...overrides,
   };
   const { selection_hash: suppliedHash, ...unsigned } = content;
-  await Bun.write(join(paths.dataRoot, 'datasets', datasetId, 'selections', `${selectionId}.json`), canonicalJson({ ...unsigned, selection_hash: typeof suppliedHash === 'string' ? suppliedHash : hashCanonical(unsigned) }));
+  await Bun.write(join(paths.dataRoot, datasetTasks(datasetId), 'selections', `${selectionId}.json`), canonicalJson({ ...unsigned, selection_hash: typeof suppliedHash === 'string' ? suppliedHash : hashCanonical(unsigned) }));
 }
 
 test('maps only known Voxel51 annotation fields and preserves decimal strings and source pointers', () => {
@@ -60,24 +61,24 @@ test('writes a versioned derived label and updates only the data-root machine re
   const configuredPaths = await paths();
   const datasetId = 'voxel51-hq-invoice-ocr';
   const sampleId = 'sample-a';
-  const annotationPath = join(configuredPaths.originalRoot, 'datasets', datasetId, 'samples', sampleId, 'annotation.json');
+  const annotationPath = join(configuredPaths.originalRoot, sampleDirectory(datasetId, sampleId), 'annotation.json');
   await Bun.write(annotationPath, JSON.stringify(fixture.samples[0]));
   const saved = await saveSampleRecord(configuredPaths, {
     schema_version: 1, sample_id: sampleId, dataset_id: datasetId, dataset_revision: 'a'.repeat(40), source_record_id: fixture.samples[0]!._id.$oid,
     origin_kind: 'public_redacted', document_kind: 'invoice', language: 'en', layout_group: null,
-    original_ref: { root: 'original', path: `datasets/${datasetId}/samples/${sampleId}/original.jpg` }, original_sha256: 'a'.repeat(64),
-    annotation_ref: { root: 'original', path: `datasets/${datasetId}/samples/${sampleId}/annotation.json` }, annotation_sha256: await sha256File(annotationPath),
+    original_ref: { root: 'original', path: `${sampleDirectory(datasetId, sampleId)}/original.jpg` }, original_sha256: 'a'.repeat(64),
+    annotation_ref: { root: 'original', path: `${sampleDirectory(datasetId, sampleId)}/annotation.json` }, annotation_sha256: await sha256File(annotationPath),
     source_observations: [], label_kind: 'none', quality_status: 'not_checked', processing_status: 'downloaded', allowed_uses: ['development'], created_at: '', updated_at: '',
   });
   await writeSelection(configuredPaths, datasetId, 'initial-20', [saved]);
 
   const result = await mapVoxel51Selection({ paths: configuredPaths, datasetId, selectionId: 'initial-20' });
   expect(result).toMatchObject({ mapped: 1, provided: expect.any(Number), missing: expect.any(Number), ambiguous: 1 });
-  const labelPath = join(configuredPaths.dataRoot, 'datasets', datasetId, 'samples', sampleId, 'label.json');
+  const labelPath = join(configuredPaths.dataRoot, sampleDirectory(datasetId, sampleId), 'fields.json');
   const label = JSON.parse(await readFile(labelPath, 'utf8'));
   expect(label.mapping_version).toBe('voxel51/1');
-  const record = JSON.parse(await readFile(join(configuredPaths.dataRoot, 'datasets', datasetId, 'samples', sampleId, 'record.json'), 'utf8'));
-  expect(record).toMatchObject({ label_ref: { root: 'data', path: `datasets/${datasetId}/samples/${sampleId}/label.json` }, label_sha256: await sha256File(labelPath), label_kind: 'dataset_annotation', mapping_version: 'voxel51/1' });
+  const record = JSON.parse(await readFile(join(configuredPaths.dataRoot, sampleDirectory(datasetId, sampleId), 'record.json'), 'utf8'));
+  expect(record).toMatchObject({ label_ref: { root: 'data', path: `${sampleDirectory(datasetId, sampleId)}/fields.json` }, label_sha256: await sha256File(labelPath), label_kind: 'dataset_annotation', mapping_version: 'voxel51/1' });
   expect(JSON.parse(await readFile(annotationPath, 'utf8'))).toEqual(fixture.samples[0]);
   await writeFile(labelPath, JSON.stringify({ altered: true }));
   expect(await Bun.file(annotationPath).text()).toContain('TEST-A');
@@ -87,13 +88,13 @@ test('fails closed when the committed selection is missing, tampered, or does no
   const configuredPaths = await paths();
   const datasetId = 'voxel51-hq-invoice-ocr';
   const sampleId = 'sample-selection';
-  const annotationPath = join(configuredPaths.originalRoot, 'datasets', datasetId, 'samples', sampleId, 'annotation.json');
+  const annotationPath = join(configuredPaths.originalRoot, sampleDirectory(datasetId, sampleId), 'annotation.json');
   await Bun.write(annotationPath, JSON.stringify(fixture.samples[0]));
   const saved = await saveSampleRecord(configuredPaths, {
     schema_version: 1, sample_id: sampleId, dataset_id: datasetId, dataset_revision: 'a'.repeat(40), source_record_id: fixture.samples[0]!._id.$oid,
     origin_kind: 'public_redacted', document_kind: 'invoice', language: 'en', layout_group: null,
     original_ref: { root: 'original', path: 'original.jpg' }, original_sha256: 'a'.repeat(64),
-    annotation_ref: { root: 'original', path: `datasets/${datasetId}/samples/${sampleId}/annotation.json` }, annotation_sha256: await sha256File(annotationPath),
+    annotation_ref: { root: 'original', path: `${sampleDirectory(datasetId, sampleId)}/annotation.json` }, annotation_sha256: await sha256File(annotationPath),
     source_observations: [], label_kind: 'none', quality_status: 'not_checked', processing_status: 'downloaded', allowed_uses: ['development'], created_at: '', updated_at: '',
   });
   await expect(mapVoxel51Selection({ paths: configuredPaths, datasetId, selectionId: 'initial-20' })).rejects.toThrow('VOXEL51_SELECTION_MISSING');
@@ -106,7 +107,7 @@ test('fails closed when the committed selection is missing, tampered, or does no
   await writeSelection(configuredPaths, datasetId, 'initial-20', [saved], { source_id: 'other-source' });
   await expect(mapVoxel51Selection({ paths: configuredPaths, datasetId, selectionId: 'initial-20' })).rejects.toThrow('VOXEL51_SELECTION_INVALID');
   await writeSelection(configuredPaths, datasetId, 'initial-20', [saved]);
-  const selectionPath = join(configuredPaths.dataRoot, 'datasets', datasetId, 'selections', 'initial-20.json');
+  const selectionPath = join(configuredPaths.dataRoot, datasetTasks(datasetId), 'selections', 'initial-20.json');
   const selection = JSON.parse(await Bun.file(selectionPath).text()) as { records: unknown[]; selection_hash: string } & Record<string, unknown>;
   const { selection_hash: _selectionHash, ...duplicate } = selection;
   const duplicateRecords = [...selection.records, selection.records[0]!];
@@ -118,33 +119,35 @@ test('maps exactly the unique sample IDs in the committed selection', async () =
   const configuredPaths = await paths();
   const datasetId = 'voxel51-hq-invoice-ocr';
   const saved = await Promise.all(['selected', 'unselected'].map(async (sampleId, index) => {
-    const annotationPath = join(configuredPaths.originalRoot, 'datasets', datasetId, 'samples', sampleId, 'annotation.json');
+    const annotationPath = join(configuredPaths.originalRoot, sampleDirectory(datasetId, sampleId), 'annotation.json');
     await Bun.write(annotationPath, JSON.stringify(fixture.samples[index]!));
     return saveSampleRecord(configuredPaths, {
       schema_version: 1, sample_id: sampleId, dataset_id: datasetId, dataset_revision: 'a'.repeat(40), source_record_id: fixture.samples[index]!._id.$oid,
       origin_kind: 'public_redacted', document_kind: 'invoice', language: 'en', layout_group: null,
       original_ref: { root: 'original', path: `original-${index}.jpg` }, original_sha256: `${index}`.repeat(64),
-      annotation_ref: { root: 'original', path: `datasets/${datasetId}/samples/${sampleId}/annotation.json` }, annotation_sha256: await sha256File(annotationPath),
+      annotation_ref: { root: 'original', path: `${sampleDirectory(datasetId, sampleId)}/annotation.json` }, annotation_sha256: await sha256File(annotationPath),
       source_observations: [], label_kind: 'none', quality_status: 'not_checked', processing_status: 'downloaded', allowed_uses: ['development'], created_at: '', updated_at: '',
     });
   }));
   await writeSelection(configuredPaths, datasetId, 'initial-20', [saved[0]!]);
   expect(await mapVoxel51Selection({ paths: configuredPaths, datasetId, selectionId: 'initial-20' })).toMatchObject({ mapped: 1, sample_ids: ['selected'] });
-  expect(await Bun.file(join(configuredPaths.dataRoot, 'datasets', datasetId, 'samples', 'selected', 'label.json')).exists()).toBe(true);
-  expect(await Bun.file(join(configuredPaths.dataRoot, 'datasets', datasetId, 'samples', 'unselected', 'label.json')).exists()).toBe(false);
+  expect(await Bun.file(join(configuredPaths.dataRoot, datasetAlias(datasetId), 'selected', 'fields.json')).exists()).toBe(true);
+  expect(await Bun.file(join(configuredPaths.dataRoot, datasetAlias(datasetId), 'unselected', 'fields.json')).exists()).toBe(false);
 });
 
 test('CLI maps the selected Voxel51 labels and publishes only structured snapshots', async () => {
   const configuredPaths = await paths();
   const datasetId = 'voxel51-hq-invoice-ocr';
   const sampleId = 'sample-cli';
-  const annotationPath = join(configuredPaths.originalRoot, 'datasets', datasetId, 'samples', sampleId, 'annotation.json');
+  const annotationPath = join(configuredPaths.originalRoot, sampleDirectory(datasetId, sampleId), 'annotation.json');
   await Bun.write(annotationPath, JSON.stringify(fixture.samples[1]));
+  const originalPath = join(configuredPaths.originalRoot, sampleDirectory(datasetId, sampleId), 'original.jpg');
+  await Bun.write(originalPath, Buffer.from([0xff, 0xd8, 0xff, 1]));
   const saved = await saveSampleRecord(configuredPaths, {
     schema_version: 1, sample_id: sampleId, dataset_id: datasetId, dataset_revision: 'a'.repeat(40), source_record_id: fixture.samples[1]!._id.$oid,
     origin_kind: 'public_redacted', document_kind: 'invoice', language: 'en', layout_group: null,
-    original_ref: { root: 'original', path: `datasets/${datasetId}/samples/${sampleId}/original.jpg` }, original_sha256: 'a'.repeat(64),
-    annotation_ref: { root: 'original', path: `datasets/${datasetId}/samples/${sampleId}/annotation.json` }, annotation_sha256: await sha256File(annotationPath),
+    original_ref: { root: 'original', path: `${sampleDirectory(datasetId, sampleId)}/original.jpg` }, original_sha256: await sha256File(originalPath),
+    annotation_ref: { root: 'original', path: `${sampleDirectory(datasetId, sampleId)}/annotation.json` }, annotation_sha256: await sha256File(annotationPath),
     source_observations: [], label_kind: 'none', quality_status: 'not_checked', processing_status: 'downloaded', allowed_uses: ['development'], created_at: '', updated_at: '',
   });
   await writeSelection(configuredPaths, datasetId, 'initial-20', [saved]);
@@ -153,5 +156,5 @@ test('CLI maps the selected Voxel51 labels and publishes only structured snapsho
   const output: unknown[] = [];
   expect(await runCli(['labels', 'map', datasetId, '--selection', 'initial-20', '--publish-snapshot', '--paths', pathsFile, '--config', workbenchPath], { print: value => output.push(value) })).toBe(0);
   expect(output[0]).toMatchObject({ mapped: 1, snapshots: 1, provided: expect.any(Number), missing: expect.any(Number), ambiguous: 1 });
-  expect(await Bun.file(join(configuredPaths.originalRoot, 'datasets', datasetId, 'samples', sampleId, 'structured', 'snapshot.json')).exists()).toBe(true);
+  expect(await Bun.file(join(configuredPaths.originalRoot, sampleDirectory(datasetId, sampleId), 'snapshot.json')).exists()).toBe(true);
 });

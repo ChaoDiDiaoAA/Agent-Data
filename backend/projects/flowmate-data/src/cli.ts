@@ -1,3 +1,5 @@
+import { compactJsonFileHash } from './readable-json.ts';
+import { sampleDirectory, datasetTasks } from './layout.ts';
 import { extname, join } from 'node:path';
 import { readFile, rm } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
@@ -53,16 +55,16 @@ async function verifyHash(path: string, expected: string, code: string): Promise
 async function verifySelectedData(paths: ReturnType<typeof loadPaths>, records: Awaited<ReturnType<typeof loadReleaseRecords>>['records']): Promise<{ parsedImage: boolean }> {
   let parsedImage = false;
   for (const record of records) {
-    const recordPath = resolveOwnedPath(paths.dataRoot, `datasets/${record.dataset_id}/samples/${record.sample_id}/record.json`);
+    const recordPath = resolveOwnedPath(paths.dataRoot, `${sampleDirectory(record.dataset_id, record.sample_id)}/record.json`);
     const recordBytes = await readFile(recordPath);
     if (recordBytes.toString('utf8') !== canonicalJson(record) || hashCanonical(record) !== await sha256File(recordPath)) throw new Error('VERIFY_RECORD_HASH_INVALID');
     const originalPath = resolveOwnedPath(paths.originalRoot, record.original_ref.path);
     await verifyHash(originalPath, record.original_sha256, 'VERIFY_ORIGINAL_HASH_INVALID');
     if (!record.annotation_ref || !record.annotation_sha256) throw new Error('VERIFY_ANNOTATION_MISSING');
-    await verifyHash(resolveOwnedPath(paths.originalRoot, record.annotation_ref.path), record.annotation_sha256, 'VERIFY_ANNOTATION_HASH_INVALID');
+    if (await compactJsonFileHash(resolveOwnedPath(paths.originalRoot, record.annotation_ref.path), record.annotation_sha256) !== record.annotation_sha256) throw new Error('VERIFY_ANNOTATION_HASH_INVALID');
     if (record.label_kind === 'none' || !record.label_ref || !record.label_sha256) throw new Error('VERIFY_LABEL_MISSING');
     await verifyHash(resolveOwnedPath(paths.dataRoot, record.label_ref.path), record.label_sha256, 'VERIFY_LABEL_HASH_INVALID');
-    const snapshotPath = resolveOwnedPath(paths.originalRoot, `datasets/${record.dataset_id}/samples/${record.sample_id}/structured`);
+    const snapshotPath = resolveOwnedPath(paths.originalRoot, `${sampleDirectory(record.dataset_id, record.sample_id)}`);
     const snapshot = await verifyStructuredSnapshot(snapshotPath);
     if (snapshot.record_sha256 !== hashCanonical(record)) throw new Error('VERIFY_SNAPSHOT_RECORD_MISMATCH');
     if (record.derived_ref && record.content_sha256) {
@@ -381,7 +383,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
   }
   if (verifyAction) {
     return withRunLock(resolveOwnedPath(paths.dataRoot, 'work/run.lock'), async () => {
-      const selected = await loadReleaseRecords(paths, selectionId);
+      const selected = await loadReleaseRecords(paths, selectionId, { lockHeld: true });
       const release = await verifyRelease(resolveReleaseVersion(paths, flags.get('--release') ?? releaseVersion));
       const selectedEntries = selected.records.map(record => ({ dataset_id: record.dataset_id, sample_id: record.sample_id, source_record_id: record.source_record_id, dataset_revision: record.dataset_revision }))
         .sort((left, right) => `${left.dataset_id}/${left.sample_id}/${left.source_record_id}`.localeCompare(`${right.dataset_id}/${right.sample_id}/${right.source_record_id}`));
@@ -421,11 +423,11 @@ export async function runCli(arguments_: string[], options: { transport?: Source
         catch (error) {
           if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
         }
-        for (const name of snapshotNames.filter(value => value.startsWith('datasets/') && value.endsWith('/structured/snapshot.json'))) {
+        for (const name of snapshotNames.filter(value => !value.startsWith('knowledge/') && value.endsWith('/snapshot.json'))) {
           await verifyStructuredSnapshot(resolveOwnedPath(destinationRoots.originalRoot, name.slice(0, -'/snapshot.json'.length)));
         }
         const plan = await rebuildCatalog(restoredPaths);
-        if (!(await Bun.file(resolveOwnedPath(destinationRoots.vaultRoot, '01_Index/Samples.md')).exists())) throw new Error('BACKUP_RESTORE_CATALOG_MISSING');
+        if (!(await Bun.file(resolveOwnedPath(destinationRoots.vaultRoot, '01_总览.md')).exists())) throw new Error('BACKUP_RESTORE_CATALOG_MISSING');
         restored = true;
       } finally {
         await rm(smokeRoot, { recursive: true, force: true });

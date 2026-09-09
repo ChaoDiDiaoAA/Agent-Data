@@ -330,6 +330,9 @@ export function createMineruApiSession(options: {
     try {
       resourceLease = await acquireMineruResourceLease(config, `mineru-api-${config.apiPort}`);
       await ensureCleanupRecordClear(apiSafetyRoot);
+      // Interrupted clients have their own record, separate from the API server.
+      // Recover only after the existing inspector confirms the old process tree exited.
+      await ensureCleanupRecordClear(processContext.safetyRoot);
       try {
         await dependencies.checkPortAvailable('127.0.0.1', config.apiPort);
       } catch (error) {

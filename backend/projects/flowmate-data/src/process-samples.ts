@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { recoverPublications } from './publication.ts';
+import { sampleDirectory, datasetTasks } from './layout.ts';
+import { readFile, rm } from 'node:fs/promises';
 import { extname, relative } from 'node:path';
 import { resolveOwnedPath } from './config.ts';
 import type { FlowmatePaths } from './contracts.ts';
@@ -10,12 +12,14 @@ import { loadSampleRecords, saveSampleRecord, transitionSample, type SampleRecor
 
 /** Also usable by public-file/knowledge acquisition once its record is committed. */
 export async function processSample(input: { paths: FlowmatePaths; record: SampleRecord }, dependencies: ParseDependencies = {}): Promise<ParseReceipt> {
+  if (!dependencies.lockHeld) return withRunLock(resolveOwnedPath(input.paths.dataRoot, 'work/run.lock'), () => processSample(input, { ...dependencies, lockHeld: true }), { jobId: 'flowmate-process' });
   const { paths, record } = input;
+  await recoverPublications(paths);
   if (record.original_ref.root !== 'original') throw new Error('PARSE_SOURCE_INVALID');
   const sourcePath = resolveOwnedPath(paths.originalRoot, record.original_ref.path);
   if (await sha256File(sourcePath) !== record.original_sha256) throw new Error('PARSE_SOURCE_HASH_MISMATCH');
   const runtime = createFlowmateMinerURuntime(paths);
-  const outputDir = resolveOwnedPath(paths.dataRoot, `datasets/${record.dataset_id}/samples/${record.sample_id}/parsed`);
+  const outputDir = resolveOwnedPath(paths.dataRoot, `work/p/${record.sample_id}`);
   return parseInvoice({ ...runtime, sampleId: record.sample_id, sourcePath, outputDir }, {
     ...dependencies,
     async onParsed(receipt) {
@@ -25,10 +29,11 @@ export async function processSample(input: { paths: FlowmatePaths; record: Sampl
       const current = (await loadSampleRecords(paths, record.dataset_id)).find(value => value.sample_id === record.sample_id);
       if (!current || current.original_sha256 !== receipt.originalSha256) throw new Error('PARSE_SOURCE_HASH_MISMATCH');
       const status = current.processing_status === 'downloaded' || current.processing_status === 'failed' ? transitionSample(current, 'processed') : current;
-      await saveSampleRecord(paths, { ...status, parser_key: receipt.parserKey, parse_attempt_id: receipt.attemptId, content_sha256: receipt.contentHash,
-        derived_ref: { root: 'data', path: relative(paths.dataRoot, receipt.normalizedDir).replaceAll('\\', '/') } });
-      await publishStructuredSnapshot({ paths, datasetId: record.dataset_id, sampleId: record.sample_id, parsed: receipt, lockHeld: true });
+      const candidate = { ...status, parser_key: receipt.parserKey, parse_attempt_id: receipt.attemptId, content_sha256: receipt.contentHash,
+        derived_ref: { root: 'data' as const, path: sampleDirectory(record.dataset_id, record.sample_id) } };
+      await publishStructuredSnapshot({ paths, datasetId: record.dataset_id, sampleId: record.sample_id, parsed: receipt, record: candidate, lockHeld: true });
       await dependencies.onParsed?.(receipt);
+      await rm(receipt.outputDir, { recursive: true, force: true });
     },
   });
 }
@@ -41,8 +46,9 @@ async function parseSelectionUnlocked(input: { paths: FlowmatePaths; selectionId
   const { paths, selectionId, limit } = input;
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(selectionId) || !Number.isSafeInteger(limit) || limit <= 0) throw new Error('PARSE_SELECTION_INVALID');
   const datasetId = 'voxel51-hq-invoice-ocr';
+  await recoverPublications(paths);
   const records = await loadSampleRecords(paths, datasetId);
-  const selected = committedSelection(await readFile(resolveOwnedPath(paths.dataRoot, `datasets/${datasetId}/selections/${selectionId}.json`)), datasetId, selectionId, records);
+  const selected = committedSelection(await readFile(resolveOwnedPath(paths.dataRoot, `${datasetTasks(datasetId)}/selections/${selectionId}.json`)), datasetId, selectionId, records);
   const images = selected.filter(record => ['.jpg', '.jpeg', '.png'].includes(extname(record.original_ref.path).toLowerCase())).slice(0, limit);
   if (images.length === 0) throw new Error('PARSE_SELECTION_NO_IMAGE');
   const receipts: ParseReceipt[] = [];

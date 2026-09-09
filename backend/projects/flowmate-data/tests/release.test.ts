@@ -21,7 +21,7 @@ const sourceConfig: SourceConfig = {
 };
 
 function sample(revision = 'rev-1'): SampleRecord {
-  return { schema_version: 1, sample_id: 'sample-a', dataset_id: 'voxel51-hq-invoice-ocr', dataset_revision: revision, source_record_id: '507f1f77bcf86cd799439011', origin_kind: 'public_redacted', document_kind: 'invoice', language: 'en', layout_group: 'vat', original_ref: { root: 'original', path: 'datasets/voxel51-hq-invoice-ocr/samples/sample-a/original.jpg' }, original_sha256: '0'.repeat(64), annotation_ref: { root: 'original', path: 'datasets/voxel51-hq-invoice-ocr/samples/sample-a/annotation.json' }, annotation_sha256: '1'.repeat(64), source_observations: ['public source'], label_ref: { root: 'data', path: 'datasets/voxel51-hq-invoice-ocr/samples/sample-a/label.json' }, label_sha256: '2'.repeat(64), label_kind: 'dataset_annotation', mapping_version: 'voxel51/1', quality_status: 'usable', processing_status: 'processed', allowed_uses: ['development'], created_at: '2026-09-08T00:00:00.000Z', updated_at: '2026-09-08T00:00:00.000Z' };
+  return { schema_version: 1, sample_id: 'sample-a', dataset_id: 'voxel51-hq-invoice-ocr', dataset_revision: revision, source_record_id: '507f1f77bcf86cd799439011', origin_kind: 'public_redacted', document_kind: 'invoice', language: 'en', layout_group: 'vat', original_ref: { root: 'original', path: 'voxel51/sample-a/original.jpg' }, original_sha256: '0'.repeat(64), annotation_ref: { root: 'original', path: 'voxel51/sample-a/annotation.json' }, annotation_sha256: '1'.repeat(64), source_observations: ['public source'], label_ref: { root: 'data', path: 'voxel51/sample-a/label.json' }, label_sha256: '2'.repeat(64), label_kind: 'dataset_annotation', mapping_version: 'voxel51/1', quality_status: 'usable', processing_status: 'processed', allowed_uses: ['development'], created_at: '2026-09-08T00:00:00.000Z', updated_at: '2026-09-08T00:00:00.000Z' };
 }
 
 async function seed(paths: FlowmatePaths, record = sample()): Promise<SampleRecord> {
@@ -29,8 +29,8 @@ async function seed(paths: FlowmatePaths, record = sample()): Promise<SampleReco
   const annotation = join(paths.originalRoot, record.annotation_ref!.path);
   const label = join(paths.dataRoot, record.label_ref!.path);
   await mkdir(join(paths.dataRoot, 'datasets/voxel51-hq-invoice-ocr'), { recursive: true });
-  await mkdir(join(paths.originalRoot, 'datasets/voxel51-hq-invoice-ocr/samples/sample-a'), { recursive: true });
-  await mkdir(join(paths.dataRoot, 'datasets/voxel51-hq-invoice-ocr/samples/sample-a'), { recursive: true });
+  await mkdir(join(paths.originalRoot, 'voxel51/sample-a'), { recursive: true });
+  await mkdir(join(paths.dataRoot, 'voxel51/sample-a'), { recursive: true });
   await writeFile(original, Buffer.from('original')); // hashes are replaced below after bytes are written.
   await writeFile(annotation, canonicalJson({ source_record_id: record.source_record_id }));
   await writeFile(label, canonicalJson({ labels: ['invoice'] }));
@@ -39,7 +39,7 @@ async function seed(paths: FlowmatePaths, record = sample()): Promise<SampleReco
   const originalBytes = await readFile(original); const annotationBytes = await readFile(annotation); const labelBytes = await readFile(label);
   const prepared = { ...record, original_sha256: hash(originalBytes), annotation_sha256: hash(annotationBytes), label_sha256: hash(labelBytes) };
   const saved = await saveSampleRecord(paths, prepared);
-  await writeFile(join(paths.dataRoot, 'datasets/voxel51-hq-invoice-ocr/dataset.json'), canonicalJson({ dataset_id: prepared.dataset_id, redistribution: sourceConfig.redistribution }));
+  await writeFile(join(paths.dataRoot, 'voxel51/dataset.json'), canonicalJson({ dataset_id: prepared.dataset_id, redistribution: sourceConfig.redistribution }));
   return saved;
 }
 
@@ -48,7 +48,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 test('builds a portable index release and verifies it after copying', async () => {
   const paths = await fixturePaths();
   const record = await seed(paths);
-  const result = await buildRelease({ paths, version: 'public-invoice-p0-v1', records: [record], includeOriginals: false, selectionId: 'initial-20', selectionHash: 'a'.repeat(64), sourceConfig });
+  const result = await buildRelease({ paths, version: 'public-invoice-p0-v1', records: [record], includeOriginals: false, sourceConfig });
   expect(result.manifest.schema).toBe('flowmate-public/1');
   expect(result.manifest.omitted_originals).toHaveLength(1);
   expect(JSON.stringify(result.manifest)).not.toMatch(/(?:^|["'])[A-Za-z]:[\\/]/);
@@ -59,7 +59,7 @@ test('builds a portable index release and verifies it after copying', async () =
   expect(portable.annotation_ref).toBeUndefined();
   expect(portable.label_ref).toEqual({ root: 'release', path: 'payload/samples/sample-a/label.json' });
   const verified = await verifyRelease(result.path);
-  expect(verified.manifest.selection_id).toBe('initial-20');
+  expect(verified.manifest.selection_id).toBeUndefined();
   const copied = join(paths.backupRoot, 'copied-release');
   await mkdir(paths.backupRoot, { recursive: true });
   await cp(result.path, copied, { recursive: true });

@@ -15,5 +15,8 @@
     "@types/bun": "1.4.0",
     "@types/node": "26.4.0",
     "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
   }
 }

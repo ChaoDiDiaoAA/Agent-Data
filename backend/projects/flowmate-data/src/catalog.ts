@@ -1,4 +1,6 @@
-import { lstat, link as hardLink, mkdir, readFile, readdir, realpath, rename, unlink, writeFile, rm } from 'node:fs/promises';
+import { recoverPublications } from './publication.ts';
+import { datasetAlias, sampleDirectory } from './layout.ts';
+import { lstat, link as hardLink, mkdir, readFile, readdir, realpath, rename, rmdir, unlink, writeFile, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, win32, posix } from 'node:path';
 import { resolveOwnedPath } from './config.ts';
 import type { FlowmatePaths } from './contracts.ts';
@@ -21,7 +23,7 @@ function fileUrl(path: string): string { return encodeURI(`file:///${path.replac
 function link(label: string, path: string): string { return `[${label}](${fileUrl(path)})`; }
 function ref(paths: FlowmatePaths, value: FileRef): string { return join(value.root === 'original' ? paths.originalRoot : paths.dataRoot, value.path); }
 function internal(path: string): string { return `[[${path.replaceAll('\\', '/').replace(/\.md$/, '')}]]`; }
-function samplePath(record: SampleRecord): string { return `03_InvoiceSamples/${catalogSegment(record.dataset_id)}/${catalogSegment(record.sample_id)}.md`; }
+function samplePath(record: SampleRecord): string { return `03_发票/${catalogSegment(datasetAlias(record.dataset_id))}/${catalogSegment(record.sample_id)}.md`; }
 function sampleParseStatus(record: SampleRecord, withdrawn: boolean): string { return withdrawn ? 'withdrawn' : record.derived_ref ? 'parsed' : record.processing_status === 'failed' ? 'failed' : 'not_parsed'; }
 
 function fail(code: string): never { throw new Error(code); }
@@ -126,9 +128,9 @@ async function releases(paths: FlowmatePaths): Promise<Array<{ version: string; 
 }
 
 function sampleCard(paths: FlowmatePaths, record: SampleRecord, withdrawn: boolean): CatalogFile {
-  const datasetId = catalogSegment(record.dataset_id);
+  const datasetId = catalogSegment(datasetAlias(record.dataset_id));
   const sampleId = catalogSegment(record.sample_id);
-  const mirror = join(paths.originalRoot, 'datasets', datasetId, 'samples', sampleId, 'structured');
+  const mirror = join(paths.originalRoot, datasetId, sampleId);
   const lines = [frontmatter({ dataset: record.dataset_id, revision: record.dataset_revision, origin: record.origin_kind, document: record.document_kind, language: record.language, label: record.label_kind, parse: sampleParseStatus(record, withdrawn), status: withdrawn ? 'withdrawn' : 'active', license: record.allowed_uses.join(',') }), `# ${record.sample_id}`, '', `- ${link('Original', ref(paths, record.original_ref))}`];
   if (record.annotation_ref) lines.push(`- ${link('Original annotation', ref(paths, record.annotation_ref))}`);
   else lines.push('- Original annotation: unavailable');
@@ -138,7 +140,7 @@ function sampleCard(paths: FlowmatePaths, record: SampleRecord, withdrawn: boole
   if (record.derived_ref) lines.push(`- ${link('Parse result', ref(paths, record.derived_ref))}`);
   else lines.push(`- Parse result: unavailable (${sampleParseStatus(record, withdrawn)})`);
   lines.push(`- Parse error: ${record.processing_status === 'failed' ? 'recorded failure' : 'none recorded'}`, '');
-  return { path: `03_InvoiceSamples/${datasetId}/${sampleId}.md`, content: lines.join('\n') };
+  return { path: `03_发票/${datasetId}/${sampleId}.md`, content: lines.join('\n') };
 }
 
 function knowledgeCard(paths: FlowmatePaths, record: KnowledgeRecord): CatalogFile {
@@ -157,12 +159,9 @@ function knowledgeCard(paths: FlowmatePaths, record: KnowledgeRecord): CatalogFi
   return { path: `04_InvoiceKnowledge/${sourceId}/${name}.md`, content: lines.join('\n') };
 }
 
-function index(name: string, entries: string[]): CatalogFile {
-  return { path: `01_Index/${name}.md`, content: [frontmatter({ type: 'index' }), `# ${name}`, '', ...entries.map(entry => `- ${entry}`), ''].join('\n') };
-}
-
 export async function buildCatalog(paths: FlowmatePaths): Promise<CatalogPlan> {
-  const datasetIds = (await directories(join(paths.dataRoot, 'datasets'))).filter(id => id !== 'public-invoice-knowledge');
+  const aliases = (await directories(paths.dataRoot)).filter(id => !['datasets', 'tasks', 'work', 'releases'].includes(id));
+  const datasetIds = aliases.map(id => id === 'voxel51' ? 'voxel51-hq-invoice-ocr' : id);
   const samples = (await Promise.all(datasetIds.map(dataset => loadSampleRecords(paths, dataset)))).flat().sort((left, right) => `${left.dataset_id}/${left.sample_id}`.localeCompare(`${right.dataset_id}/${right.sample_id}`));
   const knowledge = await knowledgeRecords(paths);
   const withdrawals = await loadWithdrawalList(withdrawalListPath(paths.dataRoot));
@@ -171,17 +170,11 @@ export async function buildCatalog(paths: FlowmatePaths): Promise<CatalogPlan> {
     ...samples.map(record => sampleCard(paths, record, withdrawals.entries.some(entry => entry.dataset_id === record.dataset_id && entry.sample_id === record.sample_id
       && (entry.source_record_id === undefined || entry.source_record_id === record.source_record_id)))),
     ...knowledge.map(record => knowledgeCard(paths, record)),
-    ...datasetIds.map(dataset => ({ path: `02_Sources/${catalogSegment(dataset)}.md`, content: [frontmatter({ source: dataset, type: 'dataset' }), `# ${dataset}`, '', ...samples.filter(record => record.dataset_id === dataset).map(record => `- ${internal(samplePath(record))}`), ''].join('\n') })),
-    ...[...new Set(knowledge.map(record => record.source_id))].sort().map(source => ({ path: `02_Sources/${catalogSegment(source)}.md`, content: [frontmatter({ source, type: 'knowledge' }), `# ${source}`, '', ...knowledge.filter(record => record.source_id === source).map(record => `- ${internal(`04_InvoiceKnowledge/${catalogSegment(source)}/${catalogSegment(record.file_id)}--${catalogSegment(record.version)}.md`)}`), ''].join('\n') })),
-    ...releaseRecords.map(release => ({ path: `05_Releases/${catalogSegment(release.version)}.md`, content: [frontmatter({ version: release.version }), `# ${release.version}`, '', `- ${link('Manifest', release.manifest)}`, ''].join('\n') })),
+    ...datasetIds.map(dataset => ({ path: `02_数据集/${catalogSegment(datasetAlias(dataset))}.md`, content: [frontmatter({ source: dataset, type: 'dataset' }), `# ${dataset}`, '', ...samples.filter(record => record.dataset_id === dataset).map(record => `- ${internal(samplePath(record))}`), ''].join('\n') })),
+    ...[...new Set(knowledge.map(record => record.source_id))].sort().map(source => ({ path: `02_数据集/${catalogSegment(source)}.md`, content: [frontmatter({ source, type: 'knowledge' }), `# ${source}`, '', ...knowledge.filter(record => record.source_id === source).map(record => `- ${internal(`04_InvoiceKnowledge/${catalogSegment(source)}/${catalogSegment(record.file_id)}--${catalogSegment(record.version)}.md`)}`), ''].join('\n') })),
   ];
-  files.push(
-    index('Sources', [...datasetIds, ...new Set(knowledge.map(record => record.source_id))].sort().map(source => internal(`02_Sources/${source}.md`))),
-    index('Samples', samples.map(record => internal(samplePath(record)))),
-    index('Knowledge', knowledge.map(record => internal(`04_InvoiceKnowledge/${catalogSegment(record.source_id)}/${catalogSegment(record.file_id)}--${catalogSegment(record.version)}.md`))),
-    index('Releases', releaseRecords.map(release => internal(`05_Releases/${catalogSegment(release.version)}.md`))),
-  );
-  const plan = { vaultRoot: paths.vaultRoot, directories: ['01_Index', '02_Sources', '03_InvoiceSamples', '04_InvoiceKnowledge', '05_Releases'], files: files.sort((left, right) => left.path.localeCompare(right.path)) };
+  files.push({ path: '01_总览.md', content: [frontmatter({ type: 'index' }), '# 发票资料总览', '', ...datasetIds.map(id => `- ${internal(`02_数据集/${datasetAlias(id)}.md`)}`), ...samples.map(record => `- ${internal(samplePath(record))}`), ...knowledge.map(record => `- ${internal(`04_InvoiceKnowledge/${record.source_id}/${record.file_id}--${record.version}.md`)}`), ...releaseRecords.map(release => `- ${link(`Release ${release.version}`, release.manifest)}`), ''].join('\n') });
+  const plan = { vaultRoot: paths.vaultRoot, directories: ['02_数据集', '03_发票', ...(knowledge.length ? ['04_InvoiceKnowledge'] : [])], files: files.sort((left, right) => left.path.localeCompare(right.path)) };
   validatePlan(plan);
   return plan;
 }
@@ -189,6 +182,7 @@ export async function buildCatalog(paths: FlowmatePaths): Promise<CatalogPlan> {
 /** Build and publish the Vault projection while the machine data roots are quiescent. */
 export async function rebuildCatalog(paths: FlowmatePaths, options: { lockHeld?: boolean } = {}): Promise<CatalogPlan> {
   const operation = async () => {
+    await recoverPublications(paths);
     const plan = await buildCatalog(paths);
     await applyCatalog(plan);
     return plan;
@@ -199,6 +193,60 @@ export async function rebuildCatalog(paths: FlowmatePaths, options: { lockHeld?:
 }
 
 function isGenerated(content: string): boolean { return content.startsWith(`---\ngenerated_by: ${generatedBy}\n`); }
+
+const managedCatalogRoots = ['01_Index', '02_Sources', '03_InvoiceSamples', '04_InvoiceKnowledge', '05_Releases', '01_总览.md', '02_数据集', '03_发票'] as const;
+
+async function collectObsoleteGenerated(path: string, desired: Set<string>, files: string[], directories: string[]): Promise<void> {
+  const info = await optionalLstat(path);
+  if (!info) return;
+  if (info.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
+  if (info.isFile()) {
+    if (!desired.has(resolve(path).toLowerCase()) && path.toLowerCase().endsWith('.md') && isGenerated(await readFile(path, 'utf8'))) files.push(path);
+    return;
+  }
+  if (!info.isDirectory()) fail('CATALOG_TARGET_CONFLICT');
+  directories.push(path);
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    if (entry.name.startsWith('.flowmate-')) continue;
+    if (entry.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
+    await collectObsoleteGenerated(join(path, entry.name), desired, files, directories);
+  }
+}
+
+async function removeObsoleteGenerated(vaultRoot: string, path: string): Promise<void> {
+  await assertVaultBound(vaultRoot, path);
+  const recovery = join(vaultRoot, `.flowmate-catalog-recovery-${crypto.randomUUID()}`);
+  await assertNewVaultPathBound(vaultRoot, recovery);
+  try { await rename(path, recovery); }
+  catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return; throw error; }
+  let moved = true;
+  try {
+    await assertVaultBound(vaultRoot, recovery);
+    if (!(await fileState(recovery)).generated) fail('CATALOG_USER_FILE_CONFLICT');
+    await unlink(recovery);
+    moved = false;
+  } catch (error) {
+    if (moved && await hardLinkNoReplace(recovery, path)) {
+      await unlink(recovery);
+      moved = false;
+    }
+    throw error;
+  }
+}
+
+async function pruneObsoleteGenerated(plan: CatalogPlan): Promise<void> {
+  const desired = new Set(plan.files.map(file => resolve(catalogPath(plan.vaultRoot, file.path)).toLowerCase()));
+  const files: string[] = [];
+  const directories: string[] = [];
+  for (const name of managedCatalogRoots) await collectObsoleteGenerated(catalogPath(plan.vaultRoot, name), desired, files, directories);
+  for (const path of files) await removeObsoleteGenerated(plan.vaultRoot, path);
+  const desiredDirectories = new Set(plan.directories.map(path => resolve(catalogPath(plan.vaultRoot, path)).toLowerCase()));
+  for (const path of directories.sort((left, right) => right.length - left.length)) {
+    if (desiredDirectories.has(resolve(path).toLowerCase())) continue;
+    try { await rmdir(path); }
+    catch (error) { if (!(error && typeof error === 'object' && 'code' in error && ['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(String(error.code)))) throw error; }
+  }
+}
 
 export async function applyCatalog(plan: CatalogPlan): Promise<void> {
   const targets = validatePlan(plan);
@@ -224,6 +272,7 @@ export async function applyCatalog(plan: CatalogPlan): Promise<void> {
       if (!file) fail('CATALOG_PLAN_INVALID');
       await atomicWriteOwned(plan.vaultRoot, target.relativePath, file.content, stagingRoot);
     }
+    await pruneObsoleteGenerated(plan);
   } finally {
     await rm(stagingRoot, { recursive: true, force: true });
     await rm(lock, { recursive: true, force: true });
@@ -289,8 +338,8 @@ async function assertFileOwnership(path: string): Promise<FileState> {
 async function atomicWriteOwned(vaultRoot: string, relativePath: string, content: string, stagingRoot: string): Promise<void> {
   const destination = catalogPath(vaultRoot, relativePath);
   const parent = dirname(destination);
-  await ensureDirectory(parent, vaultRoot);
-  await assertVaultBound(vaultRoot, parent);
+  if (resolve(parent) !== resolve(vaultRoot)) await ensureDirectory(parent, vaultRoot);
+  if (resolve(parent) !== resolve(vaultRoot)) await assertVaultBound(vaultRoot, parent);
   const before = await assertFileOwnership(destination);
   if (before.exists) {
     await assertVaultBound(vaultRoot, destination);
@@ -301,8 +350,8 @@ async function atomicWriteOwned(vaultRoot: string, relativePath: string, content
   const temporary = join(stagingRoot, `.${basename(relativePath)}.${crypto.randomUUID()}.tmp`);
   await writeFile(temporary, content, { encoding: 'utf8', flag: 'wx' });
   try {
-    await ensureDirectory(parent, vaultRoot);
-    await assertVaultBound(vaultRoot, parent);
+    if (resolve(parent) !== resolve(vaultRoot)) await ensureDirectory(parent, vaultRoot);
+    if (resolve(parent) !== resolve(vaultRoot)) await assertVaultBound(vaultRoot, parent);
     const recovery = join(vaultRoot, `.flowmate-catalog-recovery-${crypto.randomUUID()}`);
     await assertNewVaultPathBound(vaultRoot, recovery);
     let moved = false;

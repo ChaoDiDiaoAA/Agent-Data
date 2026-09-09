@@ -1,3 +1,5 @@
+import { compactJsonFileHash } from '../src/readable-json.ts';
+import { sampleDirectory, datasetTasks, datasetAlias } from '../src/layout.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
@@ -45,8 +47,8 @@ test('pins a stable selection hash to revision and exact record/annotation pairi
   const selection = selectVoxel51(records, { limit: 2, revision });
   expect(selection.selection_hash).toBe(selectVoxel51([...records].reverse(), { limit: 2, revision }).selection_hash);
   expect(selection.selection_hash).not.toBe(selectVoxel51(records, { limit: 2, revision: 'a'.repeat(40) }).selection_hash);
-  expect(selection.records[0]!.sample_id).not.toBe(selectVoxel51(records, { limit: 2, revision: 'a'.repeat(40) }).records[0]!.sample_id);
-  expect(selection.records[0]!.sample_id).toBe('voxel51-84b83a4d92669a6dec10');
+  expect(selection.records[0]!.sample_id).toBe(selectVoxel51(records, { limit: 2, revision: 'a'.repeat(40) }).records[0]!.sample_id);
+  expect(selection.records[0]!.sample_id).toBe('000001');
   expect(selection.records[0]!.image_path).toBe(fixture.samples[0]!.filepath);
   expect(selection.records[0]!.annotation_sha256).toMatch(/^[a-f0-9]{64}$/);
 });
@@ -119,22 +121,22 @@ test('acquisition stores original record objects and receipts, then reuses the p
   } });
   const result = await acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport });
   expect({ added: result.added, reused: result.reused }).toEqual({ added: 2, reused: 0 });
-  const datasetBase = join('datasets', 'voxel51-hq-invoice-ocr');
-  const selectionPath = join(configuredPaths.dataRoot, datasetBase, 'selections', 'initial-20.json');
+  const datasetBase = 'voxel51';
+  const selectionPath = join(configuredPaths.dataRoot, 'tasks', 'voxel51', 'selections', 'initial-20.json');
   const selectionBytes = await readFile(selectionPath);
   const selection = JSON.parse(selectionBytes.toString());
   expect(selection.revision).toBe(revision);
   expect(selection.index_sha256).toBe(sha(indexBytes));
   expect(selection.index_url).toContain(`/${revision}/samples.json`);
   for (const [index, entry] of selection.records.entries()) {
-    const originalDir = join(configuredPaths.originalRoot, datasetBase, 'samples', entry.sample_id);
+    const originalDir = join(configuredPaths.originalRoot, datasetBase, entry.sample_id);
     expect(JSON.parse(await readFile(join(originalDir, 'annotation.json'), 'utf8'))).toEqual(fixture.samples[index]);
     expect(await readFile(join(originalDir, 'original.jpg'))).toEqual(index === 0 ? imageA : imageB);
-    const record = JSON.parse(await readFile(join(configuredPaths.dataRoot, datasetBase, 'samples', entry.sample_id, 'record.json'), 'utf8'));
+    const record = JSON.parse(await readFile(join(configuredPaths.dataRoot, datasetBase, entry.sample_id, 'record.json'), 'utf8'));
     expect(record.original_sha256).toBe(sha(index === 0 ? imageA : imageB));
     expect(record.source_record_id).toBe(fixture.samples[index]!._id.$oid);
-    expect(record.annotation_sha256).toBe(sha(await readFile(join(originalDir, 'annotation.json'))));
-    const receipt = JSON.parse(await readFile(join(configuredPaths.dataRoot, datasetBase, 'samples', entry.sample_id, 'receipt.json'), 'utf8'));
+    expect(record.annotation_sha256).toBe(await compactJsonFileHash(join(originalDir, 'annotation.json')));
+    const receipt = JSON.parse(await readFile(join(configuredPaths.dataRoot, datasetBase, entry.sample_id, 'receipt.json'), 'utf8'));
     expect(receipt.sha256).toBe(record.original_sha256);
   }
   const dataset = JSON.parse(await readFile(join(configuredPaths.dataRoot, datasetBase, 'dataset.json'), 'utf8'));
@@ -144,21 +146,21 @@ test('acquisition stores original record objects and receipts, then reuses the p
   expect(await readFile(selectionPath)).toEqual(selectionBytes);
   await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 3, transport: offline })).rejects.toThrow('SELECTION_LIMIT_CONFLICT');
   const first = selection.records[0];
-  const firstAnnotation = join(configuredPaths.originalRoot, datasetBase, 'samples', first.sample_id, 'annotation.json');
+  const firstAnnotation = join(configuredPaths.originalRoot, datasetBase, first.sample_id, 'annotation.json');
   const originalAnnotation = await readFile(firstAnnotation);
   await writeFile(firstAnnotation, '{}');
   await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport: offline })).rejects.toThrow('VOXEL51_ANNOTATION_HASH_MISMATCH');
   await writeFile(firstAnnotation, originalAnnotation);
-  const firstReceipt = join(configuredPaths.dataRoot, datasetBase, 'samples', first.sample_id, 'receipt.json');
+  const firstReceipt = join(configuredPaths.dataRoot, datasetBase, first.sample_id, 'receipt.json');
   const originalReceipt = await readFile(firstReceipt);
   await writeFile(firstReceipt, JSON.stringify({ ...JSON.parse(originalReceipt.toString()), stable_url: 'https://other.example/invoice.jpg' }));
   await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport: offline })).rejects.toThrow('VOXEL51_RECEIPT_MISMATCH');
   await writeFile(firstReceipt, originalReceipt);
   // Simulate a crash after immutable originals/receipt were installed but before record.json was committed.
-  await unlink(join(configuredPaths.dataRoot, datasetBase, 'samples', first.sample_id, 'record.json'));
+  await unlink(join(configuredPaths.dataRoot, datasetBase, first.sample_id, 'record.json'));
   expect(await acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport })).toMatchObject({ added: 1, reused: 1 });
   expect(await readdir(join(configuredPaths.dataRoot, 'work', 'downloads'))).toEqual([]);
-  await writeFile(join(configuredPaths.originalRoot, datasetBase, 'samples', first.sample_id, 'original.jpg'), 'tampered');
+  await writeFile(join(configuredPaths.originalRoot, datasetBase, first.sample_id, 'original.jpg'), 'tampered');
   await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport: offline })).rejects.toThrow('VOXEL51_ORIGINAL_HASH_MISMATCH');
 });
 
@@ -174,11 +176,11 @@ test('keeps dataset metadata immutable while allowing a later source revision', 
     throw new Error(`UNEXPECTED_URL ${url}`);
   } });
   await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'first', limit: 1, transport: transport(revision) })).resolves.toMatchObject({ added: 1, revision });
-  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'second', limit: 1, transport: transport(nextRevision) })).resolves.toMatchObject({ added: 1, revision: nextRevision });
-  const datasetRoot = join(configuredPaths.dataRoot, 'datasets/voxel51-hq-invoice-ocr');
+  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'second', limit: 1, transport: transport(nextRevision) })).resolves.toMatchObject({ added: 0, reused: 1, revision: nextRevision });
+  const datasetRoot = join(configuredPaths.dataRoot, 'voxel51');
   const stable = JSON.parse(await readFile(join(datasetRoot, 'dataset.json'), 'utf8')) as { revision: string };
-  expect(stable.revision).toBe(revision);
-  expect((JSON.parse(await readFile(join(datasetRoot, 'revisions', nextRevision, 'dataset.json'), 'utf8')) as { revision: string }).revision).toBe(nextRevision);
+  expect(stable.revision).toBe(nextRevision);
+  expect((JSON.parse(await readFile(join(configuredPaths.dataRoot, 'tasks', 'voxel51', 'revisions', nextRevision, 'dataset.json'), 'utf8')) as { revision: string }).revision).toBe(nextRevision);
 });
 
 test('CLI dispatches probe/acquire and preserves usage exit for unsupported commands', async () => {
@@ -204,7 +206,7 @@ test('CLI dispatches probe/acquire and preserves usage exit for unsupported comm
   }));
   expect(await runCli(['acquire', 'voxel51-invoice-ocr', '--paths', configPath, '--config', customWorkbenchPath], { transport, print: value => output.push(value) })).toBe(0);
   expect(output[1]).toMatchObject({ revision, added: 1, reused: 0 });
-  expect(await Bun.file(join(configuredPaths.dataRoot, 'datasets/voxel51-hq-invoice-ocr/selections/cli-default.json')).exists()).toBe(true);
+  expect(await Bun.file(join(configuredPaths.dataRoot, 'tasks/voxel51/selections/cli-default.json')).exists()).toBe(true);
   expect(await runCli(['acquire', 'voxel51-invoice-ocr', '--selection', 'initial-20', '--limit', '1', '--paths', configPath, '--config', workbenchPath], { transport, print: value => output.push(value) })).toBe(0);
   expect(output[2]).toMatchObject({ revision, added: 0, reused: 1 });
   expect(await runCli(['unknown'])).toBe(2);
@@ -221,7 +223,7 @@ test('acquisition rejects image magic and blocked CDN redirects without recordin
       return mode === 'magic' ? new Response('<html>blocked</html>', { headers: { 'content-type': 'image/jpeg' } }) : new Response(null, { status: 302, headers: { location: 'https://new-cdn.example/image.jpg?signed=secret' } });
     } });
     await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 1, transport })).rejects.toThrow(mode === 'magic' ? 'FILE_MIME_MISMATCH' : 'REDIRECT_ORIGIN_NOT_ALLOWED: https://new-cdn.example');
-    expect(await Bun.file(join(configuredPaths.dataRoot, 'datasets/voxel51-hq-invoice-ocr/samples/voxel51-84b83a4d92669a6dec10/record.json')).exists()).toBe(false);
+    expect(await Bun.file(join(configuredPaths.dataRoot, 'voxel51/000001/record.json')).exists()).toBe(false);
   }
 });
 
@@ -240,13 +242,13 @@ test('acquisition follows the Voxel51 AWS CDN origin registered by the source', 
   await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 1, transport }))
     .resolves.toMatchObject({ revision, added: 1, reused: 0 });
   expect(transport.redirect_chain).toEqual([{ from_origin: 'https://huggingface.co', to_origin: cdnOrigin }]);
-  expect(await readFile(join(configuredPaths.originalRoot, 'datasets/voxel51-hq-invoice-ocr/samples/voxel51-84b83a4d92669a6dec10/original.jpg'))).toEqual(image);
+  expect(await readFile(join(configuredPaths.originalRoot, 'voxel51/000001/original.jpg'))).toEqual(image);
 });
 
 test('recovers a legacy orphan index after upstream main advances without manual cleanup', async () => {
   const configuredPaths = await paths();
   const config = loadSourceConfig(sourcePath);
-  const selectionDir = join(configuredPaths.dataRoot, 'datasets/voxel51-hq-invoice-ocr/selections');
+  const selectionDir = join(configuredPaths.dataRoot, 'tasks/voxel51/selections');
   await mkdir(selectionDir, { recursive: true });
   // Old write ordering could leave this index without any committed selection/revision intent.
   await writeFile(join(selectionDir, 'initial-20.index.json'), indexBytes);
@@ -265,14 +267,14 @@ test('recovers a legacy orphan index after upstream main advances without manual
   const selection = JSON.parse(await readFile(join(selectionDir, 'initial-20.json'), 'utf8'));
   expect(selection.index_sha256).toBe(sha(advancedBytes));
   expect(await readFile(join(selectionDir, 'initial-20.index.json'))).toEqual(advancedBytes);
-  const annotation = join(configuredPaths.originalRoot, 'datasets/voxel51-hq-invoice-ocr/samples', selection.records[0].sample_id, 'annotation.json');
+  const annotation = join(configuredPaths.originalRoot, 'voxel51', selection.records[0].sample_id, 'annotation.json');
   expect(JSON.parse(await readFile(annotation, 'utf8'))).toEqual(advanced.samples[0]);
 });
 
 test('restores a missing cache from persisted pinned intent and rejects different bytes at that URL', async () => {
   const configuredPaths = await paths();
   const config = loadSourceConfig(sourcePath);
-  const selectionDir = join(configuredPaths.dataRoot, 'datasets/voxel51-hq-invoice-ocr/selections');
+  const selectionDir = join(configuredPaths.dataRoot, 'tasks/voxel51/selections');
   const selectionPath = join(selectionDir, 'initial-20.json');
   const indexPath = join(selectionDir, 'initial-20.index.json');
   const initial = createSourceHttp(config, { fetch: async url => {

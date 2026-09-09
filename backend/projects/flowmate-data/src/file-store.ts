@@ -1,3 +1,4 @@
+import { prettyJson } from './readable-json.ts';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile as defaultCopyFile, lstat, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
@@ -50,9 +51,17 @@ export async function sha256File(path: string): Promise<string> {
 }
 
 export async function writeCanonicalJson(path: string, value: unknown): Promise<void> {
+  return writeJson(path, value, canonicalJson);
+}
+
+export async function writePrettyJson(path: string, value: unknown): Promise<void> {
+  return writeJson(path, value, prettyJson);
+}
+
+async function writeJson(path: string, value: unknown, serialize: (value: unknown) => string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temporary = join(dirname(path), `.${basename(path)}.${crypto.randomUUID()}.tmp`);
-  await writeFile(temporary, canonicalJson(value), { encoding: 'utf8', flag: 'wx' });
+  await writeFile(temporary, serialize(value), { encoding: 'utf8', flag: 'wx' });
   try {
     await replaceFileWithRetry(temporary, path);
   } catch (error) {

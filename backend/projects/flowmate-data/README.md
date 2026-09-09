@@ -1,19 +1,75 @@
 # FlowmateData 脚本
 
-当前重构方案见 [P0 公开发票数据工作台目标方案 V2](docs/specs/P0_公开发票数据工作台目标方案_V2.md)，源码复用依据见 [FSD 复用审查](docs/research/2026-09-08-fsd-reuse-audit.md)，配置逐项说明见 [config/README.md](config/README.md)。本期只面向网上公开的发票资料与样本，不依赖企业内部数据。
+当前目录以本文“精简后的发票目录”为准，历史业务方案见 [P0 公开发票数据工作台目标方案 V2](docs/specs/P0_公开发票数据工作台目标方案_V2.md)，源码复用依据见 [FSD 复用审查](docs/research/2026-09-08-fsd-reuse-audit.md)，配置逐项说明见 [config/README.md](config/README.md)。本期只面向网上公开的发票资料与样本，不依赖企业内部数据。
 
 目标位置：`D:\paper\Invoice` 保存网上下载的原始数据，`D:\agent-data\data\flowmate-data` 保存处理记录和派生结果，`D:\obsidian\data\flowmate-data` 保存可重建的 Obsidian 卡片。
 
 ## 存储边界
 
 - `D:\paper\Invoice`：公开来源原件、发布方原始标注，以及一份只从 `dataRoot` 发布的结构化镜像。
-- `D:\agent-data\data\flowmate-data`：机器主记录、标签、MinerU 解析结果、selection、Release、`policies/withdrawals.json` 撤回清单和运行状态；`work` 可随时删除重建。
-- `D:\obsidian\data\flowmate-data`：`01_Index`～`05_Releases` 的可重建 Markdown；带 `generated_by: flowmate-data` 的文件由目录生成器管理，用户笔记不会被覆盖。
+- `D:\agent-data\data\flowmate-data`：机器主记录、标签、MinerU 解析结果、任务选样清单、Release、`policies/withdrawals.json` 撤回清单和运行状态；`work` 保存临时文件、进程记录及未完成事务，运行中不可删除。
+- `D:\obsidian\data\flowmate-data`：`01_总览.md`、`02_数据集`、`03_发票` 的可重建 Markdown；带 `generated_by: flowmate-data` 的文件由目录生成器管理，用户笔记不会被覆盖。
 - `D:\agent-data\backups\flowmate-data`：带 SHA-256 manifest 的静止备份。
 
 目录发布前应关闭 Obsidian 及其同步/写入插件，并让所有 Flowmate 命令通过同一个 `dataRoot/work/run.lock` 串行运行。发布会在写入前后检查 Vault 路径边界；检测到外部并发改变时立即失败，保留可恢复的事务条目，不按不可信路径删除文件。处理这类失败前先停止外部写入，再重新执行目录构建。
 
-## 运行前准备
+## 精简后的发票目录
+
+项目代码位置和 `config/paths.local.json` 的六个根路径保持不变。发票目录使用数据集短名 `voxel51` 与固定编号（例如 `000001`）；完整来源记录 ID、数据集版本、解析批次和哈希写在 JSON 中。
+
+```text
+D:\paper\Invoice\voxel51\000001\
+  original.jpg       原始发票图片
+  annotation.json    发布方原始标注
+  fields.json        标注映射后的发票业务字段
+  content.json       MinerU 结构化解析内容
+  pages.json         分页信息
+  content.md         解析正文
+  record.json        来源、解析状态与校验元数据
+  assets\            解析附属图片（有才创建）
+
+D:\agent-data\data\flowmate-data\voxel51\000001\
+  fields.json、content.json、pages.json、content.md、record.json、assets\
+
+D:\obsidian\data\flowmate-data\
+  01_总览.md
+  02_数据集\voxel51.md
+  03_发票\voxel51\000001.md
+```
+
+每个数据集另有 `dataset.json`。发票目录还保留 `receipt.json`（下载凭据）、`parse.json`（解析来源及文件校验信息）和 `snapshot.json`（当前副本清单），用于校验与恢复，不能手工删除。最终发票目录不再包含 `datasets/samples/structured/parsed/attempt-长哈希/normalized` 层级。
+
+`content.json` 是 MinerU 识别出的文本、表格及坐标，不等同于业务字段；业务字段查看 `fields.json`。`D:\paper\Invoice\voxel51` 下所有 JSON（包括 dataset、annotation、fields、record、receipt、parse 和 snapshot）使用两空格缩进、换行及末尾换行。程序目录保存主副本，`D:\paper\Invoice` 保存原件和当前解析副本，Obsidian 链接到这些文件。格式转换必须通过程序同步更新校验清单，不要用编辑器批量重写受校验的文件。
+
+### 发布方标注与 MinerU 解析结果
+
+每张已获取发票的发布方原始标注位于：
+
+```text
+D:\paper\Invoice\voxel51\<发票编号>\annotation.json
+```
+
+`annotation.json` 中的 `json_annotation` 是 Voxel51 发布方提供的结构化标注，可作为字段对照依据。相关文件的职责如下：
+
+| 文件 | 来源与用途 |
+|---|---|
+| `annotation.json` | Voxel51 发布方原始记录；其中 `json_annotation` 保存发布方标注 |
+| `fields.json` | Flowmate 将发布方标注映射成统一发票字段后的结果 |
+| `content.json` | MinerU 从 `original.jpg` 识别出的文本、表格、坐标和版面结构 |
+| `record.json` | 发票来源、数据集版本、处理状态和文件哈希等校验信息 |
+
+对照关系为：
+
+```text
+annotation.json（发布方标注） → fields.json（统一字段）
+original.jpg（发票图片）      → content.json（MinerU 解析结果）
+```
+
+发布方标注不等于字段全部完整。即使存在 `json_annotation`，币种、未税金额、税率、字段坐标等字段也可能没有提供，程序会在 `fields.json` 中将其标记为 `missing` 或 `ambiguous`。当前采集器只选择 `json_annotation` 非空且可解析为非空对象的记录，因此重新执行任务后，每张下载的发票都会有可用于对照的 `annotation.json`。
+
+重新开始时保留代码、本地配置和 MinerU 模型，只清空四个数据根内的旧数据。启动下方菜单并选择 **2. 执行当前任务**，获取和解析数量仍读取 `sample.acquire_limit`，不需要重新输入。
+
+## 运行前准备（依赖与模型）
 
 Flowmate 复用 Paper Knowledge Engine 的 MinerU 启动、监督和结果规整代码，但不复用其 `config/engine.yaml` MinerU 配置；发票也不会注册成 FSD 论文或通过 `--library fsd` 运行。先按照 [Paper Knowledge Engine 使用手册](../paper-knowledge-engine/使用手册.md) 准备 MinerU 安装、模型和 GPU，再把实际路径和参数写入 Flowmate 自己的 `config/mineru.local.json`。公开来源 HTTP 代理仍从 `paperEngineRoot/config/machine.local.yaml` 的 `network.http_proxy` 读取：
 

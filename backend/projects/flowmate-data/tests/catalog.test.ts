@@ -42,15 +42,15 @@ async function seed(paths: FlowmatePaths): Promise<void> {
 
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
-test('creates all five fixed catalog directories for an empty vault', async () => {
+test('creates only the compact invoice catalog directories for an empty vault', async () => {
   const paths = await fixturePaths();
   await applyCatalog(await buildCatalog(paths));
-  for (const directory of ['01_Index', '02_Sources', '03_InvoiceSamples', '04_InvoiceKnowledge', '05_Releases']) {
+  for (const directory of ['02_数据集', '03_发票']) {
     expect((await lstat(join(paths.vaultRoot, directory))).isDirectory()).toBe(true);
   }
 });
 
-test('builds deterministic Obsidian cards and four indexes from machine records', async () => {
+test('builds deterministic Obsidian cards and a compact overview from machine records', async () => {
   const paths = await fixturePaths();
   await seed(paths);
   const first = await buildCatalog(paths);
@@ -58,10 +58,10 @@ test('builds deterministic Obsidian cards and four indexes from machine records'
   expect(first).toEqual(second);
   await applyCatalog(first);
 
-  for (const directory of ['01_Index', '02_Sources', '03_InvoiceSamples', '04_InvoiceKnowledge', '05_Releases']) {
+  for (const directory of ['02_数据集', '03_发票', '04_InvoiceKnowledge']) {
     expect((await lstat(join(paths.vaultRoot, directory))).isDirectory()).toBe(true);
   }
-  const card = await Bun.file(join(paths.vaultRoot, '03_InvoiceSamples/public-invoices/sample-a.md')).text();
+  const card = await Bun.file(join(paths.vaultRoot, '03_发票/public-invoices/sample-a.md')).text();
   expect(card).toContain('generated_by: flowmate-data');
   expect(card).toContain('schema_version: 1');
   expect(card).toContain('dataset: public-invoices');
@@ -84,11 +84,11 @@ test('builds deterministic Obsidian cards and four indexes from machine records'
   expect(knowledge).toContain('Structured mirror: unavailable (raw_only)');
   expect(knowledge).not.toContain('Structured mirror](');
   expect(knowledge).toContain('Parse result: unavailable (raw_only)');
-  const release = await Bun.file(join(paths.vaultRoot, '05_Releases/v1.md')).text();
-  expect(release).toContain('version: v1');
-  expect(release).toContain('Manifest');
+  const release = await Bun.file(join(paths.vaultRoot, '01_总览.md')).text();
+  expect(release).toContain('Release v1');
+  expect(release).toContain('manifest.json');
   for (const index of ['Sources', 'Samples', 'Knowledge', 'Releases']) {
-    const text = await Bun.file(join(paths.vaultRoot, `01_Index/${index}.md`)).text();
+    const text = await Bun.file(join(paths.vaultRoot, '01_总览.md')).text();
     expect(text).toContain('generated_by: flowmate-data');
     expect(text).not.toMatch(/supplier|PO|business/i);
   }
@@ -109,7 +109,7 @@ test('catalog bytes are stable when source insertion order changes', async () =>
   await saveSampleRecord(paths, sample('sample-b'));
   await saveSampleRecord(paths, sample('sample-a'));
   await applyCatalog(await buildCatalog(paths));
-  const pathsToCompare = ['01_Index/Samples.md', '02_Sources/public-invoices.md', '03_InvoiceSamples/public-invoices/sample-a.md', '03_InvoiceSamples/public-invoices/sample-b.md'];
+  const pathsToCompare = ['01_总览.md', '02_数据集/public-invoices.md', '03_发票/public-invoices/sample-a.md', '03_发票/public-invoices/sample-b.md'];
   const firstBytes = await Promise.all(pathsToCompare.map(relativePath => Bun.file(join(paths.vaultRoot, relativePath)).text()));
   await rm(paths.dataRoot, { recursive: true, force: true });
   await saveSampleRecord(paths, sample('sample-a'));
@@ -122,12 +122,15 @@ test('catalog bytes are stable when source insertion order changes', async () =>
 test('rebuilds deleted generated cards while preserving user notes and rejecting hand-written collisions', async () => {
   const paths = await fixturePaths(); await seed(paths);
   const plan = await buildCatalog(paths); await applyCatalog(plan);
-  const generated = join(paths.vaultRoot, '03_InvoiceSamples/public-invoices/sample-a.md');
+  const generated = join(paths.vaultRoot, '03_发票/public-invoices/sample-a.md');
+  const obsolete = join(paths.vaultRoot, '02_Sources/jiangsu-digital-invoice-sample.md');
+  await Bun.write(obsolete, '---\ngenerated_by: flowmate-data\nschema_version: 1\n---\n# stale\n');
   await rm(generated);
-  await writeFile(join(paths.vaultRoot, '03_InvoiceSamples/public-invoices/user-note.md'), '# keep me\n');
+  await writeFile(join(paths.vaultRoot, '03_发票/public-invoices/user-note.md'), '# keep me\n');
   await applyCatalog(await buildCatalog(paths));
   expect(await Bun.file(generated).exists()).toBe(true);
-  expect(await Bun.file(join(paths.vaultRoot, '03_InvoiceSamples/public-invoices/user-note.md')).text()).toBe('# keep me\n');
+  expect(await Bun.file(obsolete).exists()).toBe(false);
+  expect(await Bun.file(join(paths.vaultRoot, '03_发票/public-invoices/user-note.md')).text()).toBe('# keep me\n');
 
   const editedGenerated = '---\ngenerated_by: flowmate-data\nschema_version: 1\n---\n# edited by user\n';
   await writeFile(generated, editedGenerated);
@@ -146,5 +149,5 @@ test('runs catalog build through the CLI with the configured paths', async () =>
   const output: unknown[] = [];
   expect(await runCli(['catalog', 'build', '--paths', config, '--config', workbenchPath], { print: value => output.push(value) })).toBe(0);
   expect(output).toEqual([{ files: expect.any(Number) }]);
-  expect(await Bun.file(join(paths.vaultRoot, '01_Index/Samples.md')).exists()).toBe(true);
+  expect(await Bun.file(join(paths.vaultRoot, '01_总览.md')).exists()).toBe(true);
 });
