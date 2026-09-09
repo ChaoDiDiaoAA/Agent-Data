@@ -7,6 +7,7 @@ import { writeCanonicalJson } from './file-store.ts';
 import type { DocumentKind, FlowmatePaths, OriginKind } from './contracts.ts';
 
 export type LabelKind = 'none' | 'dataset_annotation' | 'human_reviewed';
+export type PublisherAnnotationStatus = 'annotated' | 'unannotated';
 export type ProcessingStatus = 'selected' | 'downloaded' | 'processed' | 'cataloged' | 'completed' | 'failed';
 export type TaskStatus = 'selected' | 'downloaded' | 'processed' | 'cataloged' | 'partial' | 'completed' | 'failed';
 
@@ -27,6 +28,8 @@ export interface SampleRecord {
   layout_group: string | null;
   original_ref: FileRef;
   original_sha256: string;
+  /** Whether the source publisher supplied a usable structured annotation. */
+  publisher_annotation_status?: PublisherAnnotationStatus;
   annotation_ref?: FileRef;
   annotation_sha256?: string;
   source_observations: string[];

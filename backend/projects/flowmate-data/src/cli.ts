@@ -4,7 +4,7 @@ import { extname, join } from 'node:path';
 import { readFile, rm } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { loadPaths, loadSourceConfig, loadWorkbenchConfig, resolveOwnedPath } from './config.ts';
+import { loadPaths, loadSourceConfig, loadWorkbenchConfig, resolveOwnedPath, sampleAcquireCounts, sampleAcquireTotal } from './config.ts';
 import type { SourceTransport } from './sources/dataset-records.ts';
 import { createSourceHttp } from './sources/dataset-records.ts';
 import { acquireVoxel51Selection, probeVoxel51 } from './sources/voxel51.ts';
@@ -20,7 +20,7 @@ import { verifyStructuredSnapshot } from './structured-snapshot.ts';
 import { sha256File } from './file-store.ts';
 import { redactErrorMessage } from '../../paper-knowledge-engine/src/shared/redaction.ts';
 
-export const usage = 'Usage: flowmate-data [menu] | [--paths <path>] [--config <path>] <command>';
+export const usage = 'Usage: flowmate-data [menu] | [--paths <path>] [--config <path>] <command> [--limit <n> | --with-publisher-annotation <n> --without-publisher-annotation <n>]';
 
 const defaultPathsPath = join(import.meta.dir, '../config/paths.local.json');
 const defaultWorkbenchPath = join(import.meta.dir, '../config/workbench.local.json');
@@ -60,10 +60,15 @@ async function verifySelectedData(paths: ReturnType<typeof loadPaths>, records: 
     if (recordBytes.toString('utf8') !== canonicalJson(record) || hashCanonical(record) !== await sha256File(recordPath)) throw new Error('VERIFY_RECORD_HASH_INVALID');
     const originalPath = resolveOwnedPath(paths.originalRoot, record.original_ref.path);
     await verifyHash(originalPath, record.original_sha256, 'VERIFY_ORIGINAL_HASH_INVALID');
-    if (!record.annotation_ref || !record.annotation_sha256) throw new Error('VERIFY_ANNOTATION_MISSING');
-    if (await compactJsonFileHash(resolveOwnedPath(paths.originalRoot, record.annotation_ref.path), record.annotation_sha256) !== record.annotation_sha256) throw new Error('VERIFY_ANNOTATION_HASH_INVALID');
-    if (record.label_kind === 'none' || !record.label_ref || !record.label_sha256) throw new Error('VERIFY_LABEL_MISSING');
-    await verifyHash(resolveOwnedPath(paths.dataRoot, record.label_ref.path), record.label_sha256, 'VERIFY_LABEL_HASH_INVALID');
+    const annotationStatus = record.publisher_annotation_status ?? (record.annotation_ref || record.annotation_sha256 ? 'annotated' : 'unannotated');
+    if (annotationStatus === 'annotated') {
+      if (!record.annotation_ref || !record.annotation_sha256) throw new Error('VERIFY_ANNOTATION_MISSING');
+      if (await compactJsonFileHash(resolveOwnedPath(paths.originalRoot, record.annotation_ref.path), record.annotation_sha256) !== record.annotation_sha256) throw new Error('VERIFY_ANNOTATION_HASH_INVALID');
+      if (record.label_kind === 'none' || !record.label_ref || !record.label_sha256) throw new Error('VERIFY_LABEL_MISSING');
+      await verifyHash(resolveOwnedPath(paths.dataRoot, record.label_ref.path), record.label_sha256, 'VERIFY_LABEL_HASH_INVALID');
+    } else if (record.annotation_ref || record.annotation_sha256 || record.label_ref || record.label_sha256 || record.label_kind !== 'none') {
+      throw new Error('VERIFY_UNANNOTATED_RECORD_INVALID');
+    }
     const snapshotPath = resolveOwnedPath(paths.originalRoot, `${sampleDirectory(record.dataset_id, record.sample_id)}`);
     const snapshot = await verifyStructuredSnapshot(snapshotPath);
     if (snapshot.record_sha256 !== hashCanonical(record)) throw new Error('VERIFY_SNAPSHOT_RECORD_MISMATCH');
@@ -112,13 +117,16 @@ function menuErrorSummary(error: unknown): string {
 function menuResultSummary(args: string[], value: unknown): string {
   const result = menuRecord(value);
   if (args[0] === 'source' && args[1] === 'probe') {
-    return `revision=${menuText(result.revision)}，索引 ${String(result.record_count ?? 0)} 条，带标注 ${String(result.annotated_count ?? 0)} 条`;
+    return `revision=${menuText(result.revision)}，索引 ${String(result.record_count ?? 0)} 条，带标注 ${String(result.annotated_count ?? 0)} 条，无标注 ${String(result.unannotated_count ?? 0)} 条，无效标注 ${String(result.invalid_annotation_count ?? 0)} 条`;
   }
   if (args[0] === 'acquire') {
-    return `新增 ${String(result.added ?? 0)} 条，复用 ${String(result.reused ?? 0)} 条，revision=${menuText(result.revision)}`;
+    const counts = menuRecord(result.counts);
+    const split = counts.with_publisher_annotation !== undefined
+      ? `，带标注 ${String(counts.with_publisher_annotation)}，无标注 ${String(counts.without_publisher_annotation ?? 0)}` : '';
+    return `新增 ${String(result.added ?? 0)} 条，复用 ${String(result.reused ?? 0)} 条${split}，revision=${menuText(result.revision)}`;
   }
   if (args[0] === 'labels') {
-    return `映射 ${String(result.mapped ?? 0)} 条，提供 ${String(result.provided ?? 0)}，缺失 ${String(result.missing ?? 0)}，歧义 ${String(result.ambiguous ?? 0)}，镜像 ${String(result.snapshots ?? 0)}`;
+    return `映射 ${String(result.mapped ?? 0)} 条，跳过无标注 ${String(result.skipped_unannotated ?? 0)} 条，提供 ${String(result.provided ?? 0)}，缺失 ${String(result.missing ?? 0)}，歧义 ${String(result.ambiguous ?? 0)}，镜像 ${String(result.snapshots ?? 0)}`;
   }
   if (args[0] === 'parse') return `解析 ${String(result.parsed ?? 0)} 条`;
   if (args[0] === 'catalog') return `写入 ${String(result.files ?? 0)} 个文件`;
@@ -132,16 +140,20 @@ function menuResultSummary(args: string[], value: unknown): string {
 function menuConfigSummary(pathsPath: string, configPath: string, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): string {
   const total = source.record_count === undefined ? '未配置' : String(source.record_count);
   const annotated = source.annotated_record_count === undefined ? '未配置' : String(source.annotated_record_count);
-  const taskLimit = String(workbench.sample.acquire_limit);
-  const limitWarning = source.annotated_record_count !== undefined && workbench.sample.acquire_limit > source.annotated_record_count
-    ? '警告：workbench.sample.acquire_limit 超过可标注数量，采集会被拒绝。'
-    : '';
+  const counts = sampleAcquireCounts(workbench.sample);
+  const totalTask = sampleAcquireTotal(workbench.sample);
+  const declaredUnannotated = source.record_count !== undefined && source.annotated_record_count !== undefined ? source.record_count - source.annotated_record_count : undefined;
+  const limitWarning = source.annotated_record_count !== undefined && counts.with_publisher_annotation > source.annotated_record_count
+    ? '警告：带发布方标注数量超过来源声明上限，采集会被拒绝。'
+    : declaredUnannotated !== undefined && counts.without_publisher_annotation > declaredUnannotated
+      ? '警告：无发布方标注数量超过来源声明上限，采集会被拒绝。' : '';
   return [
     `[任务] current / ${workbench.sample.dataset_id} / ${workbench.sample.selection_id}`,
-    `[配置] ${configPath}；配置上限 ${annotated} 条，本次上限 ${taskLimit} 条`,
+    `[配置] ${configPath}`,
     `[来源] ${source.source_id} / ${source.dataset_id ?? '未配置'}`,
-    `[数据集] 总量 ${total} 条，可标注 ${annotated} 条`,
-    `[说明] 获取与 MinerU 解析使用同一批 ${taskLimit} 条发票；任务完成后继续构建 Obsidian、Release、校验和备份。`,
+    `[数据集] 总量 ${total} 条，可标注 ${annotated} 条${declaredUnannotated === undefined ? '' : `，无标注 ${declaredUnannotated} 条`}`,
+    `[本次任务] 带发布方标注 ${counts.with_publisher_annotation} 条；无发布方标注 ${counts.without_publisher_annotation} 条；合计 ${totalTask} 条`,
+    `[说明] 获取与 MinerU 解析使用同一批 ${totalTask} 条发票；任务完成后继续构建 Obsidian、Release、校验和备份。`,
     `路径配置：${pathsPath}`,
     ...(limitWarning ? [limitWarning] : []),
   ].join('\n');
@@ -162,14 +174,15 @@ function menuParseProgress(output: MenuOutput, progress: ParseProgress): void {
 }
 
 function menuLabel(workbench: ReturnType<typeof loadWorkbenchConfig>): string {
-  const taskLimit = String(workbench.sample.acquire_limit);
+  const counts = sampleAcquireCounts(workbench.sample);
+  const total = sampleAcquireTotal(workbench.sample);
   return [
     'FlowmateData（Bun CLI）',
     `[任务] ${workbench.sample.dataset_id} / ${workbench.sample.selection_id}`,
-    `[数量] 获取与解析 ${taskLimit} 条`,
+    `[数量] 获取与解析 ${total} 条（带标注 ${counts.with_publisher_annotation}，无标注 ${counts.without_publisher_annotation}）`,
     '=========================',
     '1. 查看来源和任务配置',
-    `2. 执行当前任务（获取并解析 ${taskLimit} 条）`,
+    `2. 执行当前任务（获取并解析 ${total} 条）`,
     '3. 校验当前任务',
     `4. 创建备份（verify=${workbench.backup.verify}, restore_smoke=${workbench.backup.restore_smoke}）`,
     '0. 退出',
@@ -184,11 +197,13 @@ interface MenuStep {
 
 function menuTaskSteps(pathsPath: string, configPath: string, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): MenuStep[] {
   const common = (args: string[]) => menuCommand(args, pathsPath, configPath);
-  const taskLimit = workbench.sample.acquire_limit;
+  const taskLimit = sampleAcquireTotal(workbench.sample);
+  const counts = sampleAcquireCounts(workbench.sample);
+  const quantity = `${taskLimit} 条（带标注 ${counts.with_publisher_annotation}，无标注 ${counts.without_publisher_annotation}）`;
   return [
     { phase: '探测', label: '探测公开来源', commands: [common(['source', 'probe', source.source_id])] },
-    { phase: '获取', label: `获取并固定 ${taskLimit} 条发票`, commands: [common(['acquire', source.source_id])] },
-    { phase: '标签', label: `映射 ${taskLimit} 条标签并发布结构化镜像`, commands: [common(['labels', 'map', workbench.sample.dataset_id])] },
+    { phase: '获取', label: `获取并固定 ${quantity} 发票`, commands: [common(['acquire', source.source_id])] },
+    { phase: '标签', label: `映射可用发布方标注并发布结构化镜像`, commands: [common(['labels', 'map', workbench.sample.dataset_id])] },
     { phase: 'MinerU', label: `逐条解析 ${taskLimit} 条发票`, commands: [common(['parse'])] },
     { phase: 'Obsidian', label: '构建 Obsidian 目录', commands: [common(['catalog', 'build'])] },
     { phase: 'Release', label: `构建 Release（${workbench.release.version}）`, commands: [common(['release', 'build', workbench.release.version])] },
@@ -254,9 +269,11 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
       };
       const taskStartedAt = Date.now();
       if (choice === '2') {
+        const counts = sampleAcquireCounts(workbench.sample);
+        const total = sampleAcquireTotal(workbench.sample);
         writeMenu(output, `[任务] current / ${workbench.sample.dataset_id} / ${workbench.sample.selection_id} 开始`);
-        writeMenu(output, `[配置] ${configPath}；配置上限 ${source.annotated_record_count ?? '未配置'} 条，本次上限 ${workbench.sample.acquire_limit} 条`);
-        writeMenu(output, `[说明] 获取与 MinerU 解析使用同一批 ${workbench.sample.acquire_limit} 条发票；完成后构建 Obsidian、Release、校验和备份。`);
+        writeMenu(output, `[配置] ${configPath}；带发布方标注 ${counts.with_publisher_annotation} 条，无发布方标注 ${counts.without_publisher_annotation} 条，合计 ${total} 条`);
+        writeMenu(output, `[说明] 获取与 MinerU 解析使用同一批 ${total} 条发票；完成后构建 Obsidian、Release、校验和备份。`);
       }
       let failed = false;
       const selectedSteps = stepsByChoice[choice]!;
@@ -322,7 +339,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
       restoreSmokeFlag = true;
       continue;
     }
-    if (!['--paths', '--config', '--selection', '--limit', '--release'].includes(value) || flags.has(value) || !arguments_[index + 1] || arguments_[index + 1]!.startsWith('--')) return 2;
+    if (!['--paths', '--config', '--selection', '--limit', '--with-publisher-annotation', '--without-publisher-annotation', '--release'].includes(value) || flags.has(value) || !arguments_[index + 1] || arguments_[index + 1]!.startsWith('--')) return 2;
     flags.set(value, arguments_[++index]!);
   }
   const probe = positional.join(' ') === 'source probe voxel51-invoice-ocr';
@@ -336,28 +353,39 @@ export async function runCli(arguments_: string[], options: { transport?: Source
   const verifyAction = positional.join(' ') === 'verify';
   const knowledgeAction = positional[0] === 'knowledge' && (positional[1] === 'acquire' || positional[1] === 'parse') && positional.length >= 2 ? positional[1] : undefined;
   if ((!probe && !acquire && !mapLabels && !parse && !catalogBuild && !knowledgeAction && !releaseBuild && !releaseVerify && !backupCreate && !verifyAction) || !flags.has('--paths')) return 2;
-  if (probe && (flags.has('--selection') || flags.has('--limit') || publishSnapshotFlag)) return 2;
+  const splitCountFlags = flags.has('--with-publisher-annotation') || flags.has('--without-publisher-annotation');
+  if (probe && (flags.has('--selection') || flags.has('--limit') || splitCountFlags || publishSnapshotFlag)) return 2;
   const limitText = flags.get('--limit');
   const validLimitFlag = limitText === undefined || /^\d+$/.test(limitText) && Number.isSafeInteger(Number(limitText)) && Number(limitText) > 0;
   if ((acquire || parse) && !validLimitFlag) return 2;
-  if (mapLabels && flags.has('--limit')) return 2;
-  if (knowledgeAction && (flags.has('--selection') || flags.has('--limit') || publishSnapshotFlag)) return 2;
-  if (releaseBuild && (flags.has('--limit') || publishSnapshotFlag)) return 2;
+  const withCountText = flags.get('--with-publisher-annotation');
+  const withoutCountText = flags.get('--without-publisher-annotation');
+  const validSplitCount = (text: string | undefined) => text === undefined || /^\d+$/.test(text) && Number.isSafeInteger(Number(text));
+  if (!validSplitCount(withCountText) || !validSplitCount(withoutCountText)) return 2;
+  if ((limitText !== undefined && splitCountFlags) || (!acquire && splitCountFlags) || mapLabels && (flags.has('--limit') || splitCountFlags)) return 2;
+  if (knowledgeAction && (flags.has('--selection') || flags.has('--limit') || splitCountFlags || publishSnapshotFlag)) return 2;
+  if (releaseBuild && (flags.has('--limit') || splitCountFlags || publishSnapshotFlag)) return 2;
   if (releaseBuild && flags.has('--release')) return 2;
   if (releaseVerify && (flags.has('--selection') || flags.has('--limit') || publishSnapshotFlag || includeOriginalsFlag)) return 2;
   if (!verifyAction && !releaseBuild && flags.has('--release')) return 2;
   if (!releaseBuild && includeOriginalsFlag) return 2;
   if (!backupCreate && (backupVerifyFlag || restoreSmokeFlag)) return 2;
-  if (backupCreate && (flags.has('--selection') || flags.has('--limit') || publishSnapshotFlag || includeOriginalsFlag)) return 2;
-  if (verifyAction && (flags.has('--limit') || publishSnapshotFlag || includeOriginalsFlag || backupVerifyFlag || restoreSmokeFlag)) return 2;
+  if (backupCreate && (flags.has('--selection') || flags.has('--limit') || splitCountFlags || publishSnapshotFlag || includeOriginalsFlag)) return 2;
+  if (verifyAction && (flags.has('--limit') || splitCountFlags || publishSnapshotFlag || includeOriginalsFlag || backupVerifyFlag || restoreSmokeFlag)) return 2;
   const paths = loadPaths(flags.get('--paths')!);
   const workbench = loadWorkbenchConfig(flags.get('--config') ?? defaultWorkbenchPath);
   const sampleSourceConfig = loadSourceConfig(sourceConfigPath(workbench.sample.source_id));
   if (sampleSourceConfig.source_id !== workbench.sample.source_id || sampleSourceConfig.dataset_id !== workbench.sample.dataset_id) throw new Error('WORKBENCH_SAMPLE_SOURCE_MISMATCH');
   const sourceTransport = options.transport ?? (probe || acquire ? createSourceHttp(sampleSourceConfig, { network: loadSharedEngineNetwork(paths.paperEngineRoot) }) : undefined);
   const selectionId = flags.get('--selection') ?? workbench.sample.selection_id;
-  const acquireLimit = limitText === undefined ? workbench.sample.acquire_limit : Number(limitText);
-  const parseLimit = limitText === undefined ? workbench.sample.acquire_limit : Number(limitText);
+  const configuredCounts = sampleAcquireCounts(workbench.sample);
+  const configuredTotal = sampleAcquireTotal(workbench.sample);
+  const acquireLimit = limitText === undefined ? undefined : Number(limitText);
+  const explicitAcquireCounts = splitCountFlags ? {
+    with_publisher_annotation: Number(withCountText ?? 0),
+    without_publisher_annotation: Number(withoutCountText ?? 0),
+  } : undefined;
+  const parseLimit = limitText === undefined ? undefined : Number(limitText);
   const releaseVersion = positional[2] ?? workbench.release.version;
   const knowledgeSourceIds = knowledgeAction
     ? (positional.length > 2 ? positional.slice(2) : knowledgeAction === 'parse' ? workbench.knowledge.parse_source_ids : workbench.knowledge.source_ids)
@@ -391,7 +419,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
         .sort((left, right) => `${left.dataset_id}/${left.sample_id}/${left.source_record_id}`.localeCompare(`${right.dataset_id}/${right.sample_id}/${right.source_record_id}`));
       if (release.manifest.selection_id !== selectionId || release.manifest.selection_hash !== selected.selectionHash
         || releaseEntries.length !== selectedEntries.length || JSON.stringify(releaseEntries) !== JSON.stringify(selectedEntries)) throw new Error('VERIFY_SELECTION_MISMATCH');
-      if (!flags.has('--selection') && selected.records.length !== workbench.sample.acquire_limit) throw new Error('VERIFY_CONFIGURED_SAMPLE_COUNT_MISMATCH');
+      if (!flags.has('--selection') && selected.records.length !== configuredTotal) throw new Error('VERIFY_CONFIGURED_SAMPLE_COUNT_MISMATCH');
       const selectedData = await verifySelectedData(paths, selected.records);
       if (!selectedData.parsedImage) throw new Error('VERIFY_IMAGE_PARSE_MISSING');
       const catalogPlan = await rebuildCatalog(paths, { lockHeld: true });
@@ -437,7 +465,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
     return 0;
   }
   if (parse) {
-    const result = await parseSelection({ paths, selectionId, limit: parseLimit }, options.parseDependencies);
+    const result = await parseSelection({ paths, selectionId, ...(parseLimit === undefined ? {} : { limit: parseLimit }) }, options.parseDependencies);
     (options.print ?? (value => console.log(JSON.stringify(value, null, 2))))(result);
     return 0;
   }
@@ -462,7 +490,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
   }
   const config = sampleSourceConfig;
   const result = probe ? await probeVoxel51(config, { transport: sourceTransport })
-    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, limit: acquireLimit, transport: sourceTransport })
+    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, ...(explicitAcquireCounts ? { counts: explicitAcquireCounts } : acquireLimit === undefined ? { counts: configuredCounts } : { limit: acquireLimit }), transport: sourceTransport })
     : await withRunLock(resolveOwnedPath(paths.dataRoot, 'work/run.lock'), async () => {
       const mapping = await mapVoxel51Selection({ paths, datasetId: workbench.sample.dataset_id, selectionId, lockHeld: true });
       const snapshots = publishSnapshot ? await Promise.all(mapping.sample_ids.map(sampleId => publishStructuredSnapshot({ paths, datasetId: workbench.sample.dataset_id, sampleId, lockHeld: true }))) : [];

@@ -1,16 +1,14 @@
-import { writePrettyJson } from '../file-store.ts';
+import { installImmutableFile, sha256File, writeCanonicalJson, writePrettyJson, type SupportedMimeType } from '../file-store.ts';
 import { compactJsonFileHash, prettyJson } from '../readable-json.ts';
 import { recoverPublications, publicationPaths, commitPublication } from '../publication.ts';
 import { sampleDirectory, datasetTasks, datasetAlias } from '../layout.ts';
-import { writeCanonicalJson } from '../file-store.ts';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink, rm } from 'node:fs/promises';
 import { dirname, extname } from 'node:path';
 import { resolveOwnedPath } from '../config.ts';
-import type { FlowmatePaths, SourceConfig } from '../contracts.ts';
+import type { AcquireCounts, FlowmatePaths, SourceConfig } from '../contracts.ts';
 import { canonicalJson, hashCanonical, withRunLock } from '../engine-bridge.ts';
 import { createDownloader, type DownloadReceipt } from '../downloader.ts';
-import { installImmutableFile, sha256File, type SupportedMimeType } from '../file-store.ts';
 import { loadSampleRecords, saveSampleRecord } from '../task-store.ts';
 import { assertRevision, createSourceHttp, metadataScope, resolveHuggingFaceRevision, type SourceTransport } from './dataset-records.ts';
 
@@ -20,6 +18,8 @@ export interface Voxel51Record {
   image_path: string;
   annotation_locator: string;
   raw: JsonObject;
+  annotation_status?: 'annotated' | 'unannotated' | 'invalid_annotation';
+  /** Compatibility alias used by older callers. */
   annotated: boolean;
 }
 export interface SelectedVoxel51Record {
@@ -27,10 +27,12 @@ export interface SelectedVoxel51Record {
   source_record_id: string;
   image_path: string;
   annotation_locator: string;
-  annotation_sha256: string;
+  annotation_status: 'annotated' | 'unannotated';
+  annotation_sha256?: string;
 }
 export interface Voxel51Selection {
   revision: string;
+  counts: AcquireCounts;
   records: SelectedVoxel51Record[];
   selection_hash: string;
 }
@@ -63,10 +65,50 @@ function safeId(value: string): void {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) fail('VOXEL51_INVALID_ID');
 }
 
+function nonNegativeInteger(value: unknown, code = 'VOXEL51_INVALID_LIMIT'): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) fail(code);
+  return Number(value);
+}
+
+export function normalizeVoxel51AcquireCounts(options: {
+  limit?: number;
+  counts?: Partial<AcquireCounts>;
+  with_publisher_annotation?: number;
+  without_publisher_annotation?: number;
+  withPublisherAnnotation?: number;
+  withoutPublisherAnnotation?: number;
+}): AcquireCounts {
+  if (options.counts !== undefined || options.with_publisher_annotation !== undefined || options.without_publisher_annotation !== undefined
+    || options.withPublisherAnnotation !== undefined || options.withoutPublisherAnnotation !== undefined) {
+    const withCount = options.counts?.with_publisher_annotation ?? options.with_publisher_annotation ?? options.withPublisherAnnotation ?? 0;
+    const withoutCount = options.counts?.without_publisher_annotation ?? options.without_publisher_annotation ?? options.withoutPublisherAnnotation ?? 0;
+    const counts = { with_publisher_annotation: nonNegativeInteger(withCount), without_publisher_annotation: nonNegativeInteger(withoutCount) };
+    if (counts.with_publisher_annotation + counts.without_publisher_annotation <= 0) fail('VOXEL51_INVALID_LIMIT');
+    return counts;
+  }
+  if (options.limit !== undefined) {
+    const limit = nonNegativeInteger(options.limit);
+    if (limit <= 0) fail('VOXEL51_INVALID_LIMIT');
+    return { with_publisher_annotation: limit, without_publisher_annotation: 0 };
+  }
+  fail('VOXEL51_INVALID_LIMIT');
+}
+
+export function voxel51AcquireTotal(counts: AcquireCounts): number {
+  return counts.with_publisher_annotation + counts.without_publisher_annotation;
+}
+
+export function assertVoxel51AcquireCounts(config: SourceConfig, counts: AcquireCounts): void {
+  const normalized = normalizeVoxel51AcquireCounts({ counts });
+  const total = voxel51AcquireTotal(normalized);
+  if (config.record_count !== undefined && total > config.record_count) fail('VOXEL51_LIMIT_EXCEEDS_TOTAL_RECORDS');
+  if (config.annotated_record_count !== undefined && normalized.with_publisher_annotation > config.annotated_record_count) fail('VOXEL51_LIMIT_EXCEEDS_ANNOTATED_RECORDS');
+  if (config.record_count !== undefined && config.annotated_record_count !== undefined
+    && normalized.without_publisher_annotation > config.record_count - config.annotated_record_count) fail('VOXEL51_LIMIT_EXCEEDS_UNANNOTATED_RECORDS');
+}
+
 export function assertVoxel51AcquireLimit(config: SourceConfig, limit: number): void {
-  if (!Number.isSafeInteger(limit) || limit <= 0) fail('VOXEL51_INVALID_LIMIT');
-  if (config.record_count !== undefined && limit > config.record_count) fail('VOXEL51_LIMIT_EXCEEDS_TOTAL_RECORDS');
-  if (config.annotated_record_count !== undefined && limit > config.annotated_record_count) fail('VOXEL51_LIMIT_EXCEEDS_ANNOTATED_RECORDS');
+  assertVoxel51AcquireCounts(config, { with_publisher_annotation: limit, without_publisher_annotation: 0 });
 }
 
 export function readVoxel51Index(bytes: Uint8Array): Voxel51Record[] {
@@ -79,27 +121,49 @@ export function readVoxel51Index(bytes: Uint8Array): Voxel51Record[] {
     if (typeof id !== 'string' || !/^[a-f0-9]{24}$/.test(id)) return fail('VOXEL51_INVALID_RECORD_ID');
     if (ids.has(id)) return fail('VOXEL51_DUPLICATE_RECORD');
     ids.add(id);
-    let annotated = false;
+    let annotation_status: Voxel51Record['annotation_status'] = 'unannotated';
     if (typeof raw.json_annotation === 'string' && raw.json_annotation.trim()) {
       try {
         const annotation = JSON.parse(raw.json_annotation);
-        annotated = annotation !== null && typeof annotation === 'object' && !Array.isArray(annotation) && Object.keys(annotation).length > 0;
-      } catch { /* An invalid publisher annotation is not eligible for selection. */ }
+        annotation_status = annotation === null || (typeof annotation === 'object' && !Array.isArray(annotation) && Object.keys(annotation).length === 0)
+          ? 'unannotated' : annotation !== null && typeof annotation === 'object' && !Array.isArray(annotation) ? 'annotated' : 'invalid_annotation';
+      } catch { annotation_status = 'invalid_annotation'; }
+    } else if (raw.json_annotation !== undefined && raw.json_annotation !== null && typeof raw.json_annotation !== 'string') {
+      annotation_status = typeof raw.json_annotation === 'object' && !Array.isArray(raw.json_annotation)
+        && Object.keys(raw.json_annotation as JsonObject).length === 0 ? 'unannotated' : 'invalid_annotation';
     }
-    return { source_record_id: id, image_path: safeImagePath(raw.filepath), annotation_locator: `/samples/${index}`, raw, annotated };
+    return { source_record_id: id, image_path: safeImagePath(raw.filepath), annotation_locator: `/samples/${index}`, raw, annotation_status, annotated: annotation_status === 'annotated' };
   });
 }
 
-export function selectVoxel51(records: readonly Voxel51Record[], options: { limit: number; revision: string }): Voxel51Selection {
+export function selectVoxel51(records: readonly Voxel51Record[], options: {
+  revision: string;
+  limit?: number;
+  counts?: Partial<AcquireCounts>;
+  with_publisher_annotation?: number;
+  without_publisher_annotation?: number;
+  withPublisherAnnotation?: number;
+  withoutPublisherAnnotation?: number;
+}): Voxel51Selection {
   assertRevision(options.revision);
-  if (!Number.isSafeInteger(options.limit) || options.limit <= 0) return fail('VOXEL51_INVALID_LIMIT');
-  const selected = records.filter(record => record.annotated).sort((a, b) => a.source_record_id < b.source_record_id ? -1 : a.source_record_id > b.source_record_id ? 1 : 0).slice(0, options.limit);
-  if (selected.length !== options.limit) return fail('VOXEL51_INSUFFICIENT_ANNOTATED_RECORDS');
+  const counts = normalizeVoxel51AcquireCounts(options);
+  const annotated = records.filter(record => record.annotation_status === 'annotated' || (record.annotation_status === undefined && record.annotated))
+    .sort((a, b) => a.source_record_id < b.source_record_id ? -1 : a.source_record_id > b.source_record_id ? 1 : 0);
+  const unannotated = records.filter(record => record.annotation_status === 'unannotated' || (record.annotation_status === undefined && !record.annotated))
+    .sort((a, b) => a.source_record_id < b.source_record_id ? -1 : a.source_record_id > b.source_record_id ? 1 : 0);
+  if (annotated.length < counts.with_publisher_annotation) return fail('VOXEL51_INSUFFICIENT_ANNOTATED_RECORDS');
+  if (unannotated.length < counts.without_publisher_annotation) return fail('VOXEL51_INSUFFICIENT_UNANNOTATED_RECORDS');
+  const selected = [
+    ...annotated.slice(0, counts.with_publisher_annotation).map(record => ({ record, annotation_status: 'annotated' as const })),
+    ...unannotated.slice(0, counts.without_publisher_annotation).map(record => ({ record, annotation_status: 'unannotated' as const })),
+  ];
   const content = {
     revision: options.revision,
-    records: selected.map(record => ({
-      sample_id: String(selected.indexOf(record) + 1).padStart(6, '0'), source_record_id: record.source_record_id,
-      image_path: record.image_path, annotation_locator: record.annotation_locator, annotation_sha256: hashCanonical(record.raw),
+    counts,
+    records: selected.map(({ record, annotation_status }, index) => ({
+      sample_id: String(index + 1).padStart(6, '0'), source_record_id: record.source_record_id,
+      image_path: record.image_path, annotation_locator: record.annotation_locator, annotation_status,
+      ...(annotation_status === 'annotated' ? { annotation_sha256: hashCanonical(record.raw) } : {}),
     })),
   };
   return { ...content, selection_hash: hashCanonical(content) };
@@ -121,7 +185,10 @@ export async function probeVoxel51(config: SourceConfig, options: { transport?: 
   const transport = options.transport ?? createSourceHttp(config);
   const revision = await resolveHuggingFaceRevision(config, { http: transport.http });
   const index = await readIndex(config, revision, transport);
-  return { source_id: config.source_id, revision, index_url: index.index_url, index_sha256: index.index_sha256, record_count: index.records.length, annotated_count: index.records.filter(record => record.annotated).length, redirect_chain: transport.redirect_chain };
+  const annotated_count = index.records.filter(record => record.annotation_status === 'annotated' || record.annotated).length;
+  const unannotated_count = index.records.filter(record => record.annotation_status === 'unannotated').length;
+  const invalid_annotation_count = index.records.filter(record => record.annotation_status === 'invalid_annotation').length;
+  return { source_id: config.source_id, revision, index_url: index.index_url, index_sha256: index.index_sha256, record_count: index.records.length, annotated_count, unannotated_count, invalid_annotation_count, redirect_chain: transport.redirect_chain };
 }
 
 async function optionalBytes(path: string): Promise<Buffer | undefined> {
@@ -148,33 +215,43 @@ async function preserveStableDatasetMetadata(path: string, bytes: Uint8Array, da
   await immutableBytes(path, bytes);
 }
 
-function checkSelection(bytes: Uint8Array, config: SourceConfig, selectionId: string, limit: number): StoredSelection {
+function checkSelection(bytes: Uint8Array, config: SourceConfig, selectionId: string, expectedCounts: AcquireCounts): StoredSelection {
   const value = object(JSON.parse(Buffer.from(bytes).toString('utf8')));
   const { selection_hash, ...content } = value;
   if (selection_hash !== hashCanonical(content) || value.schema_version !== 1 || value.source_id !== config.source_id || value.dataset_id !== config.dataset_id || value.selection_id !== selectionId || !Array.isArray(value.records)) return fail('VOXEL51_SELECTION_INVALID');
-  if (value.records.length !== limit) return fail('SELECTION_LIMIT_CONFLICT');
+  const countsValue = value.counts;
+  const counts: AcquireCounts = countsValue && typeof countsValue === 'object' && !Array.isArray(countsValue)
+    ? { with_publisher_annotation: nonNegativeInteger((countsValue as JsonObject).with_publisher_annotation, 'VOXEL51_SELECTION_INVALID'), without_publisher_annotation: nonNegativeInteger((countsValue as JsonObject).without_publisher_annotation, 'VOXEL51_SELECTION_INVALID') }
+    : { with_publisher_annotation: value.records.filter((entry: unknown) => {
+        const row = entry && typeof entry === 'object' ? entry as JsonObject : {};
+        return row.annotation_status !== 'unannotated';
+      }).length, without_publisher_annotation: 0 };
+  if (counts.with_publisher_annotation + counts.without_publisher_annotation !== value.records.length
+    || counts.with_publisher_annotation !== expectedCounts.with_publisher_annotation
+    || counts.without_publisher_annotation !== expectedCounts.without_publisher_annotation) return fail('SELECTION_LIMIT_CONFLICT');
   if (typeof value.revision !== 'string') return fail('VOXEL51_SELECTION_INVALID');
   assertRevision(value.revision);
   if (value.index_url !== fileUrl(config, value.revision, config.record_locator!.index_path)) return fail('VOXEL51_SELECTION_INVALID');
-  return value as unknown as StoredSelection;
+  return { ...(value as unknown as StoredSelection), counts };
 }
 
 export async function acquireVoxel51Selection(options: {
-  paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit: number; transport?: SourceTransport;
-}): Promise<{ added: number; reused: number; selection_hash: string; revision: string }> {
+  paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit?: number; counts?: Partial<AcquireCounts>; transport?: SourceTransport;
+}): Promise<{ added: number; reused: number; selection_hash: string; revision: string; counts: AcquireCounts; total: number }> {
   return withRunLock(resolveOwnedPath(options.paths.dataRoot, 'work/run.lock'), () => acquireVoxel51SelectionUnlocked(options), { jobId: `flowmate-acquire-${options.selectionId}` });
 }
 
 async function acquireVoxel51SelectionUnlocked(options: {
-  paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit: number; transport?: SourceTransport;
-}): Promise<{ added: number; reused: number; selection_hash: string; revision: string }> {
-  const { paths, config, selectionId, limit } = options;
+  paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit?: number; counts?: Partial<AcquireCounts>; transport?: SourceTransport;
+}): Promise<{ added: number; reused: number; selection_hash: string; revision: string; counts: AcquireCounts; total: number }> {
+  const { paths, config, selectionId } = options;
+  const counts = normalizeVoxel51AcquireCounts({ limit: options.limit, counts: options.counts });
   await recoverPublications(paths);
   safeId(selectionId);
   if (!config.dataset_id) return fail('VOXEL51_MISSING_DATASET_ID');
   if (config.dataset_id !== 'voxel51-hq-invoice-ocr' || config.source_id !== 'voxel51-invoice-ocr') return fail('VOXEL51_SOURCE_IDENTITY_MISMATCH');
   safeId(config.dataset_id);
-  assertVoxel51AcquireLimit(config, limit);
+  assertVoxel51AcquireCounts(config, counts);
   if (config.retention !== 'allowed' || config.local_use !== 'allowed') return fail('VOXEL51_LOCAL_USE_NOT_ALLOWED');
   const transport = options.transport ?? createSourceHttp(config);
   const base = datasetTasks(config.dataset_id);
@@ -186,7 +263,7 @@ async function acquireVoxel51SelectionUnlocked(options: {
   let selection: StoredSelection;
   let records: Voxel51Record[];
   if (saved) {
-    selection = checkSelection(saved, config, selectionId, limit);
+    selection = checkSelection(saved, config, selectionId, counts);
     let cached: Uint8Array | undefined = await optionalBytes(indexPath);
     if (!cached) {
       // A committed manifest is the recovery intent; never resolve main again to fill its cache.
@@ -200,7 +277,7 @@ async function acquireVoxel51SelectionUnlocked(options: {
   } else {
     const revision = await resolveHuggingFaceRevision(config, { http: transport.http });
     const index = await readIndex(config, revision, transport);
-    const selected = selectVoxel51(index.records, { limit, revision });
+    const selected = selectVoxel51(index.records, { counts, revision });
     const registryPath = data('ids.json');
     const registryBytes = await optionalBytes(registryPath);
     const registry: { schema_version: 1; next: number; ids: Record<string, string> } = registryBytes ? JSON.parse(registryBytes.toString('utf8')) : { schema_version: 1, next: 1, ids: {} };
@@ -224,7 +301,11 @@ async function acquireVoxel51SelectionUnlocked(options: {
   const byLocator = new Map(records.map(record => [record.annotation_locator, record]));
   const selectedRecords = selection.records.map(entry => {
     const record = byLocator.get(entry.annotation_locator);
-    if (!record || !record.annotated || record.source_record_id !== entry.source_record_id || record.image_path !== entry.image_path || hashCanonical(record.raw) !== entry.annotation_sha256 || (!/^[0-9]{6,}$/.test(entry.sample_id) || registry.ids[record.source_record_id] !== entry.sample_id)) return fail('VOXEL51_SELECTION_RECORD_MISMATCH');
+    const expectedStatus = entry.annotation_status ?? (entry.annotation_sha256 ? 'annotated' : 'unannotated');
+    const validAnnotation = expectedStatus === 'annotated' && (record?.annotation_status === 'annotated' || record?.annotated)
+      && hashCanonical(record.raw) === entry.annotation_sha256;
+    const validUnannotated = expectedStatus === 'unannotated' && record?.annotation_status === 'unannotated' && entry.annotation_sha256 === undefined;
+    if (!record || (!validAnnotation && !validUnannotated) || record.source_record_id !== entry.source_record_id || record.image_path !== entry.image_path || (!/^[0-9]{6,}$/.test(entry.sample_id) || registry.ids[record.source_record_id] !== entry.sample_id)) return fail('VOXEL51_SELECTION_RECORD_MISMATCH');
     return { entry, record };
   });
   const dataset = {
@@ -232,6 +313,7 @@ async function acquireVoxel51SelectionUnlocked(options: {
     publisher: 'Voxel51', homepage: config.homepage, revision: selection.revision,
     ...(config.record_count === undefined ? {} : { record_count: config.record_count }),
     ...(config.annotated_record_count === undefined ? {} : { annotated_record_count: config.annotated_record_count }),
+    ...(config.record_count !== undefined && config.annotated_record_count !== undefined ? { unannotated_record_count: config.record_count - config.annotated_record_count } : {}),
     declared_license: config.declared_license, license_evidence: config.license_evidence.replace('{revision}', selection.revision),
     retention: config.retention, local_use: config.local_use, redistribution: config.redistribution,
   };
@@ -253,10 +335,16 @@ async function acquireVoxel51SelectionUnlocked(options: {
     const existing = existingRecords.find(item => item.sample_id === entry.sample_id);
     const originalRef = `${sampleBase}/${imageName}`;
     const annotationRef = `${sampleBase}/annotation.json`;
+    const annotationStatus = entry.annotation_status ?? (entry.annotation_sha256 ? 'annotated' : 'unannotated');
+    const isAnnotated = annotationStatus === 'annotated';
     if (existing && existing.dataset_revision === selection.revision) {
-      if (existing.source_record_id !== entry.source_record_id || existing.original_ref.root !== 'original' || existing.original_ref.path !== originalRef || existing.annotation_ref?.root !== 'original' || existing.annotation_ref.path !== annotationRef || existing.annotation_sha256 !== entry.annotation_sha256) return fail('VOXEL51_RECORD_CONFLICT');
+      const existingStatus = existing.publisher_annotation_status ?? (existing.annotation_ref || existing.annotation_sha256 ? 'annotated' : 'unannotated');
+      if (existing.source_record_id !== entry.source_record_id || existing.original_ref.root !== 'original' || existing.original_ref.path !== originalRef || existingStatus !== annotationStatus) return fail('VOXEL51_RECORD_CONFLICT');
+      if (isAnnotated && (existing.annotation_ref?.root !== 'original' || existing.annotation_ref.path !== annotationRef || existing.annotation_sha256 !== entry.annotation_sha256)) return fail('VOXEL51_RECORD_CONFLICT');
+      if (!isAnnotated && (existing.annotation_ref || existing.annotation_sha256)) return fail('VOXEL51_RECORD_CONFLICT');
       if (await sha256File(originalPath) !== existing.original_sha256) return fail('VOXEL51_ORIGINAL_HASH_MISMATCH');
-      if (await compactJsonFileHash(annotationPath) !== entry.annotation_sha256) return fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
+      if (isAnnotated && await compactJsonFileHash(annotationPath) !== entry.annotation_sha256) return fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
+      if (!isAnnotated && await optionalBytes(annotationPath)) return fail('VOXEL51_RECORD_CONFLICT');
       const receipt: DownloadReceipt = JSON.parse(await readFile(receiptPath, 'utf8'));
       const image = await readFile(originalPath);
       if (receipt.sha256 !== existing.original_sha256 || receipt.bytes !== image.length || receipt.stable_url !== fileUrl(config, existing.dataset_revision, entry.image_path) || receipt.mime_type !== imageMime(entry.image_path) || ![...config.allowed_origins, ...config.redirect_origins].includes(receipt.final_origin)) return fail('VOXEL51_RECEIPT_MISMATCH');
@@ -282,13 +370,14 @@ async function acquireVoxel51SelectionUnlocked(options: {
       // The immutable installer can reuse an existing original after a prior interrupted acquisition.
       await unlink(temporaryPath).catch(error => { if (error.code !== 'ENOENT') throw error; });
     }
-    await immutableBytes(`${stagedOriginal}/annotation.json`, Buffer.from(prettyJson(JSON.parse(canonicalJson(record.raw)))));
+    if (isAnnotated) await immutableBytes(`${stagedOriginal}/annotation.json`, Buffer.from(prettyJson(JSON.parse(canonicalJson(record.raw)))));
     await immutableBytes(`${stagedData}/receipt.json`, Buffer.from(canonicalJson(receipt)));
     const candidate = {
       schema_version: 1, sample_id: entry.sample_id, dataset_id: config.dataset_id, dataset_revision: selection.revision,
       source_record_id: entry.source_record_id, origin_kind: config.origin_kind, document_kind: config.document_kind,
       language: config.language, layout_group: null, original_ref: { root: 'original', path: originalRef },
-      original_sha256: receipt.sha256, annotation_ref: { root: 'original', path: annotationRef }, annotation_sha256: entry.annotation_sha256,
+      original_sha256: receipt.sha256, publisher_annotation_status: annotationStatus,
+      ...(isAnnotated ? { annotation_ref: { root: 'original', path: annotationRef }, annotation_sha256: entry.annotation_sha256 } : {}),
       source_observations: [`${selection.index_url}#${entry.annotation_locator}`], label_kind: 'none',
       quality_status: 'not_checked', processing_status: 'downloaded', allowed_uses: ['development', 'regression'],
       created_at: existing?.created_at ?? new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -298,14 +387,14 @@ async function acquireVoxel51SelectionUnlocked(options: {
     await commitPublication(paths, config.dataset_id, entry.sample_id, async directory => {
       if (await Bun.file(`${directory}/record.json`).exists()) {
         const stored = JSON.parse(await readFile(`${directory}/record.json`, 'utf8'));
-        if (stored.original_sha256 !== receipt.sha256 || stored.sample_id !== entry.sample_id || stored.annotation_sha256 !== entry.annotation_sha256) fail('VOXEL51_RECORD_CONFLICT');
+        if (stored.original_sha256 !== receipt.sha256 || stored.sample_id !== entry.sample_id || stored.publisher_annotation_status !== annotationStatus || (isAnnotated && stored.annotation_sha256 !== entry.annotation_sha256) || (!isAnnotated && (stored.annotation_ref || stored.annotation_sha256))) fail('VOXEL51_RECORD_CONFLICT');
         if (digest(await readFile(`${directory}/receipt.json`)) !== hashCanonical(receipt)) fail('VOXEL51_RECEIPT_MISMATCH');
       } else {
         if (await sha256File(`${directory}/${imageName}`) !== receipt.sha256) fail('VOXEL51_ORIGINAL_HASH_MISMATCH');
-        if (await compactJsonFileHash(`${directory}/annotation.json`) !== entry.annotation_sha256) fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
+        if (isAnnotated && await compactJsonFileHash(`${directory}/annotation.json`) !== entry.annotation_sha256) fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
       }
     });
     if (existing) reused += 1; else added += 1;
   }
-  return { added, reused, selection_hash: selection.selection_hash, revision: selection.revision };
+  return { added, reused, selection_hash: selection.selection_hash, revision: selection.revision, counts: selection.counts, total: selection.records.length };
 }

@@ -150,7 +150,7 @@ function assertPortable(value: unknown): void {
 async function selectionRecords(paths: FlowmatePaths, selectionId: string, config: SourceConfig): Promise<{ records: SampleRecord[]; selectionHash: string; revision: string }> {
   safeId(selectionId, 'RELEASE_INVALID_SELECTION');
   const selectionPath = resolveOwnedPath(paths.dataRoot, `tasks/voxel51/selections/${selectionId}.json`);
-  const value = JSON.parse(await readFile(selectionPath, 'utf8')) as { schema_version?: number; source_id?: string; dataset_id?: string; selection_id?: string; index_url?: string; index_sha256?: string; selection_hash?: string; revision?: string; records?: Array<{ sample_id?: string; source_record_id?: string; image_path?: string; annotation_locator?: string; annotation_sha256?: string }> };
+  const value = JSON.parse(await readFile(selectionPath, 'utf8')) as { schema_version?: number; source_id?: string; dataset_id?: string; selection_id?: string; index_url?: string; index_sha256?: string; selection_hash?: string; revision?: string; counts?: { with_publisher_annotation?: number; without_publisher_annotation?: number }; records?: Array<{ sample_id?: string; source_record_id?: string; image_path?: string; annotation_locator?: string; annotation_status?: 'annotated' | 'unannotated'; annotation_sha256?: string }> };
   const { selection_hash: selectionHash, ...content } = value;
   if (value.schema_version !== 1 || value.source_id !== config.source_id || value.dataset_id !== config.dataset_id || value.selection_id !== selectionId
     || typeof selectionHash !== 'string' || selectionHash !== hashCanonical(content) || typeof value.revision !== 'string' || !Array.isArray(value.records)
@@ -166,13 +166,21 @@ async function selectionRecords(paths: FlowmatePaths, selectionId: string, confi
   const records = value.records.map(entry => {
     if (typeof entry.sample_id !== 'string' || !byId.has(entry.sample_id)) fail('RELEASE_SELECTION_RECORD_MISSING');
     const source = byLocator.get((entry as { annotation_locator?: string }).annotation_locator ?? '');
-    if (!source || source.source_record_id !== (entry as { source_record_id?: string }).source_record_id || source.image_path !== (entry as { image_path?: string }).image_path
-      || hashCanonical(source.raw) !== (entry as { annotation_sha256?: string }).annotation_sha256 || (!/^[0-9]{6,}$/.test(entry.sample_id) || registry.ids[source.source_record_id] !== entry.sample_id)) fail('RELEASE_SELECTION_RECORD_MISMATCH');
+    const status = entry.annotation_status ?? (entry.annotation_sha256 ? 'annotated' : 'unannotated');
+    const sourceStatus = source?.annotation_status ?? (source?.annotated ? 'annotated' : 'unannotated');
+    if (!source || !['annotated', 'unannotated'].includes(status) || sourceStatus !== status || source.source_record_id !== (entry as { source_record_id?: string }).source_record_id || source.image_path !== (entry as { image_path?: string }).image_path
+      || (status === 'annotated' && hashCanonical(source.raw) !== (entry as { annotation_sha256?: string }).annotation_sha256)
+      || (status === 'unannotated' && entry.annotation_sha256 !== undefined)
+      || (!/^[0-9]{6,}$/.test(entry.sample_id) || registry.ids[source.source_record_id] !== entry.sample_id)) fail('RELEASE_SELECTION_RECORD_MISMATCH');
     const record = byId.get(entry.sample_id)!;
     if (record.dataset_id !== config.dataset_id || record.dataset_revision !== value.revision || record.source_record_id !== source.source_record_id) fail('RELEASE_SELECTION_RECORD_MISMATCH');
     return record;
   });
   if (new Set(records.map(record => record.sample_id)).size !== records.length) fail('RELEASE_SELECTION_DUPLICATE');
+  if (value.counts) {
+    const annotated = records.filter(record => (record.publisher_annotation_status ?? (record.annotation_ref || record.annotation_sha256 ? 'annotated' : 'unannotated')) === 'annotated').length;
+    if (value.counts.with_publisher_annotation !== annotated || value.counts.without_publisher_annotation !== records.length - annotated) fail('RELEASE_SELECTION_RECORD_MISMATCH');
+  }
   return { records, selectionHash, revision: value.revision };
 }
 

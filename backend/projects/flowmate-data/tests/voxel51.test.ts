@@ -35,6 +35,17 @@ test('selects only annotated publisher records and sorts by record id, not image
   expect(selection.records[0]!.annotation_locator).toBe('/samples/1');
 });
 
+test('selects annotated and unannotated groups independently and records their counts', () => {
+  const input = structuredClone(fixture);
+  input.samples[2]!.json_annotation = '';
+  const records = readVoxel51Index(Buffer.from(JSON.stringify(input)));
+  expect(records.map(record => record.annotation_status)).toEqual(['annotated', 'annotated', 'unannotated']);
+  const selection = selectVoxel51(records, { counts: { with_publisher_annotation: 1, without_publisher_annotation: 1 }, revision });
+  expect(selection.counts).toEqual({ with_publisher_annotation: 1, without_publisher_annotation: 1 });
+  expect(selection.records.map(record => record.annotation_status)).toEqual(['annotated', 'unannotated']);
+  expect(selection.records[1]!.annotation_sha256).toBeUndefined();
+});
+
 test('enforces the configured total and annotated Voxel51 counts before acquisition', () => {
   const config = loadSourceConfig(sourcePath);
   expect(() => assertVoxel51AcquireLimit(config, 20)).not.toThrow();

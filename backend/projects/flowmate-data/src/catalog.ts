@@ -131,7 +131,8 @@ function sampleCard(paths: FlowmatePaths, record: SampleRecord, withdrawn: boole
   const datasetId = catalogSegment(datasetAlias(record.dataset_id));
   const sampleId = catalogSegment(record.sample_id);
   const mirror = join(paths.originalRoot, datasetId, sampleId);
-  const lines = [frontmatter({ dataset: record.dataset_id, revision: record.dataset_revision, origin: record.origin_kind, document: record.document_kind, language: record.language, label: record.label_kind, parse: sampleParseStatus(record, withdrawn), status: withdrawn ? 'withdrawn' : 'active', license: record.allowed_uses.join(',') }), `# ${record.sample_id}`, '', `- ${link('Original', ref(paths, record.original_ref))}`];
+  const publisherAnnotation = record.publisher_annotation_status ?? (record.annotation_ref || record.annotation_sha256 ? 'annotated' : 'unannotated');
+  const lines = [frontmatter({ dataset: record.dataset_id, revision: record.dataset_revision, origin: record.origin_kind, document: record.document_kind, language: record.language, label: record.label_kind, publisher_annotation: publisherAnnotation, parse: sampleParseStatus(record, withdrawn), status: withdrawn ? 'withdrawn' : 'active', license: record.allowed_uses.join(',') }), `# ${record.sample_id}`, '', `- ${link('Original', ref(paths, record.original_ref))}`];
   if (record.annotation_ref) lines.push(`- ${link('Original annotation', ref(paths, record.annotation_ref))}`);
   else lines.push('- Original annotation: unavailable');
   if (record.label_ref) lines.push(`- ${link('Unified label', ref(paths, record.label_ref))}`);

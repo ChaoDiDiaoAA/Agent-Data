@@ -43,7 +43,13 @@ export interface WorkbenchConfig {
     source_id: string;
     dataset_id: string;
     selection_id: string;
-    acquire_limit: number;
+    /**
+     * Counts are split by whether the public dataset supplies a publisher
+     * annotation.  Both groups are downloaded and sent to MinerU.
+     */
+    acquire?: AcquireCounts;
+    /** @deprecated Use `acquire` instead. Kept for old local configs/scripts. */
+    acquire_limit?: number;
     publish_snapshot: boolean;
   };
   knowledge: {
@@ -58,4 +64,9 @@ export interface WorkbenchConfig {
     verify: boolean;
     restore_smoke: boolean;
   };
+}
+
+export interface AcquireCounts {
+  with_publisher_annotation: number;
+  without_publisher_annotation: number;
 }

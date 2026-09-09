@@ -38,18 +38,19 @@ export async function processSample(input: { paths: FlowmatePaths; record: Sampl
   });
 }
 
-export async function parseSelection(input: { paths: FlowmatePaths; selectionId: string; limit: number }, dependencies: ParseDependencies = {}) {
+export async function parseSelection(input: { paths: FlowmatePaths; selectionId: string; limit?: number }, dependencies: ParseDependencies = {}) {
   return withRunLock(resolveOwnedPath(input.paths.dataRoot, 'work/run.lock'), () => parseSelectionUnlocked(input, { ...dependencies, lockHeld: true }), { jobId: `flowmate-parse-selection-${input.selectionId}` });
 }
 
-async function parseSelectionUnlocked(input: { paths: FlowmatePaths; selectionId: string; limit: number }, dependencies: ParseDependencies = {}) {
+async function parseSelectionUnlocked(input: { paths: FlowmatePaths; selectionId: string; limit?: number }, dependencies: ParseDependencies = {}) {
   const { paths, selectionId, limit } = input;
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(selectionId) || !Number.isSafeInteger(limit) || limit <= 0) throw new Error('PARSE_SELECTION_INVALID');
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(selectionId) || (limit !== undefined && (!Number.isSafeInteger(limit) || limit <= 0))) throw new Error('PARSE_SELECTION_INVALID');
   const datasetId = 'voxel51-hq-invoice-ocr';
   await recoverPublications(paths);
   const records = await loadSampleRecords(paths, datasetId);
   const selected = committedSelection(await readFile(resolveOwnedPath(paths.dataRoot, `${datasetTasks(datasetId)}/selections/${selectionId}.json`)), datasetId, selectionId, records);
-  const images = selected.filter(record => ['.jpg', '.jpeg', '.png'].includes(extname(record.original_ref.path).toLowerCase())).slice(0, limit);
+  const imageRecords = selected.filter(record => ['.jpg', '.jpeg', '.png'].includes(extname(record.original_ref.path).toLowerCase()));
+  const images = limit === undefined ? imageRecords : imageRecords.slice(0, limit);
   if (images.length === 0) throw new Error('PARSE_SELECTION_NO_IMAGE');
   const receipts: ParseReceipt[] = [];
   for (let index = 0; index < images.length; index += 1) {

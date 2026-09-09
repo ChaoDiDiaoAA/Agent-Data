@@ -20,8 +20,8 @@
 ```text
 D:\paper\Invoice\voxel51\000001\
   original.jpg       原始发票图片
-  annotation.json    发布方原始标注
-  fields.json        标注映射后的发票业务字段
+  annotation.json    发布方原始标注（带标注样本才有）
+  fields.json        标注映射后的发票业务字段（带标注样本才有）
   content.json       MinerU 结构化解析内容
   pages.json         分页信息
   content.md         解析正文
@@ -29,7 +29,8 @@ D:\paper\Invoice\voxel51\000001\
   assets\            解析附属图片（有才创建）
 
 D:\agent-data\data\flowmate-data\voxel51\000001\
-  fields.json、content.json、pages.json、content.md、record.json、assets\
+  content.json、pages.json、content.md、record.json、assets\
+  fields.json（带发布方标注样本才有）
 
 D:\obsidian\data\flowmate-data\
   01_总览.md
@@ -43,13 +44,14 @@ D:\obsidian\data\flowmate-data\
 
 ### 发布方标注与 MinerU 解析结果
 
-每张已获取发票的发布方原始标注位于：
+带发布方标注的已获取发票，其原始标注位于：
 
 ```text
 D:\paper\Invoice\voxel51\<发票编号>\annotation.json
 ```
 
 `annotation.json` 中的 `json_annotation` 是 Voxel51 发布方提供的结构化标注，可作为字段对照依据。相关文件的职责如下：
+无发布方标注的样本不会创建这个文件；请以该样本的 `record.json` 中 `publisher_annotation_status` 判断类别。
 
 | 文件 | 来源与用途 |
 |---|---|
@@ -65,9 +67,9 @@ annotation.json（发布方标注） → fields.json（统一字段）
 original.jpg（发票图片）      → content.json（MinerU 解析结果）
 ```
 
-发布方标注不等于字段全部完整。即使存在 `json_annotation`，币种、未税金额、税率、字段坐标等字段也可能没有提供，程序会在 `fields.json` 中将其标记为 `missing` 或 `ambiguous`。当前采集器只选择 `json_annotation` 非空且可解析为非空对象的记录，因此重新执行任务后，每张下载的发票都会有可用于对照的 `annotation.json`。
+发布方标注不等于字段全部完整。即使存在 `json_annotation`，币种、未税金额、税率、字段坐标等字段也可能没有提供，程序会在 `fields.json` 中将其标记为 `missing` 或 `ambiguous`。带发布方标注的记录会保存 `annotation.json` 并生成 `fields.json`；无发布方标注的记录仍会下载原图并交给 MinerU，但不生成伪造的 `fields.json`，记录会明确标记为 `publisher_annotation_status: unannotated`。
 
-重新开始时保留代码、本地配置和 MinerU 模型，只清空四个数据根内的旧数据。启动下方菜单并选择 **2. 执行当前任务**，获取和解析数量仍读取 `sample.acquire_limit`，不需要重新输入。
+重新开始时保留代码、本地配置和 MinerU 模型，只清空四个数据根内的旧数据。启动下方菜单并选择 **2. 执行当前任务**，获取和解析数量读取 `sample.acquire.with_publisher_annotation` 与 `sample.acquire.without_publisher_annotation`，不需要重新输入。
 
 ## 运行前准备（依赖与模型）
 
@@ -103,7 +105,9 @@ bun run typecheck
 | `sample.source_id`                         | 样本来源登记 ID，对应`config/sources/<source_id>.json` | `voxel51-invoice-ocr`          |
 | `sample.dataset_id`                        | 处理数据和 Obsidian 的数据集分区                         | `voxel51-hq-invoice-ocr`       |
 | `sample.selection_id`                      | 固定选样清单 ID；同一 ID 重跑读取已提交清单              | `initial-20`                   |
-| `sample.acquire_limit`                     | 当前任务获取并交给 MinerU 解析的带标注样本数             | `20`                           |
+| `sample.acquire.with_publisher_annotation` | 当前任务获取并交给 MinerU 解析的带发布方标注样本数       | `100`                          |
+| `sample.acquire.without_publisher_annotation` | 当前任务获取并交给 MinerU 解析的无发布方标注样本数    | `0`                            |
+| `sample.acquire`                           | 两个数量之和就是本次获取与解析总数                       | `100`                          |
 | `sample.publish_snapshot`                  | 标签映射后是否同步发布`D:\paper\Invoice` 结构化镜像    | `true`                         |
 | `knowledge.source_ids`                     | 已登记的知识来源列表                                     | `[]`（当前不启用额外知识来源） |
 | `knowledge.parse_source_ids`               | 已登记且允许解析的知识来源                               | `[]`                           |
@@ -117,7 +121,7 @@ bun run typecheck
 
 当前公开来源的获取位置：
 
-- `config/sources/voxel51-invoice-ocr.json`：唯一启用的原始数据来源。Hugging Face 数据集声明共 8,181 张发票图片，其中 1,489 条带结构化标注；程序只选有发布方标注的记录，再按原始 record ID 排序获取 `acquire_limit` 条图片及 `annotation.json`，不会下载全库。`record_count` 和 `annotated_record_count` 会阻止超过上限的采集。
+- `config/sources/voxel51-invoice-ocr.json`：唯一启用的原始数据来源。Hugging Face 数据集声明共 8,181 张发票图片，其中 1,489 条带结构化标注；程序按两个配置数量分别选取带标注和无标注记录，再按原始 record ID 排序下载，两个组都会交给 MinerU，不会下载全库。`record_count` 和 `annotated_record_count` 会阻止超过声明上限的采集；索引中格式错误的标注会单独统计并跳过。
 
 ## 推荐运行方式
 
@@ -140,7 +144,7 @@ bun src/cli.ts
 不要在 `D:\agent-data\backend\projects\paper-knowledge-engine` 目录执行
 `bun src/cli.ts`；那是论文知识引擎的方向库菜单，不会启动 Flowmate。
 
-菜单会从 `config/workbench.local.json` 读取唯一的 `sample.acquire_limit`，显示当前来源总量及可标注数量。菜单的“执行当前任务”会用同一个数量完成获取、标签映射、MinerU 解析、Obsidian、Release、校验和备份；菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
+菜单会从 `config/workbench.local.json` 读取两个 `sample.acquire` 数量，并显示带标注、无标注及合计。菜单的“执行当前任务”会用同一批合计数量完成获取、标签映射、MinerU 解析、Obsidian、Release、校验和备份；菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
 
 MinerU 阶段会按顺序显示 `[发票 1/100]`、`[发票 2/100]` 等开始和完成信息；某条发票的“开始”与“完成”之间暂时没有新行时，表示该条仍在等待 MinerU 返回。
 
@@ -151,6 +155,6 @@ bun src/cli.ts source probe voxel51-invoice-ocr --paths config/paths.local.json 
 bun src/cli.ts acquire voxel51-invoice-ocr --limit 5 --paths config/paths.local.json --config config/workbench.local.json
 ```
 
-`selected`、`downloaded`、`processed`、`cataloged`、`completed` 表示样本状态；`failed` 可从上一个成功状态恢复。`policies/withdrawals.json` 记录来源撤回条目，目录重建会标记为 `withdrawn`，Release 会拒绝再次发布。Release 默认不复制 `redistribution=unknown/denied` 的原件。真实 MinerU smoke 需要本机可用的 MinerU runtime，单元测试使用 fake session；实际当前任务数量由 `sample.acquire_limit` 决定。
+`selected`、`downloaded`、`processed`、`cataloged`、`completed` 表示样本状态；`failed` 可从上一个成功状态恢复。`policies/withdrawals.json` 记录来源撤回条目，目录重建会标记为 `withdrawn`，Release 会拒绝再次发布。Release 默认不复制 `redistribution=unknown/denied` 的原件。真实 MinerU smoke 需要本机可用的 MinerU runtime，单元测试使用 fake session；实际当前任务数量由 `sample.acquire` 两个字段之和决定。`--limit` 仍作为高级兼容参数，表示只取带发布方标注样本；需要两类同时运行时应修改配置或使用两个分类参数。
 
 `verify` 命令会校验当前样本、标签、结构化镜像、解析 receipt 并重建目录；输出中的 `projection_valid` 表示这些当前文件检查通过。重复采集是否新增 0 条和 FSD 数据是否未变化需要运行前后证据，因此会列在 `pending` 中，不能由一次静态校验伪造为完成。

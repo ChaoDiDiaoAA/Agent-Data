@@ -178,4 +178,16 @@ describe('workbench configuration', () => {
   test('rejects a separate parse limit because the current task has one quantity', () => {
     expect(() => validateWorkbenchConfig({ ...validWorkbench, sample: { ...validWorkbench.sample, parse_limit: 1 } })).toThrow('UNKNOWN_FIELD');
   });
+
+  test('accepts separate publisher-annotation acquisition counts and rejects an empty task', () => {
+    const split = validateWorkbenchConfig({
+      ...validWorkbench,
+      sample: {
+        source_id: 'voxel51-invoice-ocr', dataset_id: 'voxel51-hq-invoice-ocr', selection_id: 'mixed-2026',
+        acquire: { with_publisher_annotation: 3, without_publisher_annotation: 2 }, publish_snapshot: true,
+      },
+    });
+    expect(split.sample.acquire).toEqual({ with_publisher_annotation: 3, without_publisher_annotation: 2 });
+    expect(() => validateWorkbenchConfig({ ...validWorkbench, sample: { ...split.sample, acquire: { with_publisher_annotation: 0, without_publisher_annotation: 0 } } })).toThrow('INVALID_CONFIG');
+  });
 });

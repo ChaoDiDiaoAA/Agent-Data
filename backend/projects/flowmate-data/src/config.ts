@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve, sep, win32 } from 'node:path';
-import type { DocumentKind, FlowmatePaths, OriginKind, SourceConfig, WorkbenchConfig } from './contracts.ts';
+import type { AcquireCounts, DocumentKind, FlowmatePaths, OriginKind, SourceConfig, WorkbenchConfig } from './contracts.ts';
 
 type ConfigObject = Record<string, unknown>;
 
@@ -50,6 +50,11 @@ function safeConfigId(value: unknown): string {
 
 function positiveInteger(value: unknown): number {
   if (!Number.isSafeInteger(value) || Number(value) <= 0) return fail('INVALID_CONFIG');
+  return Number(value);
+}
+
+function nonNegativeInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) return fail('INVALID_CONFIG');
   return Number(value);
 }
 
@@ -148,20 +153,36 @@ export function loadSourceConfig(path: string): SourceConfig {
 
 export function validateWorkbenchConfig(value: unknown): WorkbenchConfig {
   const config = closedObject(value, ['schema_version', 'sample', 'knowledge', 'release', 'backup']);
-  const sample = closedObject(config.sample, ['source_id', 'dataset_id', 'selection_id', 'acquire_limit', 'publish_snapshot']);
+  const sample = closedObject(config.sample, ['source_id', 'dataset_id', 'selection_id', 'acquire', 'acquire_limit', 'publish_snapshot']);
   const knowledge = closedObject(config.knowledge, ['source_ids', 'parse_source_ids']);
   const release = closedObject(config.release, ['version', 'include_originals']);
   const backup = closedObject(config.backup, ['verify', 'restore_smoke']);
   const sourceIds = stringArray(knowledge.source_ids).map(safeConfigId);
   const parseSourceIds = stringArray(knowledge.parse_source_ids).map(safeConfigId);
   if (parseSourceIds.some(sourceId => !sourceIds.includes(sourceId))) fail('INVALID_CONFIG');
+  if (sample.acquire !== undefined && sample.acquire_limit !== undefined) fail('INVALID_CONFIG');
+  let acquire: AcquireCounts | undefined;
+  if (sample.acquire !== undefined) {
+    const configured = closedObject(sample.acquire, ['with_publisher_annotation', 'without_publisher_annotation']);
+    acquire = {
+      with_publisher_annotation: nonNegativeInteger(configured.with_publisher_annotation),
+      without_publisher_annotation: nonNegativeInteger(configured.without_publisher_annotation),
+    };
+    if (acquire.with_publisher_annotation + acquire.without_publisher_annotation <= 0) fail('INVALID_CONFIG');
+  } else if (sample.acquire_limit !== undefined) {
+    // Read old local files without silently changing their meaning.  New
+    // files should use `sample.acquire` so the two source groups are explicit.
+    acquire = undefined;
+  } else {
+    fail('INVALID_CONFIG');
+  }
   return {
     schema_version: config.schema_version === 1 ? 1 : fail('INVALID_CONFIG'),
     sample: {
       source_id: safeConfigId(sample.source_id),
       dataset_id: safeConfigId(sample.dataset_id),
       selection_id: safeConfigId(sample.selection_id),
-      acquire_limit: positiveInteger(sample.acquire_limit),
+      ...(acquire ? { acquire } : { acquire_limit: positiveInteger(sample.acquire_limit) }),
       publish_snapshot: booleanValue(sample.publish_snapshot),
     },
     knowledge: { source_ids: sourceIds, parse_source_ids: parseSourceIds },
@@ -172,6 +193,18 @@ export function validateWorkbenchConfig(value: unknown): WorkbenchConfig {
 
 export function loadWorkbenchConfig(path: string): WorkbenchConfig {
   return validateWorkbenchConfig(readJson(path));
+}
+
+/** Return the configured acquisition split, including compatibility for old local files. */
+export function sampleAcquireCounts(sample: WorkbenchConfig['sample']): AcquireCounts {
+  if (sample.acquire) return { ...sample.acquire };
+  if (sample.acquire_limit !== undefined) return { with_publisher_annotation: sample.acquire_limit, without_publisher_annotation: 0 };
+  return fail('INVALID_CONFIG');
+}
+
+export function sampleAcquireTotal(sample: WorkbenchConfig['sample']): number {
+  const counts = sampleAcquireCounts(sample);
+  return counts.with_publisher_annotation + counts.without_publisher_annotation;
 }
 
 function isWithin(root: string, candidate: string): boolean {

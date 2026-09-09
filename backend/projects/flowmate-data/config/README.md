@@ -22,7 +22,8 @@ bun src/cli.ts <command> --paths config/paths.local.json --config config/workben
 如果使用相对入口，必须先执行 `Set-Location 'D:\agent-data\backend\projects\flowmate-data'`。
 在 `paper-knowledge-engine` 目录运行同名的 `bun src/cli.ts` 会进入论文方向库菜单，不会启动 Flowmate。
 菜单会读取本机的
-`config/workbench.local.json`：`sample.acquire_limit` 同时决定当前任务获取和交给 MinerU 解析多少条带标注发票。
+`config/workbench.local.json`：`sample.acquire.with_publisher_annotation` 和
+`sample.acquire.without_publisher_annotation` 分别决定两类发票的数量，二者都会获取并交给 MinerU 解析。
 菜单会在进入时显示这个任务数量，不会再要求手工输入数量，也不会为菜单生成 `--limit` 参数；修改配置后重新运行命令即可。
 
 `paths.local.json`、`workbench.local.json` 和 `mineru.local.json` 都是本机文件，不提交到 Git。仓库不再保留 `*.example.json` 模板；首次使用按下面的完整结构创建这三个文件：
@@ -49,7 +50,10 @@ bun src/cli.ts <command> --paths config/paths.local.json --config config/workben
     "source_id": "voxel51-invoice-ocr",
     "dataset_id": "voxel51-hq-invoice-ocr",
     "selection_id": "initial-20",
-    "acquire_limit": 20,
+    "acquire": {
+      "with_publisher_annotation": 20,
+      "without_publisher_annotation": 0
+    },
     "publish_snapshot": true
   },
   "knowledge": {
@@ -173,22 +177,27 @@ FSD 正在解析论文时，Flowmate 会在启动前明确报告 `MINERU_RESOURC
 | `sources/voxel51-invoice-ocr.json` | Voxel51 发票图片数据集 | `revision.url` 获取固定 revision；`record_locator.file_url_template` 获取 `samples.json` 和每条图片；`record_locator.index_path` 指定索引文件 |
 | `workbench.local.json` | 选择启用哪些来源 | `sample.source_id` 选择样本来源；当前 `knowledge.source_ids` 和 `parse_source_ids` 都为空 |
 
-Voxel51 是当前唯一登记的原始数据来源。数据集卡片声明总计 8,181 张发票图片，其中 1,489 条带结构化标注；获取流程先访问 revision API 和 `samples.json`，只保留有发布方标注的记录，按来源 record ID 排序，然后下载选中的图片和原始标注。不会因为页面显示的总样本数而下载整个数据集。
+Voxel51 是当前唯一登记的原始数据来源。数据集卡片声明总计 8,181 张发票图片，其中 1,489 条带结构化标注；获取流程先访问 revision API 和 `samples.json`，按来源 record ID 分别选择带发布方标注和无发布方标注记录，然后下载选中的图片。带标注记录另存发布方原始标注；无标注记录不会生成伪造标注。不会因为页面显示的总样本数而下载整个数据集。
 
 ### 获取多少
 
-样本数量由 `config/workbench.local.json` 的一个字段控制：
+样本数量由 `config/workbench.local.json` 的 `sample.acquire` 两个字段控制：
 
 | 参数 | 作用 | 当前默认值 |
 |---|---|---:|
-| `sample.acquire_limit` | 当前任务从样本数据集选取、下载并交给 MinerU 解析多少条有标注样本 | `20` |
+| `sample.acquire.with_publisher_annotation` | 当前任务选取、下载并交给 MinerU 解析多少条带发布方标注样本 | `100` |
+| `sample.acquire.without_publisher_annotation` | 当前任务选取、下载并交给 MinerU 解析多少条无发布方标注样本 | `0` |
+| `sample.acquire` | 两个字段之和就是本次获取和解析总数；不能为 0 | `100` |
 
-例如，要获取并解析 50 条，修改为：
+例如，要获取并解析 50 条带标注和 20 条无标注发票，修改 `sample` 中的对象为：
 
 ```json
 {
   "sample": {
-    "acquire_limit": 50
+    "acquire": {
+      "with_publisher_annotation": 50,
+      "without_publisher_annotation": 20
+    }
   }
 }
 ```
@@ -200,7 +209,7 @@ bun src/cli.ts acquire voxel51-invoice-ocr --limit 50 --paths config/paths.local
 bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/workbench.local.json
 ```
 
-上面的 `--limit` 只适合高级模式下临时覆盖单个子命令；菜单执行当前任务时始终使用同一个 `sample.acquire_limit`，因此获取和解析数量一致。
+上面的 `--limit` 只适合高级模式下临时覆盖单个子命令，兼容旧脚本时表示带发布方标注数量。要在高级模式分别指定两类数量，可对 `acquire` 使用 `--with-publisher-annotation` 和 `--without-publisher-annotation`；菜单始终使用配置中的两个字段，因此获取和解析数量一致。
 
 当前没有启用额外知识来源；`knowledge.source_ids` 和 `knowledge.parse_source_ids` 必须保持空数组。保留 `public-files` 读取器代码是为了复用和后续扩展，不代表当前会下载其他来源。
 
@@ -249,8 +258,12 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | `source_id` | 样本来源登记 ID；程序读取 `sources/<source_id>.json` | `voxel51-invoice-ocr` |
 | `dataset_id` | 数据集身份标识，保存在记录中；该来源的磁盘目录使用短名 `voxel51` | `voxel51-hq-invoice-ocr` |
 | `selection_id` | 固定选样清单 ID；第一次采集提交清单，之后按同一清单重试 | `initial-20` |
-| `acquire_limit` | 当前任务选取、下载并默认交给 `parse` 命令处理的有标注样本数 | `20` |
+| `acquire.with_publisher_annotation` | 当前任务选取、下载并交给 `parse` 命令处理的带发布方标注样本数 | `100` |
+| `acquire.without_publisher_annotation` | 当前任务选取、下载并交给 `parse` 命令处理的无发布方标注样本数 | `0` |
+| `acquire` | 两个数量之和，即当前任务获取与 MinerU 解析总数 | `100` |
 | `publish_snapshot` | `labels map` 默认是否将标签结构化镜像发布到 `originalRoot` | `true` |
+
+旧配置中的 `sample.acquire_limit` 仍可被读取并按“全部带发布方标注”兼容处理，但新配置不要再使用它；只要同时需要两类样本，就必须填写上面的 `acquire` 对象。修改数量后建议同时更换 `selection_id`，避免把新任务绑定到旧的固定选样清单。
 
 `selection_id` 不是目录名数量，也不是随机种子。它对应 `dataRoot/tasks/voxel51/selections/<selection_id>.json`，其中保存 revision、record ID、图片路径、标注定位和 selection hash。已提交 selection 存在时，重复采集不会重新选择另一批记录。发票编号单独持久化，增加任务数量不会重排已有编号。
 
@@ -386,7 +399,8 @@ MinerU API 下载结果先写入 `dataRoot/work` 下的短临时目录，规整�
 | `reader` | 读取器类型；Voxel51 使用 `dataset-records` |
 | `homepage` | 来源说明页，用于记录 provenance 和卡片链接 |
 | `record_count` | 数据集总发票图片数；当前为 `8181` |
-| `annotated_record_count` | 当前采集器可选的带结构化标注发票数；当前为 `1489`，也是 `acquire_limit` 的硬上限 |
+| `annotated_record_count` | 来源声明的带结构化标注发票数；当前为 `1489`，是 `sample.acquire.with_publisher_annotation` 的硬上限 |
+| `record_count - annotated_record_count` | 按来源声明推导的无发布方标注数量；当前为 `6692`，是 `sample.acquire.without_publisher_annotation` 的硬上限 |
 | `revision` | 版本解析方式；`kind=huggingface-api`，`url` 是读取完整 commit SHA 的 API 地址 |
 | `record_locator` | 数据记录定位规则 |
 | `allowed_origins` | 初始请求允许的 origin |
@@ -414,7 +428,7 @@ MinerU API 下载结果先写入 `dataRoot/work` 下的短临时目录，规整�
 | `index_path` | `samples.json` | revision 内的样本索引文件 |
 | `file_url_template` | `https://huggingface.co/datasets/Voxel51/high-quality-invoice-images-for-ocr/resolve/{revision}/{path}` | `{revision}` 替换为完整 SHA，`{path}` 替换为图片或索引路径 |
 
-`samples.json` 中只有 `json_annotation` 非空且可解析为对象的记录才可选。程序只选 `workbench.sample.acquire_limit` 条，不根据图片文件名排序，也不按目录顺序猜测标注配对。
+`samples.json` 中 `json_annotation` 非空且可解析为非空对象的记录归为“带发布方标注”；缺失、空字符串、`null` 或空对象归为“无发布方标注”；格式错误或其他类型归为“无效标注”，只统计不采集。程序按 `sample.acquire.with_publisher_annotation` 和 `sample.acquire.without_publisher_annotation` 分别选取，不根据图片文件名排序，也不按目录顺序猜测标注配对。
 
 Voxel51 图片的 `resolve` URL 当前会从 `https://huggingface.co` 返回 302，落到
 `https://us.aws.cdn.hf.co` 后再返回图片；索引或其他文件可能使用前两个 CDN
@@ -425,11 +439,11 @@ origin 加入本文件并补充回归测试，不能改成通配符或自动接�
 
 ## 菜单与参数覆盖优先级
 
-菜单使用 `workbench.local.json` 作为数量的唯一来源；选择采集或解析时不会要求输入数量，也不会自动添加 `--limit`。MinerU 菜单步骤按顺序处理每条发票，并显示 `[发票 i/总数]` 的开始、完成或失败状态。直接子命令仍支持命令行参数，适合调试、自动化和兼容已有脚本。
+菜单使用 `workbench.local.json` 的 `sample.acquire` 作为数量的唯一来源；选择采集或解析时不会要求输入数量，也不会自动添加 `--limit`。MinerU 菜单步骤按顺序处理每条发票，并显示 `[发票 i/总数]` 的开始、完成或失败状态。直接子命令仍支持命令行参数，适合调试、自动化和兼容已有脚本。
 
 从高到低依次是：
 
-1. 命令行显式参数，例如 `--limit 3`、`--selection regression-2026-09`。
+1. 命令行显式参数，例如 `--limit 3`、`--with-publisher-annotation 5 --without-publisher-annotation 2`、`--selection regression-2026-09`。
 2. `workbench.local.json`。
 3. 来源文件中固定的 URL、revision、许可和跳转白名单；这些不是数量参数，不能用 `--limit` 改写。
 
@@ -439,10 +453,16 @@ origin 加入本文件并补充回归测试，不能改成通配符或自动接�
 # 只探测 revision 和索引元数据，不下载图片
 bun src/cli.ts source probe voxel51-invoice-ocr --paths config/paths.local.json --config config/workbench.local.json
 
-# 按 workbench.sample.acquire_limit 获取；这里临时改成 5 条（高级模式）
+# 只取带发布方标注的 5 条（高级模式临时覆盖）
 bun src/cli.ts acquire voxel51-invoice-ocr --limit 5 --paths config/paths.local.json --config config/workbench.local.json
 
-# 按同一个 workbench.sample.acquire_limit 解析；这里临时改成 2 条（高级模式）
+# 分别取 5 条带标注和 2 条无标注（高级模式临时覆盖）
+bun src/cli.ts acquire voxel51-invoice-ocr --with-publisher-annotation 5 --without-publisher-annotation 2 --paths config/paths.local.json --config config/workbench.local.json
+
+# 解析已提交 selection 中的全部样本；获取和解析数量由 selection 固定
+bun src/cli.ts parse --paths config/paths.local.json --config config/workbench.local.json
+
+# 仅调试时临时解析前 2 条（不会改变 selection）
 bun src/cli.ts parse --limit 2 --paths config/paths.local.json --config config/workbench.local.json
 
 ```
@@ -457,3 +477,4 @@ bun src/cli.ts parse --limit 2 --paths config/paths.local.json --config config/w
 - 不建立通用爬虫，不执行网页脚本，不把发现的新链接自动加入采集范围。
 - `D:\paper\Invoice` 的结构化镜像只能由 `dataRoot` 单向发布，不能反向覆盖机器记录。
 - 原件不可覆盖；来源 revision、record ID、文件 hash 和许可证据都保留在机器记录中。
+- 带发布方标注的样本才有 `annotation.json`、`fields.json` 和标签校验；无发布方标注样本只有原图和 MinerU 解析结果，选择清单中的 `counts` 记录两类数量。
