@@ -142,6 +142,7 @@ test('builds a local task manifest from the configured model without cloud tools
     arxivId: '2601.1v1',
     version: 1,
     sha256: 'a'.repeat(64),
+    pageCount: 8,
     pdfPath: 'D:/paper/p.pdf',
     outputDir: 'D:/state/extracted/2601.1-v1',
     model: 'vlm',
@@ -160,6 +161,19 @@ test('builds a local task manifest from the configured model without cloud tools
     mineruVersion: '3.4.5',
     sourceCommit: '4fe4bde114a23ee5dd637eae99b767f4669bf58c',
   });
+});
+
+test('persists the source PDF page count in task manifests', () => {
+  const paper = { baseId: '2601.1', arxivId: '2601.1v1', version: 1, sha256: 'a'.repeat(64), pdfPath: 'D:/paper/p.pdf', pageCount: 8 };
+  const manifest = buildLocalParseManifest('run-page-count', [paper], {
+    model: 'pipeline',
+    cliBackend: 'pipeline',
+    outputRoot: 'D:/state/extracted',
+    pipelineMethod: 'auto',
+    expectedVersion: '3.4.5',
+    expectedCommit: 'commit',
+  });
+  assert.equal(manifest.jobs[0].pageCount, 8);
 });
 
 test('manifest metadata reaches source.json through the real parse boundary', async () => {

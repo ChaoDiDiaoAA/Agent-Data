@@ -11,6 +11,16 @@ test('renders zero-based page_idx as one-based markers', () => {
   assert.equal(renderPageMarkedText(pages), '--- PAGE 1 ---\nfirst\n\n--- PAGE 2 ---\nsecond');
 });
 
+test('preserves empty records for page indices omitted by MinerU', () => {
+  const pages = normalizeMinerUPages([
+    { page_idx: 0, type: 'text', text: 'first' },
+    { page_idx: 2, type: 'text', text: 'third' },
+  ], 3);
+  assert.deepEqual(pages.map(page => [page.pageNumber, page.text]), [
+    [1, 'first'], [2, ''], [3, 'third'],
+  ]);
+});
+
 test('preserves reference list items instead of treating reference-only pages as empty', () => {
   const pages = normalizeMinerUPages([
     { page_idx: 7, type: 'list', sub_type: 'ref_text', list_items: ['First reference.', 'Second reference.'] },

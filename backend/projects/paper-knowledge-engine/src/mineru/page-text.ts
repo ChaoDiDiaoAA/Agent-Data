@@ -14,13 +14,28 @@ function blockText(block: Record<string, unknown>) {
     .join('\n\n');
 }
 
-export function normalizeMinerUPages(contentList: unknown): PdfPage[] {
+export function normalizeMinerUPages(contentList: unknown, expectedPageCount?: number): PdfPage[] {
   const byPage = new Map<number, string[]>();
   for (const block of Array.isArray(contentList) ? contentList : []) {
     if (!block || typeof block !== 'object' || Array.isArray(block) || typeof block.page_idx !== 'number' || !Number.isSafeInteger(block.page_idx) || block.page_idx < 0) continue;
     const blocks = byPage.get(block.page_idx) ?? [];
     blocks.push(blockText(block));
     byPage.set(block.page_idx, blocks);
+  }
+  const expected = typeof expectedPageCount === 'number' && Number.isSafeInteger(expectedPageCount) && expectedPageCount >= 0
+    ? expectedPageCount
+    : undefined;
+  if (expected !== undefined) {
+    const highestObservedPage = Math.max(-1, ...byPage.keys());
+    const totalPages = Math.max(expected, highestObservedPage + 1);
+    return Array.from({ length: totalPages }, (_, index) => {
+      const blocks = byPage.get(index) ?? [];
+      return {
+        pageNumber: index + 1,
+        text: blocks.filter(Boolean).join('\n\n'),
+        blockCount: blocks.length,
+      };
+    });
   }
   return [...byPage.entries()].sort(([a], [b]) => a - b).map(([index, blocks]) => ({
     pageNumber: index + 1,

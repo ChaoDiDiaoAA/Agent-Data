@@ -112,6 +112,7 @@ export function buildLocalParseManifest(runId: string, papers: LocalPaper[], con
       arxivId: job.arxivId,
       version: job.version,
       sha256: job.sha256,
+      ...(job.pageCount !== undefined ? { pageCount: job.pageCount } : {}),
       pdfPath: String(paper.pdfPath).replaceAll('\\', '/'),
       outputDir: job.outputDir,
       model: job.model,

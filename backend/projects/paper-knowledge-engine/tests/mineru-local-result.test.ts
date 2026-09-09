@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { PDFDocument } from 'pdf-lib';
 import { normalizeLocalMinerUResult } from '../src/mineru/mineru-local-result.ts';
 import { assessExtraction } from '../src/mineru/mineru-quality.ts';
 import { createParseWorkspace, publishParseWorkspace } from '../src/mineru/mineru-workspace.ts';
@@ -292,8 +293,31 @@ test('normalization stores identical referenced assets once and rewrites every a
 test('rejects a page count mismatch', async () => {
   const root = await fixtureRoot('page-count');
   await writeFile(join(root, 'paper.md'), '# Paper');
-  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([{ page_idx: 0, type: 'text', text: 'first' }]));
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: 'first' },
+    { page_idx: 2, type: 'text', text: 'third' },
+  ]));
   await assert.rejects(normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 2 }), /page count mismatch/);
+});
+
+test('recovers the page count for resumed manifests that omitted it', async () => {
+  const root = await fixtureRoot('resume-page-count');
+  const pdfPath = join(root, 'source.pdf');
+  const pdf = await PDFDocument.create();
+  pdf.addPage(); pdf.addPage(); pdf.addPage();
+  await writeFile(pdfPath, await pdf.save());
+  await writeFile(join(root, 'paper.md'), '# Paper');
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: 'first' },
+    { page_idx: 2, type: 'text', text: 'third' },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, fileSource: pdfPath });
+  const pages = JSON.parse(await readFile(join(root, 'normalized/pages.json'), 'utf8'));
+  assert.equal(result.pageCount, 3);
+  assert.deepEqual(pages.map((page: { pageNumber: number; text: string }) => [page.pageNumber, page.text]), [
+    [1, 'first'], [2, ''], [3, 'third'],
+  ]);
 });
 
 test('rejects discovered artifacts outside the output directory', async (t) => {

@@ -2,6 +2,7 @@ import type { LocalParseJob } from '../types/jobs.ts';
 import { createHash } from 'node:crypto';
 import { copyFile, lstat, mkdir, readFile, realpath, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { PDFDocument } from 'pdf-lib';
 import { normalizeMinerUPages, renderPageMarkedText } from './page-text.ts';
 import { archiveReferences, rewriteArchiveReferences, realTree } from '../shared/archive-v2.ts';
 
@@ -89,7 +90,13 @@ async function atomic(path: string, content: string) {
   await writeFile(temporary, content, 'utf8');
   await rename(temporary, path);
 }
-export async function normalizeLocalMinerUResult(job: Pick<LocalParseJob, 'model' | 'cliBackend' | 'outputDir' | 'attemptStartedAt' | 'pageCount'>) {
+async function sourcePdfPageCount(fileSource: unknown): Promise<number | undefined> {
+  if (typeof fileSource !== 'string' || !fileSource) return undefined;
+  try { return (await PDFDocument.load(await readFile(fileSource))).getPageCount(); }
+  catch { return undefined; }
+}
+
+export async function normalizeLocalMinerUResult(job: Pick<LocalParseJob, 'model' | 'cliBackend' | 'outputDir' | 'attemptStartedAt' | 'pageCount' | 'fileSource'>) {
   if (!job.outputDir) throw new Error('output directory is required');
   const root = resolve(job.outputDir);
   try { await realTree(root); }
@@ -105,8 +112,11 @@ export async function normalizeLocalMinerUResult(job: Pick<LocalParseJob, 'model
 
   const markdownText = await readFile(markdown, 'utf8');
   const contentList: unknown = JSON.parse(await readFile(structured, 'utf8'));
-  const pages = normalizeMinerUPages(job.model === 'vlm' ? pageBlocksFor(contentList) : contentList);
-  if (Number.isInteger(job.pageCount) && pages.length !== job.pageCount) throw new Error('page count mismatch');
+  const expectedPageCount = typeof job.pageCount === 'number' && Number.isSafeInteger(job.pageCount) && job.pageCount >= 1
+    ? job.pageCount
+    : await sourcePdfPageCount(job.fileSource);
+  const pages = normalizeMinerUPages(job.model === 'vlm' ? pageBlocksFor(contentList) : contentList, expectedPageCount);
+  if (Number.isInteger(expectedPageCount) && pages.length !== expectedPageCount) throw new Error('page count mismatch');
 
   const assetPaths = new Map<string, string>();
   const assetHashes = new Map<string, string>();
