@@ -498,7 +498,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
           await verifyStructuredSnapshot(resolveOwnedPath(destinationRoots.originalRoot, name.slice(0, -'/snapshot.json'.length)));
         }
         const plan = await rebuildCatalog(restoredPaths);
-        if (!(await Bun.file(resolveOwnedPath(destinationRoots.vaultRoot, '01_总览.md')).exists())) throw new Error('BACKUP_RESTORE_CATALOG_MISSING');
+        if (!(await Bun.file(resolveOwnedPath(destinationRoots.vaultRoot, 'Evidence/indexes/overview.md')).exists())) throw new Error('BACKUP_RESTORE_CATALOG_MISSING');
         restored = true;
       } finally {
         await rm(smokeRoot, { recursive: true, force: true });

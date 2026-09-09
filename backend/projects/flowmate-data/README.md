@@ -8,7 +8,7 @@
 
 - `D:\paper\Invoice`：公开来源原件、发布方原始标注，以及一份只从 `dataRoot` 发布的结构化镜像。
 - `D:\agent-data\data\flowmate-data`：机器主记录、标签、MinerU 解析结果、任务选样清单、Release、`policies/withdrawals.json` 撤回清单和运行状态；`work` 保存临时文件、进程记录及未完成事务，运行中不可删除。
-- `D:\obsidian\data\flowmate-data`：Vault 自包含副本。除 `01_总览.md`、`02_数据集`、`03_发票`、`05_发布` 的可重建 Markdown 外，还保存每张发票的原图、发布方标注、统一字段、record、receipt、snapshot、MinerU 解析文件和 assets；带 `generated_by: flowmate-data` 的 Markdown 与 `.flowmate-assets.json` 由目录生成器管理，用户笔记不会被覆盖。
+- `D:\obsidian\data\flowmate-data`：Vault 自包含副本。自动发布器只拥有 `Evidence/`，其中按 FSD 风格保存 `invoices/`、`indexes/`、`knowledge/`、`releases/` 和英文命名的 Markdown；每张发票的原图、发布方标注、统一字段、record、receipt、snapshot、MinerU 解析文件和 assets 都物理复制到对应实体目录。带 `generated_by: flowmate-data` 的 Markdown 与 `.flowmate-assets.json` 由目录生成器管理，用户笔记不会被覆盖。
 - `D:\agent-data\backups\flowmate-data`：带 SHA-256 manifest 的静止备份。
 
 目录发布前应关闭 Obsidian 及其同步/写入插件，并让所有 Flowmate 命令通过同一个 `dataRoot/work/run.lock` 串行运行。发布会在写入前后检查 Vault 路径边界；检测到外部并发改变时立即失败，保留可恢复的事务条目，不按不可信路径删除文件。处理这类失败前先停止外部写入，再重新执行目录构建。
@@ -33,15 +33,19 @@ D:\agent-data\data\flowmate-data\voxel51\000001\
   fields.json（带发布方标注样本才有）
 
 D:\obsidian\data\flowmate-data\
-  01_总览.md
-  02_数据集\voxel51.md
-  03_发票\voxel51\000001.md
-  03_发票\voxel51\000001\
-    original.jpg、annotation.json、fields.json
-    record.json、receipt.json、snapshot.json
-    content.md、content.json、pages.json、parse.json、assets\
-  05_发布\<version>\manifest.json、checksums.json
+  Evidence\
+    indexes\overview.md
+    indexes\voxel51.md
+    invoices\voxel51\000001\
+      invoice.md
+      original.jpg、annotation.json、fields.json
+      record.json、receipt.json、snapshot.json
+      content.md、content.json、pages.json、parse.json、assets\
+    knowledge\<source>\<file>--<version>\knowledge.md  （可选）
+    releases\<version>\manifest.json、checksums.json  （可选）
 ```
+
+运行后 Vault 的业务生成物只有 `Evidence/` 和用于记录二进制副本 hash 的 `.flowmate-assets.json`；真正的索引从 `Evidence/indexes/overview.md` 打开。`Evidence/` 之外不生成 Flowmate 业务文件。
 
 每个数据集另有 `dataset.json`。发票目录还保留 `receipt.json`（下载凭据）、`parse.json`（解析来源及文件校验信息）和 `snapshot.json`（当前副本清单），用于校验与恢复，不能手工删除。最终发票目录不再包含 `datasets/samples/structured/parsed/attempt-长哈希/normalized` 层级。
 
@@ -62,7 +66,7 @@ Set-Location 'D:\agent-data\backend\projects\flowmate-data'
 bun src/cli.ts catalog build --paths config/paths.local.json --config config/workbench.local.json
 ```
 
-每张发票卡片中的 `![[...]]`、`[[...]]` 均指向 Vault 内的实体文件，例如 `03_发票/voxel51/000001/original.jpg`、`content.md` 或 `fields.json`；不依赖 `D:\paper\Invoice`、`D:\agent-data\data\flowmate-data` 的路径映射。发布文件位于 `05_发布\<version>`，概览页通过 Vault 内部链接打开 `manifest.json`。
+每张发票的 `invoice.md` 与附件位于同一个 Vault 实体目录。卡片中的 `![[...]]`、`[[...]]` 均指向 Vault 内部文件，例如 `Evidence/invoices/voxel51/000001/original.jpg`、`content.md` 或 `fields.json`；不依赖 `D:\paper\Invoice`、`D:\agent-data\data\flowmate-data` 的路径映射。发布文件位于 `Evidence/releases/<version>`，概览页通过 Vault 内部链接打开 `manifest.json`。
 
 `content.json` 是 MinerU 识别出的文本、表格及坐标，不等同于业务字段；业务字段查看 `fields.json`。`D:\paper\Invoice\voxel51` 下所有 JSON（包括 dataset、annotation、fields、record、receipt、parse 和 snapshot）使用两空格缩进、换行及末尾换行。程序目录保存机器主副本，`D:\paper\Invoice` 保存原件和当前解析副本，Obsidian 保存一份物理副本；Obsidian Markdown 只使用 Vault 内部链接和嵌入，不使用 `file:///` 或指向上述权威根的绝对路径。格式转换必须通过程序同步更新校验清单，不要用编辑器批量重写受校验的文件。
 

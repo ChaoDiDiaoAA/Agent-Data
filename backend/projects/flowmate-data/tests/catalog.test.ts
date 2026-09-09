@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
-import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { FlowmatePaths } from '../src/contracts.ts';
 import { applyCatalog, buildCatalog, type CatalogPlan } from '../src/catalog.ts';
 import { sha256File } from '../src/file-store.ts';
@@ -60,7 +60,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 test('creates only the compact invoice catalog directories for an empty vault', async () => {
   const paths = await fixturePaths();
   await applyCatalog(await buildCatalog(paths));
-  for (const directory of ['02_数据集', '03_发票']) {
+  for (const directory of ['Evidence/indexes', 'Evidence/invoices']) {
     expect((await lstat(join(paths.vaultRoot, directory))).isDirectory()).toBe(true);
   }
 });
@@ -73,10 +73,10 @@ test('builds deterministic Obsidian cards and a compact overview from machine re
   expect(first).toEqual(second);
   await applyCatalog(first);
 
-  for (const directory of ['02_数据集', '03_发票', '04_InvoiceKnowledge']) {
+  for (const directory of ['Evidence/indexes', 'Evidence/invoices', 'Evidence/knowledge']) {
     expect((await lstat(join(paths.vaultRoot, directory))).isDirectory()).toBe(true);
   }
-  const card = await Bun.file(join(paths.vaultRoot, '03_发票/public-invoices/sample-a.md')).text();
+  const card = await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/public-invoices/sample-a/invoice.md')).text();
   expect(card).toContain('generated_by: flowmate-data');
   expect(card).toContain('schema_version: 1');
   expect(card).toContain('dataset: public-invoices');
@@ -93,17 +93,17 @@ test('builds deterministic Obsidian cards and a compact overview from machine re
   expect(card).toContain('Structured mirror');
   expect(card).toContain('Parse result');
 
-  const knowledge = await Bun.file(join(paths.vaultRoot, '04_InvoiceKnowledge/chinatax/notice--20260908T000000000Z--abc.md')).text();
+  const knowledge = await Bun.file(join(paths.vaultRoot, 'Evidence/knowledge/chinatax/notice--20260908T000000000Z--abc/knowledge.md')).text();
   expect(knowledge).toContain('applicable_period: 2024-11');
   expect(knowledge).toContain('parse: raw_only');
   expect(knowledge).toContain('Structured mirror: unavailable (raw_only)');
   expect(knowledge).not.toContain('Structured mirror](');
   expect(knowledge).toContain('Parse result: unavailable (raw_only)');
-  const release = await Bun.file(join(paths.vaultRoot, '01_总览.md')).text();
+  const release = await Bun.file(join(paths.vaultRoot, 'Evidence/indexes/overview.md')).text();
   expect(release).toContain('Release v1');
   expect(release).toContain('manifest.json');
   for (const index of ['Sources', 'Samples', 'Knowledge', 'Releases']) {
-    const text = await Bun.file(join(paths.vaultRoot, '01_总览.md')).text();
+    const text = await Bun.file(join(paths.vaultRoot, 'Evidence/indexes/overview.md')).text();
     expect(text).toContain('generated_by: flowmate-data');
     expect(text).not.toMatch(/supplier|PO|business/i);
   }
@@ -127,7 +127,7 @@ test('catalog bytes are stable when source insertion order changes', async () =>
   await seedLegacySampleFiles(paths, 'sample-a');
   const firstPlan = await buildCatalog(paths);
   await applyCatalog(firstPlan);
-  const pathsToCompare = ['01_总览.md', '02_数据集/public-invoices.md', '03_发票/public-invoices/sample-a.md', '03_发票/public-invoices/sample-b.md'];
+  const pathsToCompare = ['Evidence/indexes/overview.md', 'Evidence/indexes/public-invoices.md', 'Evidence/invoices/public-invoices/sample-a/invoice.md', 'Evidence/invoices/public-invoices/sample-b/invoice.md'];
   const firstBytes = await Promise.all(pathsToCompare.map(relativePath => Bun.file(join(paths.vaultRoot, relativePath)).text()));
   await rm(paths.dataRoot, { recursive: true, force: true });
   await saveSampleRecord(paths, sample('sample-a'));
@@ -143,15 +143,15 @@ test('catalog bytes are stable when source insertion order changes', async () =>
 test('rebuilds deleted generated cards while preserving user notes and rejecting hand-written collisions', async () => {
   const paths = await fixturePaths(); await seed(paths);
   const plan = await buildCatalog(paths); await applyCatalog(plan);
-  const generated = join(paths.vaultRoot, '03_发票/public-invoices/sample-a.md');
+  const generated = join(paths.vaultRoot, 'Evidence/invoices/public-invoices/sample-a/invoice.md');
   const obsolete = join(paths.vaultRoot, '02_Sources/jiangsu-digital-invoice-sample.md');
   await Bun.write(obsolete, '---\ngenerated_by: flowmate-data\nschema_version: 1\n---\n# stale\n');
   await rm(generated);
-  await writeFile(join(paths.vaultRoot, '03_发票/public-invoices/user-note.md'), '# keep me\n');
+  await writeFile(join(paths.vaultRoot, 'Evidence/invoices/public-invoices/sample-a/user-note.md'), '# keep me\n');
   await applyCatalog(await buildCatalog(paths));
   expect(await Bun.file(generated).exists()).toBe(true);
   expect(await Bun.file(obsolete).exists()).toBe(false);
-  expect(await Bun.file(join(paths.vaultRoot, '03_发票/public-invoices/user-note.md')).text()).toBe('# keep me\n');
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/public-invoices/sample-a/user-note.md')).text()).toBe('# keep me\n');
 
   const editedGenerated = '---\ngenerated_by: flowmate-data\nschema_version: 1\n---\n# edited by user\n';
   await writeFile(generated, editedGenerated);
@@ -163,19 +163,30 @@ test('rebuilds deleted generated cards while preserving user notes and rejecting
   expect(await readFile(generated, 'utf8')).toBe('# handwritten\n');
 });
 
+test('removes generated files from the previous Chinese layout during migration', async () => {
+  const paths = await fixturePaths();
+  await seed(paths);
+  const legacy = join(paths.vaultRoot, '03_发票/voxel51/legacy.md');
+  await mkdir(dirname(legacy), { recursive: true });
+  await writeFile(legacy, '---\ngenerated_by: flowmate-data\nschema_version: 1\n---\n# stale\n');
+  await applyCatalog(await buildCatalog(paths));
+  expect(await Bun.file(legacy).exists()).toBe(false);
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/public-invoices/sample-a/invoice.md')).exists()).toBe(true);
+});
+
 test('copies catalog assets into the Vault and rejects changed destinations', async () => {
   const paths = await fixturePaths();
   const source = join(paths.originalRoot, 'voxel51', '000001', 'original.jpg');
   await Bun.write(source, Buffer.from([0xff, 0xd8, 0xff, 1]));
   const plan = {
     vaultRoot: paths.vaultRoot,
-    directories: ['03_发票', '03_发票/voxel51', '03_发票/voxel51/000001'],
+    directories: ['Evidence/invoices', 'Evidence/invoices/voxel51', 'Evidence/invoices/voxel51/000001'],
     files: [],
-    assets: [{ path: '03_发票/voxel51/000001/original.jpg', sourcePath: source, sha256: await sha256File(source), bytes: 4 }],
+    assets: [{ path: 'Evidence/invoices/voxel51/000001/original.jpg', sourcePath: source, sha256: await sha256File(source), bytes: 4 }],
   };
   await applyCatalog(plan);
-  await expect(readFile(join(paths.vaultRoot, '03_发票/voxel51/000001/original.jpg'))).resolves.toEqual(Buffer.from([0xff, 0xd8, 0xff, 1]));
-  await Bun.write(join(paths.vaultRoot, '03_发票/voxel51/000001/original.jpg'), 'changed');
+  await expect(readFile(join(paths.vaultRoot, 'Evidence/invoices/voxel51/000001/original.jpg'))).resolves.toEqual(Buffer.from([0xff, 0xd8, 0xff, 1]));
+  await Bun.write(join(paths.vaultRoot, 'Evidence/invoices/voxel51/000001/original.jpg'), 'changed');
   await expect(applyCatalog(plan)).rejects.toThrow('CATALOG_ASSET_CONFLICT');
 });
 
@@ -185,9 +196,9 @@ test('rejects a catalog asset whose source changes after planning', async () => 
   await Bun.write(source, Buffer.from([0xff, 0xd8, 0xff, 2]));
   const plan = {
     vaultRoot: paths.vaultRoot,
-    directories: ['03_发票', '03_发票/voxel51', '03_发票/voxel51/000002'],
+    directories: ['Evidence/invoices', 'Evidence/invoices/voxel51', 'Evidence/invoices/voxel51/000002'],
     files: [],
-    assets: [{ path: '03_发票/voxel51/000002/original.jpg', sourcePath: source, sha256: await sha256File(source), bytes: 4 }],
+    assets: [{ path: 'Evidence/invoices/voxel51/000002/original.jpg', sourcePath: source, sha256: await sha256File(source), bytes: 4 }],
   };
   await Bun.write(source, Buffer.from([0xff, 0xd8, 0xff, 9]));
   await expect(applyCatalog(plan)).rejects.toThrow('CATALOG_ASSET_SOURCE_HASH_MISMATCH');
@@ -197,10 +208,10 @@ test('rejects a symlink at a catalog asset destination', async () => {
   const paths = await fixturePaths();
   const source = join(paths.originalRoot, 'voxel51', '000003', 'original.jpg');
   const target = join(paths.originalRoot, 'outside.jpg');
-  const destination = join(paths.vaultRoot, '03_发票/voxel51/000003/original.jpg');
+  const destination = join(paths.vaultRoot, 'Evidence/invoices/voxel51/000003/original.jpg');
   await Bun.write(source, Buffer.from([0xff, 0xd8, 0xff, 3]));
   await Bun.write(target, Buffer.from([0xff, 0xd8, 0xff, 4]));
-  await Bun.write(join(paths.vaultRoot, '03_发票/voxel51/000003/.keep'), '');
+  await Bun.write(join(paths.vaultRoot, 'Evidence/invoices/voxel51/000003/.keep'), '');
   try { await symlink(target, destination, 'file'); }
   catch (error) {
     if (error && typeof error === 'object' && 'code' in error && ['EPERM', 'EACCES'].includes(String(error.code))) return;
@@ -208,9 +219,9 @@ test('rejects a symlink at a catalog asset destination', async () => {
   }
   const plan = {
     vaultRoot: paths.vaultRoot,
-    directories: ['03_发票', '03_发票/voxel51', '03_发票/voxel51/000003'],
+    directories: ['Evidence/invoices', 'Evidence/invoices/voxel51', 'Evidence/invoices/voxel51/000003'],
     files: [],
-    assets: [{ path: '03_发票/voxel51/000003/original.jpg', sourcePath: source, sha256: await sha256File(source), bytes: 4 }],
+    assets: [{ path: 'Evidence/invoices/voxel51/000003/original.jpg', sourcePath: source, sha256: await sha256File(source), bytes: 4 }],
   };
   await expect(applyCatalog(plan)).rejects.toThrow('CATALOG_PATH_SYMLINK');
 });
@@ -260,17 +271,17 @@ test('builds a self-contained Vault sample with annotation and Release assets', 
   await Bun.write(join(paths.dataRoot, 'releases/v1/manifest.json'), JSON.stringify({ version: 'v1', entries: [] }) + '\n');
   await Bun.write(join(paths.dataRoot, 'releases/v1/checksums.json'), JSON.stringify({ schema: 'v1', files: [] }) + '\n');
   const plan = await buildCatalog(paths);
-  expect(plan.assets.some(asset => asset.path === '03_发票/voxel51/sample-a/original.jpg')).toBe(true);
+  expect(plan.assets.some(asset => asset.path === 'Evidence/invoices/voxel51/sample-a/original.jpg')).toBe(true);
   await applyCatalog(plan);
-  expect(await Bun.file(join(paths.vaultRoot, '03_发票/voxel51/sample-a/original.jpg')).exists()).toBe(true);
-  expect(await Bun.file(join(paths.vaultRoot, '03_发票/voxel51/sample-a/annotation.json')).exists()).toBe(true);
-  expect(await Bun.file(join(paths.vaultRoot, '03_发票/voxel51/sample-a/fields.json')).exists()).toBe(true);
-  expect(await Bun.file(join(paths.vaultRoot, '03_发票/voxel51/sample-b/annotation.json')).exists()).toBe(false);
-  expect(await Bun.file(join(paths.vaultRoot, '03_发票/voxel51/sample-b/content.md')).exists()).toBe(true);
-  expect(await readFile(join(paths.vaultRoot, '03_发票/voxel51/sample-a/record.json'))).toEqual(await readFile(join(paths.dataRoot, 'voxel51/sample-a/record.json')));
-  expect(await readFile(join(paths.vaultRoot, '03_发票/voxel51/sample-a/receipt.json'))).toEqual(await readFile(join(paths.dataRoot, 'voxel51/sample-a/receipt.json')));
-  expect(await Bun.file(join(paths.vaultRoot, '05_发布/v1/manifest.json')).exists()).toBe(true);
-  const markdown = await Bun.file(join(paths.vaultRoot, '03_发票/voxel51/sample-a.md')).text();
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a/original.jpg')).exists()).toBe(true);
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a/annotation.json')).exists()).toBe(true);
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a/fields.json')).exists()).toBe(true);
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-b/annotation.json')).exists()).toBe(false);
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-b/content.md')).exists()).toBe(true);
+  expect(await readFile(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a/record.json'))).toEqual(await readFile(join(paths.dataRoot, 'voxel51/sample-a/record.json')));
+  expect(await readFile(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a/receipt.json'))).toEqual(await readFile(join(paths.dataRoot, 'voxel51/sample-a/receipt.json')));
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/releases/v1/manifest.json')).exists()).toBe(true);
+  const markdown = await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a/invoice.md')).text();
   expect(markdown).not.toContain('file:///');
   expect(markdown).not.toContain(paths.originalRoot);
   expect(markdown).not.toContain(paths.dataRoot);
@@ -291,5 +302,5 @@ test('runs catalog build through the CLI with the configured paths', async () =>
   const output: unknown[] = [];
   expect(await runCli(['catalog', 'build', '--paths', config, '--config', workbenchPath], { print: value => output.push(value) })).toBe(0);
   expect(output).toEqual([{ files: expect.any(Number) }]);
-  expect(await Bun.file(join(paths.vaultRoot, '01_总览.md')).exists()).toBe(true);
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/indexes/overview.md')).exists()).toBe(true);
 });

@@ -241,24 +241,26 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 
 `catalog build` 是权威根到 Vault 的单向物理复制。数据资产不会创建指向权威根的符号链接或硬链接；Markdown 的临时发布只在 Vault 内部完成。Markdown 中也不会写入 `file:///` 或 `D:\paper\Invoice`、`D:\agent-data\data\flowmate-data` 的绝对路径，卡片中的 `[[...]]` 和 `![[...]]` 只指向 Vault 内文件。
 
-目录结构保持精简：
+目录结构采用与 FSD Vault 相同的 `Evidence` 托管根，并把每张发票的 Markdown 卡片和附件放在同一个实体目录：
 
 ```text
 D:\obsidian\data\flowmate-data\
-├─ 01_总览.md
-├─ 02_数据集\voxel51.md
-├─ 03_发票\voxel51\000001.md
-├─ 03_发票\voxel51\000001\
-│  ├─ original.jpg
-│  ├─ annotation.json       # 仅发布方带标注样本
-│  ├─ fields.json           # 仅已完成标注映射的样本
-│  ├─ record.json
-│  ├─ receipt.json
-│  ├─ snapshot.json
-│  ├─ content.md、content.json、pages.json、parse.json
-│  └─ assets\
-└─ 05_发布\<version>\manifest.json、checksums.json
+└─ Evidence\
+   ├─ indexes\overview.md
+   ├─ indexes\voxel51.md
+   ├─ invoices\voxel51\000001\
+   │  ├─ invoice.md
+   │  ├─ original.jpg
+   │  ├─ annotation.json       # 仅发布方带标注样本
+   │  ├─ fields.json           # 仅已完成标注映射的样本
+   │  ├─ record.json、receipt.json、snapshot.json
+   │  ├─ content.md、content.json、pages.json、parse.json
+   │  └─ assets\
+   ├─ knowledge\<source>\<file>--<version>\knowledge.md  # 可选
+   └─ releases\<version>\manifest.json、checksums.json    # 可选
 ```
+
+运行后 Vault 的业务生成物只有 `Evidence/` 和二进制副本 hash 清单 `.flowmate-assets.json`；总览入口是 `Evidence/indexes/overview.md`。Flowmate 不再生成 `01_`、中文目录或卡片与同名附件目录并列的结构。
 
 `D:\paper\Invoice` 与 `D:\agent-data\data\flowmate-data` 仍是权威位置：前者负责原件、发布方原始标注和结构化镜像，后者负责机器记录、统一字段、MinerU 结果、任务和 Release。Vault 副本由这些位置生成，Vault 中的手工修改不会被当作新的来源；相同 hash 的文件可重复执行，检测到手工改写或符号链接时会以冲突错误停止。
 

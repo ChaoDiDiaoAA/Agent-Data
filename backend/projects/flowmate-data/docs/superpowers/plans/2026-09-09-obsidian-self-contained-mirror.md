@@ -15,7 +15,7 @@
 - Keep `projectRoot`, `paperEngineRoot`, `originalRoot`, `dataRoot`, `vaultRoot`, and `backupRoot` unchanged.
 - Keep `D:\paper\Invoice` as the original and structured-mirror authority and `D:\agent-data\data\flowmate-data` as the machine-record authority.
 - Copy data into `D:\obsidian\data\flowmate-data`; never use a symlink, hard link, or `file:///` link to an authority root.
-- Preserve the compact Vault roots `01_总览.md`, `02_数据集`, `03_发票`, and `05_发布`.
+- Preserve the compact Vault roots `Evidence/indexes/overview.md`, `Evidence/indexes`, `Evidence/invoices`, and `Evidence/releases`.
 - Include `annotation.json` and `fields.json` only for records with `publisher_annotation_status: annotated`.
 - Fail closed on path escape, symlink, source-hash mismatch, destination conflict, or incomplete source assets.
 - Keep generated Markdown and copied assets idempotent and protect user-authored Vault files.
@@ -44,13 +44,13 @@ test('copies catalog assets into the Vault and rejects changed or linked destina
   await writeFile(source, Buffer.from([0xff, 0xd8, 0xff, 1]));
   const plan = {
     vaultRoot: paths.vaultRoot,
-    directories: ['03_发票', '03_发票/voxel51', '03_发票/voxel51/000001'],
+    directories: ['Evidence/invoices', 'Evidence/invoices/voxel51', 'Evidence/invoices/voxel51/000001'],
     files: [],
-    assets: [{ path: '03_发票/voxel51/000001/original.jpg', sourcePath: source, sha256: await sha256File(source), bytes: 4 }],
+    assets: [{ path: 'Evidence/invoices/voxel51/000001/original.jpg', sourcePath: source, sha256: await sha256File(source), bytes: 4 }],
   };
   await applyCatalog(plan);
-  await expect(readFile(join(paths.vaultRoot, '03_发票/voxel51/000001/original.jpg'))).resolves.toEqual(Buffer.from([0xff, 0xd8, 0xff, 1]));
-  await writeFile(join(paths.vaultRoot, '03_发票/voxel51/000001/original.jpg'), 'changed');
+  await expect(readFile(join(paths.vaultRoot, 'Evidence/invoices/voxel51/000001/original.jpg'))).resolves.toEqual(Buffer.from([0xff, 0xd8, 0xff, 1]));
+  await writeFile(join(paths.vaultRoot, 'Evidence/invoices/voxel51/000001/original.jpg'), 'changed');
   await expect(applyCatalog(plan)).rejects.toThrow('CATALOG_ASSET_CONFLICT');
 });
 ```
@@ -104,8 +104,8 @@ git commit -m "feat(flowmate-data): publish catalog assets into Vault"
 
 **Interfaces:**
 - `buildCatalog(paths)` returns text pages plus `assets` for every selected sample and Release file.
-- Sample assets are written to `03_发票/<dataset>/<sample-id>/`; the card remains `03_发票/<dataset>/<sample-id>.md`.
-- Release assets are written to `05_发布/<version>/manifest.json` and `05_发布/<version>/checksums.json` when those files exist in the data root.
+- Sample assets are written to `Evidence/invoices/<dataset>/<sample-id>/`; the card remains `Evidence/invoices/<dataset>/<sample-id>/invoice.md`.
+- Release assets are written to `Evidence/releases/<version>/manifest.json` and `Evidence/releases/<version>/checksums.json` when those files exist in the data root.
 
 - [x] **Step 1: Write the failing test**
 
@@ -114,11 +114,11 @@ Extend the existing seeded catalog fixture so the authority roots contain a vali
 Add a second sample with `publisher_annotation_status: unannotated`, no annotation or label refs, and a valid parsed snapshot. Assert its Vault directory contains original and MinerU files but no `annotation.json` or `fields.json`.
 
 ```ts
-expect(await readFile(join(paths.vaultRoot, '03_发票/voxel51/sample-a/original.jpg'))).toEqual(await readFile(originalPath));
-expect(await Bun.file(join(paths.vaultRoot, '03_发票/voxel51/sample-a/annotation.json')).exists()).toBe(true);
-expect(await Bun.file(join(paths.vaultRoot, '03_发票/voxel51/sample-b/annotation.json')).exists()).toBe(false);
-expect(await Bun.file(join(paths.vaultRoot, '05_发布/v1/manifest.json')).exists()).toBe(true);
-const markdown = await Bun.file(join(paths.vaultRoot, '03_发票/voxel51/sample-a.md')).text();
+expect(await readFile(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a/original.jpg'))).toEqual(await readFile(originalPath));
+expect(await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a/annotation.json')).exists()).toBe(true);
+expect(await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-b/annotation.json')).exists()).toBe(false);
+expect(await Bun.file(join(paths.vaultRoot, 'Evidence/releases/v1/manifest.json')).exists()).toBe(true);
+const markdown = await Bun.file(join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a/invoice.md')).text();
 expect(markdown).not.toContain('file:///');
 expect(markdown).not.toContain('D:\\paper\\Invoice');
 ```
@@ -133,19 +133,19 @@ Add helpers that resolve and verify source files from `record.original_ref`, `re
 
 For annotated records include `annotation.json` and `fields.json`; for unannotated records omit both and omit any unified-label reference. Use `publisher_annotation_status` with the existing backward-compatible inference when older records lack the field. Reject a missing or hash-mismatched required source file before returning the plan.
 
-Replace `fileUrl`, `ref`, and external sample links in `sampleCard` with Vault-relative references. Keep the card at `03_发票/<dataset>/<sample-id>.md` and use links/embeds such as:
+Replace `fileUrl`, `ref`, and external sample links in `sampleCard` with Vault-relative references. Keep the card at `Evidence/invoices/<dataset>/<sample-id>/invoice.md` and use links/embeds such as:
 
 ```md
-![[03_发票/voxel51/sample-a/original.jpg]]
-[[03_发票/voxel51/sample-a/content.md|MinerU 内容]]
-[[03_发票/voxel51/sample-a/fields.json|统一字段]]
+![[Evidence/invoices/voxel51/sample-a/original.jpg]]
+[[Evidence/invoices/voxel51/sample-a/content.md|MinerU 内容]]
+[[Evidence/invoices/voxel51/sample-a/fields.json|统一字段]]
 ```
 
-Use plain text for unavailable files. Keep the source homepage and license evidence as ordinary URL metadata; do not turn authority-root paths into links. Change the overview Release entry to `[[05_发布/<version>/manifest.json|Release <version>]]`.
+Use plain text for unavailable files. Keep the source homepage and license evidence as ordinary URL metadata; do not turn authority-root paths into links. Change the overview Release entry to `[[Evidence/releases/<version>/manifest.json|Release <version>]]`.
 
 - [x] **Step 4: Implement Release asset collection**
 
-Change `releases(paths)` to return the data-root manifest and optional checksums path. Add both files to `CatalogPlan.assets` under `05_发布/<version>/`. Generate a short Release page or append a Release section to `01_总览.md` that uses only the Vault-relative manifest link. If a checksums file is absent, omit it instead of creating a fabricated file.
+Change `releases(paths)` to return the data-root manifest and optional checksums path. Add both files to `CatalogPlan.assets` under `Evidence/releases/<version>/`. Generate a short Release page or append a Release section to `Evidence/indexes/overview.md` that uses only the Vault-relative manifest link. If a checksums file is absent, omit it instead of creating a fabricated file.
 
 - [x] **Step 5: Run the focused catalog tests and verify they pass**
 
@@ -208,7 +208,7 @@ Run `git diff --check` and `git status --short`. Confirm there are no whitespace
 
 - [x] **Step 4: Validate the actual configured Vault paths**
 
-After confirming no live Flowmate or MinerU run owns the roots, run the menu's `catalog build` against `config/paths.local.json` and `config/workbench.local.json`. Inspect `D:\obsidian\data\flowmate-data\03_发票` and `05_发布` to confirm physical files are present; do not delete authority data as part of this task.
+After confirming no live Flowmate or MinerU run owns the roots, run the menu's `catalog build` against `config/paths.local.json` and `config/workbench.local.json`. Inspect `D:\obsidian\data\flowmate-data\Evidence/invoices` and `Evidence/releases` to confirm physical files are present; do not delete authority data as part of this task.
 
 - [x] **Step 5: Report the result**
 

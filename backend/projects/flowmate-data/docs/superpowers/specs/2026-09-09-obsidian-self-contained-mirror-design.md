@@ -24,28 +24,29 @@ Flowmate 当前在 `D:\obsidian\data\flowmate-data` 生成 Markdown 卡片，但
 
 ```text
 D:\obsidian\data\flowmate-data\
-├─ 01_总览.md
-├─ 02_数据集\
-│  └─ voxel51.md
-├─ 03_发票\
-│  └─ voxel51\
-│     ├─ 000001.md
-│     └─ 000001\
-│        ├─ original.jpg
-│        ├─ annotation.json
-│        ├─ fields.json
-│        ├─ record.json
-│        ├─ receipt.json
-│        ├─ snapshot.json
-│        ├─ content.md
-│        ├─ content.json
-│        ├─ pages.json
-│        ├─ parse.json
-│        └─ assets\
-└─ 05_发布\
-   └─ public-invoice-p0-v1\
-      ├─ manifest.json
-      └─ checksums.json
+└─ Evidence\
+   ├─ indexes\
+   │  ├─ overview.md
+   │  └─ voxel51.md
+   ├─ invoices\
+   │  └─ voxel51\
+   │     └─ 000001\
+   │        ├─ invoice.md
+   │        ├─ original.jpg
+   │        ├─ annotation.json
+   │        ├─ fields.json
+   │        ├─ record.json
+   │        ├─ receipt.json
+   │        ├─ snapshot.json
+   │        ├─ content.md
+   │        ├─ content.json
+   │        ├─ pages.json
+   │        ├─ parse.json
+   │        └─ assets\
+   └─ releases\
+      └─ public-invoice-p0-v1\
+         ├─ manifest.json
+         └─ checksums.json
 ```
 
 `annotation.json` 和 `fields.json` 只在记录具有发布方标注时出现。`content.md`、`content.json`、`pages.json`、`parse.json` 和解析资产来自已验证的 MinerU 规范化结果。文件名保持短且稳定，目录中的样本编号沿用数据根的持久化编号。
@@ -63,7 +64,7 @@ D:\obsidian\data\flowmate-data\
 
 - 发票卡片使用 Vault 内部相对路径或 Obsidian 嵌入，例如 `![[000001/original.jpg]]` 和 `[[000001/content.md]]`。
 - 总览和数据集页面只链接 Vault 内部 Markdown 页面。
-- Release 页面只链接 Vault 内部的 `05_发布/<version>/manifest.json`。
+- Release 页面只链接 Vault 内部的 `Evidence/releases/<version>/manifest.json`。
 - 来源主页和许可证证据可以作为普通 URL 元数据保留，但不能用本机绝对路径或 `file:///` 指向外部数据根。
 - 构建结果中不得出现 `D:\paper\Invoice`、`D:\agent-data\data\flowmate-data` 或对应的 `file:///` 文件链接。
 

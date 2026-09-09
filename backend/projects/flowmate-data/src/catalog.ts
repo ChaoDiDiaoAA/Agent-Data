@@ -1,5 +1,14 @@
 import { recoverPublications } from './publication.ts';
-import { datasetAlias, sampleDirectory } from './layout.ts';
+import {
+  datasetAlias,
+  sampleDirectory,
+  vaultEvidenceRoot,
+  vaultIndexPath,
+  vaultIndexesRoot,
+  vaultInvoicesRoot,
+  vaultKnowledgeRoot,
+  vaultReleasesRoot,
+} from './layout.ts';
 import { copyFile, lstat, link as hardLink, mkdir, readFile, readdir, realpath, rename, rmdir, unlink, writeFile, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, win32, posix } from 'node:path';
@@ -33,7 +42,9 @@ function ref(paths: FlowmatePaths, value: FileRef): string {
   return resolveOwnedPath(root, value.path);
 }
 function internal(path: string): string { return `[[${path.replaceAll('\\', '/').replace(/\.md$/, '')}]]`; }
-function samplePath(record: SampleRecord): string { return `03_发票/${catalogSegment(datasetAlias(record.dataset_id))}/${catalogSegment(record.sample_id)}.md`; }
+function samplePath(record: SampleRecord): string {
+  return `${vaultInvoicesRoot}/${catalogSegment(datasetAlias(record.dataset_id))}/${catalogSegment(record.sample_id)}/invoice.md`;
+}
 function sampleParseStatus(record: SampleRecord, withdrawn: boolean): string { return withdrawn ? 'withdrawn' : record.derived_ref ? 'parsed' : record.processing_status === 'failed' ? 'failed' : 'not_parsed'; }
 
 function fail(code: string): never { throw new Error(code); }
@@ -151,7 +162,7 @@ async function releases(paths: FlowmatePaths): Promise<Array<{ version: string; 
 }
 
 function sampleAssetBase(record: SampleRecord): string {
-  return `03_发票/${catalogSegment(datasetAlias(record.dataset_id))}/${catalogSegment(record.sample_id)}`;
+  return `${vaultInvoicesRoot}/${catalogSegment(datasetAlias(record.dataset_id))}/${catalogSegment(record.sample_id)}`;
 }
 
 function sampleCard(record: SampleRecord, withdrawn: boolean): CatalogFile {
@@ -171,11 +182,11 @@ function sampleCard(record: SampleRecord, withdrawn: boolean): CatalogFile {
   if (record.derived_ref) lines.push(`- ${vaultLink('Parse result', `${assetBase}/content.md`)}`);
   else lines.push(`- Parse result: unavailable (${sampleParseStatus(record, withdrawn)})`);
   lines.push(`- Parse error: ${record.processing_status === 'failed' ? 'recorded failure' : 'none recorded'}`, '');
-  return { path: `03_发票/${datasetId}/${sampleId}.md`, content: lines.join('\n') };
+  return { path: `${vaultInvoicesRoot}/${datasetId}/${sampleId}/invoice.md`, content: lines.join('\n') };
 }
 
 function knowledgeAssetBase(record: KnowledgeRecord): string {
-  return `04_InvoiceKnowledge/${catalogSegment(record.source_id)}/${catalogSegment(record.file_id)}--${catalogSegment(record.version)}`;
+  return `${vaultKnowledgeRoot}/${catalogSegment(record.source_id)}/${catalogSegment(record.file_id)}--${catalogSegment(record.version)}`;
 }
 
 function knowledgeCard(record: KnowledgeRecord): CatalogFile {
@@ -193,7 +204,7 @@ function knowledgeCard(record: KnowledgeRecord): CatalogFile {
   else lines.push(`- Parse result: unavailable (${record.parse_status})`);
   lines.push('- Original annotation: unavailable', '- Unified label: unavailable');
   lines.push(`- [Source](${record.source_url})`, `- [License evidence](${record.license_evidence})`, '');
-  return { path: `04_InvoiceKnowledge/${sourceId}/${name}.md`, content: lines.join('\n') };
+  return { path: `${vaultKnowledgeRoot}/${sourceId}/${name}/knowledge.md`, content: lines.join('\n') };
 }
 
 interface AssetCollectionOptions { skipNames?: Set<string> }
@@ -301,10 +312,10 @@ export async function buildCatalog(paths: FlowmatePaths): Promise<CatalogPlan> {
   const knowledgeAssets = await Promise.all(knowledge.map(record => buildKnowledgeAssets(paths, record)));
   const assets = [...sampleAssets.flat(), ...knowledgeAssets.flat()];
   for (const release of releaseRecords) {
-    const manifest = await addCatalogAsset(new Map(), `05_发布/${catalogSegment(release.version)}/manifest.json`, release.manifest, true);
+    const manifest = await addCatalogAsset(new Map(), `${vaultReleasesRoot}/${catalogSegment(release.version)}/manifest.json`, release.manifest, true);
     if (manifest) assets.push(manifest);
     if (release.checksums) {
-      const checksum = await addCatalogAsset(new Map(), `05_发布/${catalogSegment(release.version)}/checksums.json`, release.checksums, true);
+      const checksum = await addCatalogAsset(new Map(), `${vaultReleasesRoot}/${catalogSegment(release.version)}/checksums.json`, release.checksums, true);
       if (checksum) assets.push(checksum);
     }
   }
@@ -312,12 +323,27 @@ export async function buildCatalog(paths: FlowmatePaths): Promise<CatalogPlan> {
     ...samples.map(record => sampleCard(record, withdrawals.entries.some(entry => entry.dataset_id === record.dataset_id && entry.sample_id === record.sample_id
       && (entry.source_record_id === undefined || entry.source_record_id === record.source_record_id)))),
     ...knowledge.map(record => knowledgeCard(record)),
-    ...datasetIds.map(dataset => ({ path: `02_数据集/${catalogSegment(datasetAlias(dataset))}.md`, content: [frontmatter({ source: dataset, type: 'dataset' }), `# ${dataset}`, '', ...samples.filter(record => record.dataset_id === dataset).map(record => `- ${internal(samplePath(record))}`), ''].join('\n') })),
-    ...[...new Set(knowledge.map(record => record.source_id))].sort().map(source => ({ path: `02_数据集/${catalogSegment(source)}.md`, content: [frontmatter({ source, type: 'knowledge' }), `# ${source}`, '', ...knowledge.filter(record => record.source_id === source).map(record => `- ${internal(`04_InvoiceKnowledge/${catalogSegment(source)}/${catalogSegment(record.file_id)}--${catalogSegment(record.version)}.md`)}`), ''].join('\n') })),
+    ...datasetIds.map(dataset => ({ path: `${vaultIndexesRoot}/${catalogSegment(datasetAlias(dataset))}.md`, content: [frontmatter({ source: dataset, type: 'dataset' }), `# ${dataset}`, '', ...samples.filter(record => record.dataset_id === dataset).map(record => `- ${internal(samplePath(record))}`), ''].join('\n') })),
+    ...[...new Set(knowledge.map(record => record.source_id))].sort().map(source => ({ path: `${vaultKnowledgeRoot}/${catalogSegment(source)}/index.md`, content: [frontmatter({ source, type: 'knowledge' }), `# ${source}`, '', ...knowledge.filter(record => record.source_id === source).map(record => `- ${internal(`${vaultKnowledgeRoot}/${catalogSegment(source)}/${catalogSegment(record.file_id)}--${catalogSegment(record.version)}/knowledge.md`)}`), ''].join('\n') })),
   ];
-  files.push({ path: '01_总览.md', content: [frontmatter({ type: 'index' }), '# 发票资料总览', '', ...datasetIds.map(id => `- ${internal(`02_数据集/${datasetAlias(id)}.md`)}`), ...samples.map(record => `- ${internal(samplePath(record))}`), ...knowledge.map(record => `- ${internal(`04_InvoiceKnowledge/${record.source_id}/${record.file_id}--${record.version}.md`)}`), ...releaseRecords.map(release => `- ${vaultLink(`Release ${release.version}`, `05_发布/${catalogSegment(release.version)}/manifest.json`)}`), ''].join('\n') });
-  const releaseDirectories = releaseRecords.map(release => `05_发布/${catalogSegment(release.version)}`);
-  const plan = { vaultRoot: paths.vaultRoot, directories: ['02_数据集', '03_发票', ...(knowledge.length ? ['04_InvoiceKnowledge'] : []), ...(releaseRecords.length ? ['05_发布', ...releaseDirectories] : [])], files: files.sort((left, right) => left.path.localeCompare(right.path)), assets: assets.sort((left, right) => left.path.localeCompare(right.path)) };
+  files.push({ path: vaultIndexPath, content: [frontmatter({ type: 'index' }), '# Invoice Data Overview', '', ...datasetIds.map(id => `- ${internal(`${vaultIndexesRoot}/${datasetAlias(id)}.md`)}`), ...samples.map(record => `- ${internal(samplePath(record))}`), ...knowledge.map(record => `- ${internal(`${vaultKnowledgeRoot}/${record.source_id}/${record.file_id}--${record.version}/knowledge.md`)}`), ...releaseRecords.map(release => `- ${vaultLink(`Release ${release.version}`, `${vaultReleasesRoot}/${catalogSegment(release.version)}/manifest.json`)}`), ''].join('\n') });
+  const releaseDirectories = releaseRecords.map(release => `${vaultReleasesRoot}/${catalogSegment(release.version)}`);
+  const knowledgeDirectories = [...new Set(knowledge.flatMap(record => [
+    `${vaultKnowledgeRoot}/${catalogSegment(record.source_id)}`,
+    `${vaultKnowledgeRoot}/${catalogSegment(record.source_id)}/${catalogSegment(record.file_id)}--${catalogSegment(record.version)}`,
+  ]))];
+  const plan = {
+    vaultRoot: paths.vaultRoot,
+    directories: [
+      vaultEvidenceRoot,
+      vaultIndexesRoot,
+      vaultInvoicesRoot,
+      ...(knowledge.length ? [vaultKnowledgeRoot, ...knowledgeDirectories] : []),
+      ...(releaseRecords.length ? [vaultReleasesRoot, ...releaseDirectories] : []),
+    ],
+    files: files.sort((left, right) => left.path.localeCompare(right.path)),
+    assets: assets.sort((left, right) => left.path.localeCompare(right.path)),
+  };
   validatePlan(plan);
   return plan;
 }
@@ -337,7 +363,10 @@ export async function rebuildCatalog(paths: FlowmatePaths, options: { lockHeld?:
 
 function isGenerated(content: string): boolean { return content.startsWith(`---\ngenerated_by: ${generatedBy}\n`); }
 
-const managedCatalogRoots = ['01_Index', '02_Sources', '03_InvoiceSamples', '04_InvoiceKnowledge', '05_Releases', '01_总览.md', '02_数据集', '03_发票', '05_发布'] as const;
+// Evidence is the only current publishing root. The remaining entries are
+// read-only migration roots so a rebuild can remove stale generated files
+// from earlier layouts without touching handwritten files.
+const managedCatalogRoots = ['Evidence', '01_Index', '02_Sources', '03_InvoiceSamples', '04_InvoiceKnowledge', '05_Releases', '01_总览.md', '02_数据集', '03_发票', '05_发布'] as const;
 
 async function collectObsoleteGenerated(path: string, desired: Set<string>, files: string[], directories: string[]): Promise<void> {
   const info = await optionalLstat(path);
