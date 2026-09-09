@@ -133,9 +133,9 @@ bun run typecheck
 | `sample.source_id`                            | 样本来源登记 ID，对应`config/sources/<source_id>.json` | `voxel51-invoice-ocr`          |
 | `sample.dataset_id`                           | 处理数据和 Obsidian 的数据集分区                         | `voxel51-hq-invoice-ocr`       |
 | `sample.selection_id`                         | 固定选样清单 ID；同一 ID 重跑读取已提交清单              | `initial-20`                   |
-| `sample.acquire.with_publisher_annotation`    | 当前任务获取并交给 MinerU 解析的带发布方标注样本数       | `100`                          |
-| `sample.acquire.without_publisher_annotation` | 当前任务获取并交给 MinerU 解析的无发布方标注样本数       | `0`                            |
-| `sample.acquire`                              | 两个数量之和就是本次获取与解析总数                       | `100`                          |
+| `sample.acquire.with_publisher_annotation`    | 当前任务获取并交给 MinerU 解析的带发布方标注样本数       | `10`                           |
+| `sample.acquire.without_publisher_annotation` | 当前任务获取并交给 MinerU 解析的无发布方标注样本数       | `10`                           |
+| `sample.acquire`                              | 两个数量之和就是本次获取与解析总数                       | `20`                           |
 | `sample.publish_snapshot`                     | 标签映射后是否同步发布`D:\paper\Invoice` 结构化镜像    | `true`                         |
 | `knowledge.source_ids`                        | 已登记的知识来源列表                                     | `[]`（当前不启用额外知识来源） |
 | `knowledge.parse_source_ids`                  | 已登记且允许解析的知识来源                               | `[]`                           |
@@ -143,7 +143,41 @@ bun run typecheck
 | `release.include_originals`                   | 是否在 Release 复制允许再分发的原件                      | `false`                        |
 | `backup.verify` / `backup.restore_smoke`    | 备份命令默认是否校验、独立恢复演练                       | `true` / `true`              |
 
-`selection_id` 对应 `dataRoot/tasks/voxel51/selections/<selection_id>.json`，提交后会固定带发布方标注和无发布方标注两组数量。修改 `sample.acquire` 时必须同时换用新的 `selection_id`；菜单会在执行任务前读取本地清单，发现数量不一致会在探测、下载和 MinerU 之前停止并给出已固定数量、当前请求数量和新 ID 示例，避免运行到获取步骤才失败。
+`selection_id` 是固定选样清单的名称，不是数量参数，也不是随机种子。它对应
+`dataRoot/tasks/voxel51/selections/<selection_id>.json`，清单中保存来源 revision、具体
+record ID、图片路径、标注定位和 selection hash。首次执行时，程序按
+`sample.acquire.with_publisher_annotation` 与 `sample.acquire.without_publisher_annotation`
+选出两组记录并提交清单；之后使用相同 ID 和相同数量重跑，会复用完全相同的发票，适合
+失败后重试。
+
+选样清单一旦提交，两组数量就与 `selection_id` 一起固定。此后只要修改
+`sample.acquire` 中任意一个数量，就必须换用新的 `selection_id`；即使总数不变、只是调整
+两类样本比例，也必须换 ID。菜单会在探测、下载和 MinerU 之前检查本地清单，发现数量不一致
+就停止，并显示已固定数量、当前请求数量和新 ID 示例，避免执行到下载阶段才失败。尚未生成
+清单的首次运行前可以直接调整数量，但建议让 ID 与批次含义一致。
+
+例如，20 条（10 条带标注、10 条无标注）可以使用：
+
+```json
+"selection_id": "initial-20",
+"acquire": {
+  "with_publisher_annotation": 10,
+  "without_publisher_annotation": 10
+}
+```
+
+改为 40 条（20+20）时应改成新的 ID：
+
+```json
+"selection_id": "initial-40-a20-u20",
+"acquire": {
+  "with_publisher_annotation": 20,
+  "without_publisher_annotation": 20
+}
+```
+
+只修改 MinerU、Release、备份或路径参数时，不需要更换 `selection_id`。旧清单和已下载数据
+会保留，新 ID 表示一个新的可复现批次。
 
 命令行的 `--selection`、`--limit`、`--publish-snapshot`、`--include-originals`、`--verify` 和 `--restore-smoke` 会覆盖或开启对应默认值；没有显式 `--config` 时读取本机的 `config/workbench.local.json`。
 

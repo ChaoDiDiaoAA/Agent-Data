@@ -51,8 +51,8 @@ bun src/cli.ts <command> --paths config/paths.local.json --config config/workben
     "dataset_id": "voxel51-hq-invoice-ocr",
     "selection_id": "initial-20",
     "acquire": {
-      "with_publisher_annotation": 20,
-      "without_publisher_annotation": 0
+      "with_publisher_annotation": 10,
+      "without_publisher_annotation": 10
     },
     "publish_snapshot": true
   },
@@ -294,16 +294,46 @@ bun src/cli.ts catalog build --paths config/paths.local.json --config config/wor
 | `source_id` | 样本来源登记 ID；程序读取 `sources/<source_id>.json` | `voxel51-invoice-ocr` |
 | `dataset_id` | 数据集身份标识，保存在记录中；该来源的磁盘目录使用短名 `voxel51` | `voxel51-hq-invoice-ocr` |
 | `selection_id` | 固定选样清单 ID；第一次采集提交清单，之后按同一清单重试 | `initial-20` |
-| `acquire.with_publisher_annotation` | 当前任务选取、下载并交给 `parse` 命令处理的带发布方标注样本数 | `100` |
-| `acquire.without_publisher_annotation` | 当前任务选取、下载并交给 `parse` 命令处理的无发布方标注样本数 | `0` |
-| `acquire` | 两个数量之和，即当前任务获取与 MinerU 解析总数 | `100` |
+| `acquire.with_publisher_annotation` | 当前任务选取、下载并交给 `parse` 命令处理的带发布方标注样本数 | `10` |
+| `acquire.without_publisher_annotation` | 当前任务选取、下载并交给 `parse` 命令处理的无发布方标注样本数 | `10` |
+| `acquire` | 两个数量之和，即当前任务获取与 MinerU 解析总数 | `20` |
 | `publish_snapshot` | `labels map` 默认是否将标签结构化镜像发布到 `originalRoot` | `true` |
 
-旧配置中的 `sample.acquire_limit` 仍可被读取并按“全部带发布方标注”兼容处理，但新配置不要再使用它；只要同时需要两类样本，就必须填写上面的 `acquire` 对象。修改数量后建议同时更换 `selection_id`，避免把新任务绑定到旧的固定选样清单。
+旧配置中的 `sample.acquire_limit` 仍可被读取并按“全部带发布方标注”兼容处理，但新配置不要再使用它；只要同时需要两类样本，就必须填写上面的 `acquire` 对象。
 
-`selection_id` 不是目录名数量，也不是随机种子。它对应 `dataRoot/tasks/voxel51/selections/<selection_id>.json`，其中保存 revision、record ID、图片路径、标注定位和 selection hash。已提交 selection 存在时，重复采集不会重新选择另一批记录。发票编号单独持久化，增加任务数量不会重排已有编号。
+`selection_id` 不是目录名数量，也不是随机种子，而是固定选样清单的名称。它对应
+`dataRoot/tasks/voxel51/selections/<selection_id>.json`，其中保存 revision、具体 record ID、
+图片路径、标注定位和 selection hash。首次执行会按 `acquire` 的两组数量生成并提交清单；
+已提交 selection 存在时，使用相同 ID 和相同数量重跑会复用完全相同的记录，不会重新选择另一批
+发票。发票编号单独持久化，增加任务数量不会重排已有编号。
 
-选样清单一旦提交，带发布方标注数和无发布方标注数就与 `selection_id` 一起固定，不能只修改 `sample.acquire` 后继续复用原 ID。菜单执行完整任务前会先读取本地清单并比较两组数量；发现不一致时会在探测、下载和 MinerU 之前停止，并显示已固定数量、当前配置数量以及可直接参考的新 ID（例如 `initial-20-a10-u10`）。此时只需修改 `sample.selection_id` 后重新运行菜单，旧清单和已下载数据会保留。
+选样清单一旦提交，带发布方标注数和无发布方标注数就与 `selection_id` 一起固定。此后只要
+修改 `sample.acquire` 中任意一个数量，就必须同时更换 `selection_id`；即使总数不变、只是
+调整两类样本比例，也不能继续复用原 ID。菜单会在探测、下载和 MinerU 之前读取本地清单并
+比较两组数量；发现不一致时停止，并显示已固定数量、当前配置数量以及可直接参考的新 ID。
+尚未生成清单的首次运行前可以直接调整数量，但建议让 ID 与批次含义一致。只修改 MinerU、
+Release、备份或路径参数时，不需要更换 `selection_id`。旧清单和已下载数据会保留，新 ID 表示
+一个新的可复现批次。
+
+例如，20 条（10 条带标注、10 条无标注）使用：
+
+```json
+"selection_id": "initial-20",
+"acquire": {
+  "with_publisher_annotation": 10,
+  "without_publisher_annotation": 10
+}
+```
+
+改为 40 条（20+20）时使用新的 ID：
+
+```json
+"selection_id": "initial-40-a20-u20",
+"acquire": {
+  "with_publisher_annotation": 20,
+  "without_publisher_annotation": 20
+}
+```
 
 ### `knowledge` 参数
 
