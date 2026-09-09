@@ -631,6 +631,34 @@ test('occupied port throws MINERU_API_PORT_IN_USE and never invokes managedProce
   });
 });
 
+test('dispose after a prelaunch failure preserves the original startup error', async () => {
+  await withSessionFixture(async ({ config, processContext }) => {
+    const session = createMineruApiSession({
+      config,
+      processContext,
+      dependencies: {
+        checkPortAvailable: async () => {
+          throw Object.assign(new Error('busy'), { code: 'EADDRINUSE' });
+        },
+        fetchHealth: async () => healthyPayload(config),
+        managedProcess: (async () => {
+          throw new Error('managed process must not start');
+        }) as typeof runManagedProcess,
+        runClient: async () => {
+          throw new Error('runClient should not be called');
+        },
+        sleep: async () => {},
+      },
+    });
+
+    await assert.rejects(() => session.ensureReady(), (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'MINERU_API_PORT_IN_USE');
+      return true;
+    });
+    await assert.doesNotReject(() => session.dispose());
+  });
+});
+
 test('startup timeout aborts, awaits cleanup, and throws MINERU_API_STARTUP_TIMEOUT', async () => {
   await withSessionFixture(async ({ config, processContext }) => {
     let aborted = false;

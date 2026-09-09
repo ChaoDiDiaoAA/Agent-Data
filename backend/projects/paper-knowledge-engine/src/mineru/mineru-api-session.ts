@@ -27,6 +27,7 @@ export interface MineruApiSessionDependencies {
 interface ServerLaunch {
   apiUrl: string;
   controller: AbortController;
+  startedPid?: number;
   started: Promise<number>;
   resolveStarted(pid: number): void;
   rejectStarted(error: unknown): void;
@@ -302,7 +303,10 @@ export function createMineruApiSession(options: {
           apiStderrBuffer = `${apiStderrBuffer}${chunk}`.slice(-API_DIAGNOSTIC_BUFFER_LIMIT);
         },
         onEvent(event) {
-          if (event.kind === 'started') launch.resolveStarted(event.pid);
+          if (event.kind === 'started') {
+            launch.startedPid = event.pid;
+            launch.resolveStarted(event.pid);
+          }
         },
       });
       void managed.catch((error) => {
@@ -435,6 +439,11 @@ export function createMineruApiSession(options: {
       const currentState = state;
       const current = currentState.launch;
       state = { kind: 'disposed' };
+      // A launch can fail before a managed process is created (for example
+      // because the configured port is occupied). In that case there is
+      // nothing to clean up; preserve the original startup error instead of
+      // replacing it with a cleanup failure from the rejected promise.
+      if (current.startedPid === undefined && current.outcome?.kind === 'error') return;
       if (currentState.kind !== 'ended') current.controller.abort();
       const result = await waitForLaunchResult(current);
       if (!result.cleanupConfirmed) throw cleanupUnconfirmedError();

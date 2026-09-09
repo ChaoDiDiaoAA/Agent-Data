@@ -116,7 +116,7 @@ bun src/cli.ts <command> --paths config/paths.local.json --config config/workben
     "task_timeout_seconds": 3600,
     "result_download_timeout_seconds": 600,
     "api_host": "127.0.0.1",
-    "api_port": 17860,
+    "api_port": 17861,
     "api_startup_timeout_seconds": 120,
     "local_import": {
       "recursive": true,
@@ -155,7 +155,7 @@ bun install --frozen-lockfile
 bun run typecheck
 ```
 
-`parse` 命令会通过 bridge 启动任务级 MinerU API，并在任务结束后回收；不需要先手工启动第二个 MinerU 服务。
+`parse` 命令会通过 bridge 启动任务级 MinerU API，并在任务结束后回收；不需要先手工启动第二个 MinerU 服务。Flowmate 默认使用 `17861`，Paper Knowledge Engine 默认使用 `17860`，两个项目不要共用同一个端口。
 
 ## 先看结论：从哪里获取、获取多少
 
@@ -340,7 +340,7 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | `task_timeout_seconds` | 单个 MinerU 任务超时 |
 | `result_download_timeout_seconds` | MinerU 结果下载超时 |
 | `api_host` | 本地 MinerU API 监听地址；只能是 `127.0.0.1` |
-| `api_port` | 本地 MinerU API 端口 |
+| `api_port` | 本地 MinerU API 端口；Flowmate 默认 `17861`，应与其他项目的 MinerU 服务区分 |
 | `api_startup_timeout_seconds` | API 健康检查等待时间 |
 | `local_import.recursive` | 共享 runner 的本地导入是否递归；Flowmate 当前不从 FSD 导入 |
 | `local_import.max_files` | 本地导入文件数上限 |

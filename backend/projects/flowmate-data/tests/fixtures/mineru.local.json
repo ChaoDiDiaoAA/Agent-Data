@@ -49,7 +49,7 @@
     "task_timeout_seconds": 3600,
     "result_download_timeout_seconds": 600,
     "api_host": "127.0.0.1",
-    "api_port": 17860,
+    "api_port": 17861,
     "api_startup_timeout_seconds": 120,
     "local_import": {
       "recursive": true,
