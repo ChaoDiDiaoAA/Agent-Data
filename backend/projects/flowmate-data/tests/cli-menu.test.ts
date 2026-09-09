@@ -113,6 +113,31 @@ describe('interactive CLI menu', () => {
     expect(result.output).not.toContain('"selection_hash"');
   });
 
+  test('prints each invoice progress while the MinerU step is running', async () => {
+    const { pathsPath, configPath } = await menuFixture(2);
+    const answers = ['2', '0'];
+    const lines: string[] = [];
+    await runMenu({
+      pathsPath,
+      configPath,
+      ask: async () => answers.shift()!,
+      output: fakeOutput(lines),
+      execute: async (args, executeOptions) => {
+        if (args[0] === 'parse') {
+          const onProgress = executeOptions?.parseDependencies?.onProgress;
+          await onProgress?.({ index: 1, total: 2, sampleId: 'invoice-a', status: 'started', elapsedMs: 0 });
+          await onProgress?.({ index: 1, total: 2, sampleId: 'invoice-a', status: 'completed', elapsedMs: 1_234 });
+          await onProgress?.({ index: 2, total: 2, sampleId: 'invoice-b', status: 'started', elapsedMs: 0 });
+        }
+        return 0;
+      },
+    });
+    const output = lines.join('');
+    expect(output).toContain('[发票 1/2] invoice-a 开始（MinerU）');
+    expect(output).toContain('[发票 1/2] invoice-a 完成（耗时 00:01）');
+    expect(output).toContain('[发票 2/2] invoice-b 开始（MinerU）');
+  });
+
   test('maps verify and backup entries to the correct commands', async () => {
     const verification = await runChoice('3');
     expect(verification.commands).toHaveLength(2);

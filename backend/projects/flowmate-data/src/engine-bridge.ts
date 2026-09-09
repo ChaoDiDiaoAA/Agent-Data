@@ -46,6 +46,13 @@ export interface ParseReceipt {
   contentHash: string;
   files: ParsedFile[];
 }
+export interface ParseProgress {
+  index: number;
+  total: number;
+  sampleId: string;
+  status: 'started' | 'completed' | 'failed';
+  elapsedMs: number;
+}
 export interface ParseInput {
   sampleId: string;
   sourcePath: string;
@@ -58,6 +65,8 @@ export interface ParseInput {
 export interface ParseDependencies {
   createSession?: typeof createMineruApiSession;
   now?: () => Date;
+  /** Optional progress notifications for sequential selection parsing. */
+  onProgress?: (progress: ParseProgress) => void | Promise<void>;
   /** Internal use: the caller already holds Flowmate's run lock for a larger operation. */
   lockHeld?: boolean;
   /** Runs after cleanup and receipt verification, while the Flowmate run lock is held. */

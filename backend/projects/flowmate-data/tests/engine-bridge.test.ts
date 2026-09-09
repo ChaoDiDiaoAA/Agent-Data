@@ -166,10 +166,16 @@ test('parse CLI selects the first image in the committed selection and saves onl
   await Bun.write(selectionPath, bridge.canonicalJson({ ...selection, selection_hash: bridge.hashCanonical(selection) }));
   const pathsFile = join(paths.projectRoot, 'paths.json'); await writeFile(pathsFile, JSON.stringify(paths));
   let runs = 0; let output: unknown;
+  const progress: Array<{ index: number; total: number; sampleId: string; status: string }> = [];
   expect(await runCli(['parse', '--selection', 'initial-20', '--limit', '1', '--paths', pathsFile, '--config', workbench], { print: value => { output = value; }, parseDependencies: {
     createSession: () => ({ async ensureReady() { return 'fake'; }, async run(job) { runs++; expect(job.fileSource).toBe(join(paths.originalRoot, originalPath)); await cp(join(fixture, 'mineru-output'), job.outputDir, { recursive: true }); return { exitCode: 0 }; }, async dispose() {} }),
+    onProgress: event => { progress.push({ index: event.index, total: event.total, sampleId: event.sampleId, status: event.status }); },
   } })).toBe(0);
   expect(runs).toBe(1); expect(output).toMatchObject({ parsed: 1 });
+  expect(progress).toEqual([
+    { index: 1, total: 1, sampleId: 'invoice-a', status: 'started' },
+    { index: 1, total: 1, sampleId: 'invoice-a', status: 'completed' },
+  ]);
   const [record] = await loadSampleRecords(paths, datasetId);
   expect(record).toMatchObject({ processing_status: 'processed', parser_key: expect.stringContaining('mineru@3.4.5'), parse_attempt_id: expect.stringMatching(/^attempt-/) });
   expect(await Bun.file(join(paths.originalRoot, 'datasets', datasetId, 'samples', 'invoice-a', 'structured', 'snapshot.json')).exists()).toBe(true);

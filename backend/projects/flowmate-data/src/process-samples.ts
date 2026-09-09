@@ -46,6 +46,17 @@ async function parseSelectionUnlocked(input: { paths: FlowmatePaths; selectionId
   const images = selected.filter(record => ['.jpg', '.jpeg', '.png'].includes(extname(record.original_ref.path).toLowerCase())).slice(0, limit);
   if (images.length === 0) throw new Error('PARSE_SELECTION_NO_IMAGE');
   const receipts: ParseReceipt[] = [];
-  for (const record of images) receipts.push(await processSample({ paths, record }, dependencies));
+  for (let index = 0; index < images.length; index += 1) {
+    const record = images[index]!;
+    const startedAt = Date.now();
+    await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'started', elapsedMs: 0 });
+    try {
+      receipts.push(await processSample({ paths, record }, dependencies));
+      await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'completed', elapsedMs: Date.now() - startedAt });
+    } catch (error) {
+      await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'failed', elapsedMs: Date.now() - startedAt });
+      throw error;
+    }
+  }
   return { parsed: receipts.length, sample_ids: receipts.map(receipt => receipt.sampleId), attempts: receipts.map(receipt => receipt.attemptId) };
 }

@@ -9,7 +9,7 @@ import { acquireVoxel51Selection, probeVoxel51 } from './sources/voxel51.ts';
 import { mapVoxel51Selection } from './labels/voxel51.ts';
 import { publishStructuredSnapshot } from './structured-snapshot.ts';
 import { parseSelection } from './process-samples.ts';
-import { canonicalJson, hashCanonical, loadSharedEngineNetwork, realTree, verifyNormalizedOutput, withRunLock, type ParseDependencies } from './engine-bridge.ts';
+import { canonicalJson, hashCanonical, loadSharedEngineNetwork, realTree, verifyNormalizedOutput, withRunLock, type ParseDependencies, type ParseProgress } from './engine-bridge.ts';
 import { acquirePublicFiles, parsePublicKnowledge } from './sources/public-files.ts';
 import { rebuildCatalog } from './catalog.ts';
 import { buildRelease, loadReleaseRecords, loadReleaseSourceConfig, verifyRelease } from './release.ts';
@@ -149,6 +149,16 @@ function menuCommand(args: string[], pathsPath: string, configPath: string): str
   return [...args, '--paths', pathsPath, '--config', configPath];
 }
 
+function menuParseProgress(output: MenuOutput, progress: ParseProgress): void {
+  const label = `[发票 ${progress.index}/${progress.total}] ${progress.sampleId}`;
+  if (progress.status === 'started') {
+    writeMenu(output, `${label} 开始（MinerU）`);
+    return;
+  }
+  const status = progress.status === 'completed' ? '完成' : '失败';
+  writeMenu(output, `${label} ${status}（耗时 ${menuDuration(progress.elapsedMs)}）`);
+}
+
 function menuLabel(workbench: ReturnType<typeof loadWorkbenchConfig>): string {
   const taskLimit = String(workbench.sample.acquire_limit);
   return [
@@ -177,7 +187,7 @@ function menuTaskSteps(pathsPath: string, configPath: string, workbench: ReturnT
     { phase: '探测', label: '探测公开来源', commands: [common(['source', 'probe', source.source_id])] },
     { phase: '获取', label: `获取并固定 ${taskLimit} 条发票`, commands: [common(['acquire', source.source_id])] },
     { phase: '标签', label: `映射 ${taskLimit} 条标签并发布结构化镜像`, commands: [common(['labels', 'map', workbench.sample.dataset_id])] },
-    { phase: 'MinerU', label: `解析同一批 ${taskLimit} 条发票`, commands: [common(['parse'])] },
+    { phase: 'MinerU', label: `逐条解析 ${taskLimit} 条发票`, commands: [common(['parse'])] },
     { phase: 'Obsidian', label: '构建 Obsidian 目录', commands: [common(['catalog', 'build'])] },
     { phase: 'Release', label: `构建 Release（${workbench.release.version}）`, commands: [common(['release', 'build', workbench.release.version])] },
     { phase: '校验', label: '校验 Release 和当前任务', commands: [common(['release', 'verify', workbench.release.version]), common(['verify'])] },
@@ -203,9 +213,18 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
   });
   const invoke = async (args: string[]): Promise<{ code: number; result: unknown }> => {
     let result: unknown;
+    const parseDependencies = args[0] === 'parse'
+      ? {
+          ...options.parseDependencies,
+          onProgress: async (progress: ParseProgress) => {
+            menuParseProgress(output, progress);
+            await options.parseDependencies?.onProgress?.(progress);
+          },
+        }
+      : options.parseDependencies;
     const code = await execute(args, {
       transport: options.transport,
-      parseDependencies: options.parseDependencies,
+      parseDependencies,
       print: value => { result = value; },
     });
     return { code, result };
