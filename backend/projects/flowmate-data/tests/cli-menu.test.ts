@@ -138,6 +138,31 @@ describe('interactive CLI menu', () => {
     expect(output).toContain('[发票 2/2] invoice-b 开始（MinerU）');
   });
 
+  test('prints each invoice progress while the acquisition step is running', async () => {
+    const { pathsPath, configPath } = await menuFixture(2);
+    const answers = ['2', '0'];
+    const lines: string[] = [];
+    await runMenu({
+      pathsPath,
+      configPath,
+      ask: async () => answers.shift()!,
+      output: fakeOutput(lines),
+      execute: async (args, executeOptions) => {
+        if (args[0] === 'acquire') {
+          const onProgress = executeOptions?.acquireProgress;
+          await onProgress?.({ index: 1, total: 2, sampleId: 'invoice-a', annotationStatus: 'annotated', status: 'started', elapsedMs: 0 });
+          await onProgress?.({ index: 1, total: 2, sampleId: 'invoice-a', annotationStatus: 'annotated', status: 'completed', elapsedMs: 1_234 });
+          await onProgress?.({ index: 2, total: 2, sampleId: 'invoice-b', annotationStatus: 'unannotated', status: 'started', elapsedMs: 0 });
+        }
+        return 0;
+      },
+    });
+    const output = lines.join('');
+    expect(output).toContain('[发票 1/2] invoice-a 开始（获取，带标注）');
+    expect(output).toContain('[发票 1/2] invoice-a 完成（获取，带标注，耗时 00:01）');
+    expect(output).toContain('[发票 2/2] invoice-b 开始（获取，无标注）');
+  });
+
   test('maps verify and backup entries to the correct commands', async () => {
     const verification = await runChoice('3');
     expect(verification.commands).toHaveLength(2);

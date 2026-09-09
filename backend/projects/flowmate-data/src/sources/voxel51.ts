@@ -36,6 +36,14 @@ export interface Voxel51Selection {
   records: SelectedVoxel51Record[];
   selection_hash: string;
 }
+export interface AcquireProgress {
+  index: number;
+  total: number;
+  sampleId: string;
+  annotationStatus: 'annotated' | 'unannotated';
+  status: 'started' | 'completed' | 'failed';
+  elapsedMs: number;
+}
 interface StoredSelection extends Voxel51Selection {
   schema_version: 1;
   source_id: string;
@@ -237,12 +245,14 @@ function checkSelection(bytes: Uint8Array, config: SourceConfig, selectionId: st
 
 export async function acquireVoxel51Selection(options: {
   paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit?: number; counts?: Partial<AcquireCounts>; transport?: SourceTransport;
+  onProgress?: (progress: AcquireProgress) => void | Promise<void>;
 }): Promise<{ added: number; reused: number; selection_hash: string; revision: string; counts: AcquireCounts; total: number }> {
   return withRunLock(resolveOwnedPath(options.paths.dataRoot, 'work/run.lock'), () => acquireVoxel51SelectionUnlocked(options), { jobId: `flowmate-acquire-${options.selectionId}` });
 }
 
 async function acquireVoxel51SelectionUnlocked(options: {
   paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit?: number; counts?: Partial<AcquireCounts>; transport?: SourceTransport;
+  onProgress?: (progress: AcquireProgress) => void | Promise<void>;
 }): Promise<{ added: number; reused: number; selection_hash: string; revision: string; counts: AcquireCounts; total: number }> {
   const { paths, config, selectionId } = options;
   const counts = normalizeVoxel51AcquireCounts({ limit: options.limit, counts: options.counts });
@@ -325,76 +335,85 @@ async function acquireVoxel51SelectionUnlocked(options: {
   const downloader = createDownloader({ http: transport.http });
   let added = 0;
   let reused = 0;
-  for (const { entry, record } of selectedRecords) {
-    const sampleBase = sampleDirectory(config.dataset_id, entry.sample_id);
-    const imageName = `original${extname(entry.image_path).toLowerCase()}`;
-    const originalPath = originals(`${sampleBase}/${imageName}`);
-    const annotationPath = originals(`${sampleBase}/annotation.json`);
-    const receiptPath = resolveOwnedPath(paths.dataRoot, `${sampleBase}/receipt.json`);
-    const stableUrl = fileUrl(config, selection.revision, entry.image_path);
-    const existing = existingRecords.find(item => item.sample_id === entry.sample_id);
-    const originalRef = `${sampleBase}/${imageName}`;
-    const annotationRef = `${sampleBase}/annotation.json`;
+  const total = selectedRecords.length;
+  for (const [index, { entry, record }] of selectedRecords.entries()) {
     const annotationStatus = entry.annotation_status ?? (entry.annotation_sha256 ? 'annotated' : 'unannotated');
-    const isAnnotated = annotationStatus === 'annotated';
-    if (existing && existing.dataset_revision === selection.revision) {
-      const existingStatus = existing.publisher_annotation_status ?? (existing.annotation_ref || existing.annotation_sha256 ? 'annotated' : 'unannotated');
-      if (existing.source_record_id !== entry.source_record_id || existing.original_ref.root !== 'original' || existing.original_ref.path !== originalRef || existingStatus !== annotationStatus) return fail('VOXEL51_RECORD_CONFLICT');
-      if (isAnnotated && (existing.annotation_ref?.root !== 'original' || existing.annotation_ref.path !== annotationRef || existing.annotation_sha256 !== entry.annotation_sha256)) return fail('VOXEL51_RECORD_CONFLICT');
-      if (!isAnnotated && (existing.annotation_ref || existing.annotation_sha256)) return fail('VOXEL51_RECORD_CONFLICT');
-      if (await sha256File(originalPath) !== existing.original_sha256) return fail('VOXEL51_ORIGINAL_HASH_MISMATCH');
-      if (isAnnotated && await compactJsonFileHash(annotationPath) !== entry.annotation_sha256) return fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
-      if (!isAnnotated && await optionalBytes(annotationPath)) return fail('VOXEL51_RECORD_CONFLICT');
-      const receipt: DownloadReceipt = JSON.parse(await readFile(receiptPath, 'utf8'));
-      const image = await readFile(originalPath);
-      if (receipt.sha256 !== existing.original_sha256 || receipt.bytes !== image.length || receipt.stable_url !== fileUrl(config, existing.dataset_revision, entry.image_path) || receipt.mime_type !== imageMime(entry.image_path) || ![...config.allowed_origins, ...config.redirect_origins].includes(receipt.final_origin)) return fail('VOXEL51_RECEIPT_MISMATCH');
-      reused += 1;
-      continue;
-    }
-    if (existing && existing.source_record_id !== entry.source_record_id) fail('VOXEL51_RECORD_CONFLICT');
-    const transaction = await publicationPaths(paths, config.dataset_id, entry.sample_id);
-    await rm(transaction.dataWork, { recursive: true, force: true });
-    await rm(transaction.originalWork, { recursive: true, force: true });
-    const stagedData = transaction.swaps[0]!.stage;
-    const stagedOriginal = transaction.swaps[1]!.stage;
-    await mkdir(stagedData, { recursive: true });
-    await mkdir(stagedOriginal, { recursive: true });
-    const temporaryPath = resolveOwnedPath(paths.dataRoot, `work/downloads/${entry.sample_id}.${crypto.randomUUID()}.part`);
-    let receipt: DownloadReceipt;
+    const startedAt = Date.now();
+    await options.onProgress?.({ index: index + 1, total, sampleId: entry.sample_id, annotationStatus, status: 'started', elapsedMs: 0 });
     try {
-      receipt = await downloader.downloadToTemp({
-        url: stableUrl, source: config, destination: `${stagedOriginal}/${imageName}`, temporaryPath,
-        expectedMimeType: imageMime(entry.image_path), maxBytes: 32 * 1024 * 1024,
-      });
-    } finally {
-      // The immutable installer can reuse an existing original after a prior interrupted acquisition.
-      await unlink(temporaryPath).catch(error => { if (error.code !== 'ENOENT') throw error; });
-    }
-    if (isAnnotated) await immutableBytes(`${stagedOriginal}/annotation.json`, Buffer.from(prettyJson(JSON.parse(canonicalJson(record.raw)))));
-    await immutableBytes(`${stagedData}/receipt.json`, Buffer.from(canonicalJson(receipt)));
-    const candidate = {
-      schema_version: 1, sample_id: entry.sample_id, dataset_id: config.dataset_id, dataset_revision: selection.revision,
-      source_record_id: entry.source_record_id, origin_kind: config.origin_kind, document_kind: config.document_kind,
-      language: config.language, layout_group: null, original_ref: { root: 'original', path: originalRef },
-      original_sha256: receipt.sha256, publisher_annotation_status: annotationStatus,
-      ...(isAnnotated ? { annotation_ref: { root: 'original', path: annotationRef }, annotation_sha256: entry.annotation_sha256 } : {}),
-      source_observations: [`${selection.index_url}#${entry.annotation_locator}`], label_kind: 'none',
-      quality_status: 'not_checked', processing_status: 'downloaded', allowed_uses: ['development', 'regression'],
-      created_at: existing?.created_at ?? new Date().toISOString(), updated_at: new Date().toISOString(),
-    };
-    const duplicate = existingRecords.find(value => value.sample_id !== entry.sample_id && value.original_sha256 === receipt.sha256);
-    await writeCanonicalJson(`${stagedData}/record.json`, { ...candidate, ...(duplicate ? { duplicate_of: duplicate.sample_id } : {}) });
-    await commitPublication(paths, config.dataset_id, entry.sample_id, async directory => {
-      if (await Bun.file(`${directory}/record.json`).exists()) {
-        const stored = JSON.parse(await readFile(`${directory}/record.json`, 'utf8'));
-        if (stored.original_sha256 !== receipt.sha256 || stored.sample_id !== entry.sample_id || stored.publisher_annotation_status !== annotationStatus || (isAnnotated && stored.annotation_sha256 !== entry.annotation_sha256) || (!isAnnotated && (stored.annotation_ref || stored.annotation_sha256))) fail('VOXEL51_RECORD_CONFLICT');
-        if (digest(await readFile(`${directory}/receipt.json`)) !== hashCanonical(receipt)) fail('VOXEL51_RECEIPT_MISMATCH');
+      const sampleBase = sampleDirectory(config.dataset_id, entry.sample_id);
+      const imageName = `original${extname(entry.image_path).toLowerCase()}`;
+      const originalPath = originals(`${sampleBase}/${imageName}`);
+      const annotationPath = originals(`${sampleBase}/annotation.json`);
+      const receiptPath = resolveOwnedPath(paths.dataRoot, `${sampleBase}/receipt.json`);
+      const stableUrl = fileUrl(config, selection.revision, entry.image_path);
+      const existing = existingRecords.find(item => item.sample_id === entry.sample_id);
+      const originalRef = `${sampleBase}/${imageName}`;
+      const annotationRef = `${sampleBase}/annotation.json`;
+      const isAnnotated = annotationStatus === 'annotated';
+      if (existing && existing.dataset_revision === selection.revision) {
+        const existingStatus = existing.publisher_annotation_status ?? (existing.annotation_ref || existing.annotation_sha256 ? 'annotated' : 'unannotated');
+        if (existing.source_record_id !== entry.source_record_id || existing.original_ref.root !== 'original' || existing.original_ref.path !== originalRef || existingStatus !== annotationStatus) return fail('VOXEL51_RECORD_CONFLICT');
+        if (isAnnotated && (existing.annotation_ref?.root !== 'original' || existing.annotation_ref.path !== annotationRef || existing.annotation_sha256 !== entry.annotation_sha256)) return fail('VOXEL51_RECORD_CONFLICT');
+        if (!isAnnotated && (existing.annotation_ref || existing.annotation_sha256)) return fail('VOXEL51_RECORD_CONFLICT');
+        if (await sha256File(originalPath) !== existing.original_sha256) return fail('VOXEL51_ORIGINAL_HASH_MISMATCH');
+        if (isAnnotated && await compactJsonFileHash(annotationPath) !== entry.annotation_sha256) return fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
+        if (!isAnnotated && await optionalBytes(annotationPath)) return fail('VOXEL51_RECORD_CONFLICT');
+        const receipt: DownloadReceipt = JSON.parse(await readFile(receiptPath, 'utf8'));
+        const image = await readFile(originalPath);
+        if (receipt.sha256 !== existing.original_sha256 || receipt.bytes !== image.length || receipt.stable_url !== fileUrl(config, existing.dataset_revision, entry.image_path) || receipt.mime_type !== imageMime(entry.image_path) || ![...config.allowed_origins, ...config.redirect_origins].includes(receipt.final_origin)) return fail('VOXEL51_RECEIPT_MISMATCH');
+        reused += 1;
       } else {
-        if (await sha256File(`${directory}/${imageName}`) !== receipt.sha256) fail('VOXEL51_ORIGINAL_HASH_MISMATCH');
-        if (isAnnotated && await compactJsonFileHash(`${directory}/annotation.json`) !== entry.annotation_sha256) fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
+        if (existing && existing.source_record_id !== entry.source_record_id) fail('VOXEL51_RECORD_CONFLICT');
+        const transaction = await publicationPaths(paths, config.dataset_id, entry.sample_id);
+        await rm(transaction.dataWork, { recursive: true, force: true });
+        await rm(transaction.originalWork, { recursive: true, force: true });
+        const stagedData = transaction.swaps[0]!.stage;
+        const stagedOriginal = transaction.swaps[1]!.stage;
+        await mkdir(stagedData, { recursive: true });
+        await mkdir(stagedOriginal, { recursive: true });
+        const temporaryPath = resolveOwnedPath(paths.dataRoot, `work/downloads/${entry.sample_id}.${crypto.randomUUID()}.part`);
+        let receipt: DownloadReceipt;
+        try {
+          receipt = await downloader.downloadToTemp({
+            url: stableUrl, source: config, destination: `${stagedOriginal}/${imageName}`, temporaryPath,
+            expectedMimeType: imageMime(entry.image_path), maxBytes: 32 * 1024 * 1024,
+          });
+        } finally {
+          // The immutable installer can reuse an existing original after a prior interrupted acquisition.
+          await unlink(temporaryPath).catch(error => { if (error.code !== 'ENOENT') throw error; });
+        }
+        if (isAnnotated) await immutableBytes(`${stagedOriginal}/annotation.json`, Buffer.from(prettyJson(JSON.parse(canonicalJson(record.raw)))));
+        await immutableBytes(`${stagedData}/receipt.json`, Buffer.from(canonicalJson(receipt)));
+        const candidate = {
+          schema_version: 1, sample_id: entry.sample_id, dataset_id: config.dataset_id, dataset_revision: selection.revision,
+          source_record_id: entry.source_record_id, origin_kind: config.origin_kind, document_kind: config.document_kind,
+          language: config.language, layout_group: null, original_ref: { root: 'original', path: originalRef },
+          original_sha256: receipt.sha256, publisher_annotation_status: annotationStatus,
+          ...(isAnnotated ? { annotation_ref: { root: 'original', path: annotationRef }, annotation_sha256: entry.annotation_sha256 } : {}),
+          source_observations: [`${selection.index_url}#${entry.annotation_locator}`], label_kind: 'none',
+          quality_status: 'not_checked', processing_status: 'downloaded', allowed_uses: ['development', 'regression'],
+          created_at: existing?.created_at ?? new Date().toISOString(), updated_at: new Date().toISOString(),
+        };
+        const duplicate = existingRecords.find(value => value.sample_id !== entry.sample_id && value.original_sha256 === receipt.sha256);
+        await writeCanonicalJson(`${stagedData}/record.json`, { ...candidate, ...(duplicate ? { duplicate_of: duplicate.sample_id } : {}) });
+        await commitPublication(paths, config.dataset_id, entry.sample_id, async directory => {
+          if (await Bun.file(`${directory}/record.json`).exists()) {
+            const stored = JSON.parse(await readFile(`${directory}/record.json`, 'utf8'));
+            if (stored.original_sha256 !== receipt.sha256 || stored.sample_id !== entry.sample_id || stored.publisher_annotation_status !== annotationStatus || (isAnnotated && stored.annotation_sha256 !== entry.annotation_sha256) || (!isAnnotated && (stored.annotation_ref || stored.annotation_sha256))) fail('VOXEL51_RECORD_CONFLICT');
+            if (digest(await readFile(`${directory}/receipt.json`)) !== hashCanonical(receipt)) fail('VOXEL51_RECEIPT_MISMATCH');
+          } else {
+            if (await sha256File(`${directory}/${imageName}`) !== receipt.sha256) fail('VOXEL51_ORIGINAL_HASH_MISMATCH');
+            if (isAnnotated && await compactJsonFileHash(`${directory}/annotation.json`) !== entry.annotation_sha256) fail('VOXEL51_ANNOTATION_HASH_MISMATCH');
+          }
+        });
+        if (existing) reused += 1; else added += 1;
       }
-    });
-    if (existing) reused += 1; else added += 1;
+      await options.onProgress?.({ index: index + 1, total, sampleId: entry.sample_id, annotationStatus, status: 'completed', elapsedMs: Date.now() - startedAt });
+    } catch (error) {
+      await options.onProgress?.({ index: index + 1, total, sampleId: entry.sample_id, annotationStatus, status: 'failed', elapsedMs: Date.now() - startedAt });
+      throw error;
+    }
   }
   return { added, reused, selection_hash: selection.selection_hash, revision: selection.revision, counts: selection.counts, total: selection.records.length };
 }

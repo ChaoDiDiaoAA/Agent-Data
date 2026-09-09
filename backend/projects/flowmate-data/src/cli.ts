@@ -7,7 +7,7 @@ import { stdin, stdout } from 'node:process';
 import { loadPaths, loadSourceConfig, loadWorkbenchConfig, resolveOwnedPath, sampleAcquireCounts, sampleAcquireTotal } from './config.ts';
 import type { SourceTransport } from './sources/dataset-records.ts';
 import { createSourceHttp } from './sources/dataset-records.ts';
-import { acquireVoxel51Selection, probeVoxel51 } from './sources/voxel51.ts';
+import { acquireVoxel51Selection, probeVoxel51, type AcquireProgress } from './sources/voxel51.ts';
 import { mapVoxel51Selection } from './labels/voxel51.ts';
 import { publishStructuredSnapshot } from './structured-snapshot.ts';
 import { parseSelection } from './process-samples.ts';
@@ -173,6 +173,17 @@ function menuParseProgress(output: MenuOutput, progress: ParseProgress): void {
   writeMenu(output, `${label} ${status}（耗时 ${menuDuration(progress.elapsedMs)}）`);
 }
 
+function menuAcquireProgress(output: MenuOutput, progress: AcquireProgress): void {
+  const label = `[发票 ${progress.index}/${progress.total}] ${progress.sampleId}`;
+  const annotation = progress.annotationStatus === 'annotated' ? '带标注' : '无标注';
+  if (progress.status === 'started') {
+    writeMenu(output, `${label} 开始（获取，${annotation}）`);
+    return;
+  }
+  const status = progress.status === 'completed' ? '完成' : '失败';
+  writeMenu(output, `${label} ${status}（获取，${annotation}，耗时 ${menuDuration(progress.elapsedMs)}）`);
+}
+
 function menuLabel(workbench: ReturnType<typeof loadWorkbenchConfig>): string {
   const counts = sampleAcquireCounts(workbench.sample);
   const total = sampleAcquireTotal(workbench.sample);
@@ -239,9 +250,13 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
           },
         }
       : options.parseDependencies;
+    const acquireProgress = args[0] === 'acquire'
+      ? async (progress: AcquireProgress) => { menuAcquireProgress(output, progress); }
+      : undefined;
     const code = await execute(args, {
       transport: options.transport,
       parseDependencies,
+      ...(acquireProgress ? { acquireProgress } : {}),
       print: value => { result = value; },
     });
     return { code, result };
@@ -309,7 +324,7 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
   }
 }
 
-export async function runCli(arguments_: string[], options: { transport?: SourceTransport; print?: (value: unknown) => void; parseDependencies?: ParseDependencies } = {}): Promise<number> {
+export async function runCli(arguments_: string[], options: { transport?: SourceTransport; print?: (value: unknown) => void; parseDependencies?: ParseDependencies; acquireProgress?: (progress: AcquireProgress) => void | Promise<void> } = {}): Promise<number> {
   const positional: string[] = [];
   const flags = new Map<string, string>();
   let publishSnapshotFlag = false;
@@ -490,7 +505,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
   }
   const config = sampleSourceConfig;
   const result = probe ? await probeVoxel51(config, { transport: sourceTransport })
-    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, ...(explicitAcquireCounts ? { counts: explicitAcquireCounts } : acquireLimit === undefined ? { counts: configuredCounts } : { limit: acquireLimit }), transport: sourceTransport })
+    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, ...(explicitAcquireCounts ? { counts: explicitAcquireCounts } : acquireLimit === undefined ? { counts: configuredCounts } : { limit: acquireLimit }), transport: sourceTransport, onProgress: options.acquireProgress })
     : await withRunLock(resolveOwnedPath(paths.dataRoot, 'work/run.lock'), async () => {
       const mapping = await mapVoxel51Selection({ paths, datasetId: workbench.sample.dataset_id, selectionId, lockHeld: true });
       const snapshots = publishSnapshot ? await Promise.all(mapping.sample_ids.map(sampleId => publishStructuredSnapshot({ paths, datasetId: workbench.sample.dataset_id, sampleId, lockHeld: true }))) : [];

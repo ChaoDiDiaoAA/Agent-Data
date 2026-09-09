@@ -53,12 +53,12 @@ D:\paper\Invoice\voxel51\<发票编号>\annotation.json
 `annotation.json` 中的 `json_annotation` 是 Voxel51 发布方提供的结构化标注，可作为字段对照依据。相关文件的职责如下：
 无发布方标注的样本不会创建这个文件；请以该样本的 `record.json` 中 `publisher_annotation_status` 判断类别。
 
-| 文件 | 来源与用途 |
-|---|---|
-| `annotation.json` | Voxel51 发布方原始记录；其中 `json_annotation` 保存发布方标注 |
-| `fields.json` | Flowmate 将发布方标注映射成统一发票字段后的结果 |
-| `content.json` | MinerU 从 `original.jpg` 识别出的文本、表格、坐标和版面结构 |
-| `record.json` | 发票来源、数据集版本、处理状态和文件哈希等校验信息 |
+| 文件                | 来源与用途                                                     |
+| ------------------- | -------------------------------------------------------------- |
+| `annotation.json` | Voxel51 发布方原始记录；其中`json_annotation` 保存发布方标注 |
+| `fields.json`     | Flowmate 将发布方标注映射成统一发票字段后的结果                |
+| `content.json`    | MinerU 从`original.jpg` 识别出的文本、表格、坐标和版面结构   |
+| `record.json`     | 发票来源、数据集版本、处理状态和文件哈希等校验信息             |
 
 对照关系为：
 
@@ -100,20 +100,20 @@ bun run typecheck
 
 `workbench.local.json` 的关键字段如下：
 
-| 配置路径                                     | 含义                                                     | 示例                             |
-| -------------------------------------------- | -------------------------------------------------------- | -------------------------------- |
-| `sample.source_id`                         | 样本来源登记 ID，对应`config/sources/<source_id>.json` | `voxel51-invoice-ocr`          |
-| `sample.dataset_id`                        | 处理数据和 Obsidian 的数据集分区                         | `voxel51-hq-invoice-ocr`       |
-| `sample.selection_id`                      | 固定选样清单 ID；同一 ID 重跑读取已提交清单              | `initial-20`                   |
-| `sample.acquire.with_publisher_annotation` | 当前任务获取并交给 MinerU 解析的带发布方标注样本数       | `100`                          |
-| `sample.acquire.without_publisher_annotation` | 当前任务获取并交给 MinerU 解析的无发布方标注样本数    | `0`                            |
-| `sample.acquire`                           | 两个数量之和就是本次获取与解析总数                       | `100`                          |
-| `sample.publish_snapshot`                  | 标签映射后是否同步发布`D:\paper\Invoice` 结构化镜像    | `true`                         |
-| `knowledge.source_ids`                     | 已登记的知识来源列表                                     | `[]`（当前不启用额外知识来源） |
-| `knowledge.parse_source_ids`               | 已登记且允许解析的知识来源                               | `[]`                           |
-| `release.version`                          | 默认 Release 版本                                        | `public-invoice-p0-v1`         |
-| `release.include_originals`                | 是否在 Release 复制允许再分发的原件                      | `false`                        |
-| `backup.verify` / `backup.restore_smoke` | 备份命令默认是否校验、独立恢复演练                       | `true` / `true`              |
+| 配置路径                                        | 含义                                                     | 示例                             |
+| ----------------------------------------------- | -------------------------------------------------------- | -------------------------------- |
+| `sample.source_id`                            | 样本来源登记 ID，对应`config/sources/<source_id>.json` | `voxel51-invoice-ocr`          |
+| `sample.dataset_id`                           | 处理数据和 Obsidian 的数据集分区                         | `voxel51-hq-invoice-ocr`       |
+| `sample.selection_id`                         | 固定选样清单 ID；同一 ID 重跑读取已提交清单              | `initial-20`                   |
+| `sample.acquire.with_publisher_annotation`    | 当前任务获取并交给 MinerU 解析的带发布方标注样本数       | `100`                          |
+| `sample.acquire.without_publisher_annotation` | 当前任务获取并交给 MinerU 解析的无发布方标注样本数       | `0`                            |
+| `sample.acquire`                              | 两个数量之和就是本次获取与解析总数                       | `100`                          |
+| `sample.publish_snapshot`                     | 标签映射后是否同步发布`D:\paper\Invoice` 结构化镜像    | `true`                         |
+| `knowledge.source_ids`                        | 已登记的知识来源列表                                     | `[]`（当前不启用额外知识来源） |
+| `knowledge.parse_source_ids`                  | 已登记且允许解析的知识来源                               | `[]`                           |
+| `release.version`                             | 默认 Release 版本                                        | `public-invoice-p0-v1`         |
+| `release.include_originals`                   | 是否在 Release 复制允许再分发的原件                      | `false`                        |
+| `backup.verify` / `backup.restore_smoke`    | 备份命令默认是否校验、独立恢复演练                       | `true` / `true`              |
 
 命令行的 `--selection`、`--limit`、`--publish-snapshot`、`--include-originals`、`--verify` 和 `--restore-smoke` 会覆盖或开启对应默认值；没有显式 `--config` 时读取本机的 `config/workbench.local.json`。
 
@@ -146,7 +146,7 @@ bun src/cli.ts
 
 菜单会从 `config/workbench.local.json` 读取两个 `sample.acquire` 数量，并显示带标注、无标注及合计。菜单的“执行当前任务”会用同一批合计数量完成获取、标签映射、MinerU 解析、Obsidian、Release、校验和备份；菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
 
-MinerU 阶段会按顺序显示 `[发票 1/100]`、`[发票 2/100]` 等开始和完成信息；某条发票的“开始”与“完成”之间暂时没有新行时，表示该条仍在等待 MinerU 返回。
+获取阶段和 MinerU 阶段都会按顺序显示 `[发票 1/100]`、`[发票 2/100]` 等逐条进度。获取阶段会标明“带标注/无标注”，并显示开始、完成或失败；某条发票的“开始”与“完成”之间暂时没有新行时，表示该条仍在等待网络下载或 MinerU 返回。
 
 直接子命令仍可用于调试、自动化和兼容已有脚本，但属于高级模式。直接模式可显式传入 `--paths`、`--config`，并在确有需要时用 `--limit` 临时覆盖配置：
 
