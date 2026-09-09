@@ -72,6 +72,8 @@ describe('interactive CLI menu', () => {
   test('defers source and task details until option 1 is selected', async () => {
     const result = await runChoice('0', 7);
 
+    expect(result.output).toContain('FlowmateData（Bun CLI）');
+    expect(result.output).toContain('[任务] voxel51-hq-invoice-ocr / initial-20');
     expect(result.output).toContain('1. 查看来源和任务配置');
     expect(result.output).not.toContain('路径配置：');
     expect(result.output).not.toContain('当前来源：');
@@ -80,10 +82,9 @@ describe('interactive CLI menu', () => {
   test('shows one task quantity for acquisition and parsing', async () => {
     const result = await runChoice('1', 7);
 
-    expect(result.output).toContain('数据集发票总量：8181');
-    expect(result.output).toContain('可采集的带标注发票：1489');
-    expect(result.output).toContain('当前任务数量（获取与解析）：7 条');
-    expect(result.output).toContain('执行当前任务会获取并解析同一批 7 条发票');
+    expect(result.output).toContain('[数据集] 总量 8181 条，可标注 1489 条');
+    expect(result.output).toContain('[说明] 获取与 MinerU 解析使用同一批 7 条发票');
+    expect(result.output).toContain('[配置]');
     expect(result.output).toContain('2. 执行当前任务（获取并解析 7 条）');
     expect(result.output).not.toContain('parse_limit');
   });
@@ -102,6 +103,14 @@ describe('interactive CLI menu', () => {
     expect(result.commands[7]).toEqual(expect.arrayContaining(['verify']));
     expect(result.commands[8]).toEqual(expect.arrayContaining(['backup', 'create']));
     expect(result.commands.every(command => !command.includes('--limit'))).toBe(true);
+    expect(result.output).toContain('[任务] current / voxel51-hq-invoice-ocr / initial-20 开始');
+    expect(result.output).toContain('[配置]');
+    expect(result.output).toContain('[说明] 获取与 MinerU 解析使用同一批 7 条发票');
+    expect(result.output).toContain('[探测 1/8] 探测公开来源 开始');
+    expect(result.output).toContain('[备份 8/8] 创建备份 完成');
+    expect(result.output).toContain('[任务] 完成');
+    expect(result.output).not.toContain('"source_id"');
+    expect(result.output).not.toContain('"selection_hash"');
   });
 
   test('maps verify and backup entries to the correct commands', async () => {

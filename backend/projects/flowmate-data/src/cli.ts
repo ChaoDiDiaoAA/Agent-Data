@@ -77,6 +77,44 @@ function writeMenu(output: MenuOutput, value: string): void {
   output.write(`${value}\n`);
 }
 
+function menuDuration(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const mmss = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return hours > 0 ? `${hours}:${mmss}` : mmss;
+}
+
+function menuRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function menuText(value: unknown, fallback = 'unknown', length = 16): string {
+  if (typeof value !== 'string' || !value) return fallback;
+  return value.length <= length ? value : `${value.slice(0, length)}...`;
+}
+
+function menuResultSummary(args: string[], value: unknown): string {
+  const result = menuRecord(value);
+  if (args[0] === 'source' && args[1] === 'probe') {
+    return `revision=${menuText(result.revision)}，索引 ${String(result.record_count ?? 0)} 条，带标注 ${String(result.annotated_count ?? 0)} 条`;
+  }
+  if (args[0] === 'acquire') {
+    return `新增 ${String(result.added ?? 0)} 条，复用 ${String(result.reused ?? 0)} 条，revision=${menuText(result.revision)}`;
+  }
+  if (args[0] === 'labels') {
+    return `映射 ${String(result.mapped ?? 0)} 条，提供 ${String(result.provided ?? 0)}，缺失 ${String(result.missing ?? 0)}，歧义 ${String(result.ambiguous ?? 0)}，镜像 ${String(result.snapshots ?? 0)}`;
+  }
+  if (args[0] === 'parse') return `解析 ${String(result.parsed ?? 0)} 条`;
+  if (args[0] === 'catalog') return `写入 ${String(result.files ?? 0)} 个文件`;
+  if (args[0] === 'release' && args[1] === 'build') return `version=${menuText(result.version, args[2] ?? 'unknown')}，条目 ${String(result.entries ?? 0)}，省略原件 ${String(result.omitted_originals ?? 0)}`;
+  if (args[0] === 'release' && args[1] === 'verify') return `version=${menuText(result.version, args[2] ?? 'unknown')}，文件 ${String(result.files ?? 0)} 个`;
+  if (args[0] === 'verify') return `记录 ${String(result.records ?? 0)} 条，Release 文件 ${String(result.release_files ?? 0)}，卡片 ${String(result.cards ?? 0)}，projection_valid=${String(result.projection_valid ?? false)}`;
+  if (args[0] === 'backup') return `backup_id=${menuText(result.backup_id, 'unknown', 24)}，verified=${String(result.verified ?? false)}，restore_smoke=${String(result.restore_smoke ?? false)}`;
+  return value === undefined ? '已完成' : '已完成并返回摘要';
+}
+
 function menuConfigSummary(pathsPath: string, configPath: string, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): string {
   const total = source.record_count === undefined ? '未配置' : String(source.record_count);
   const annotated = source.annotated_record_count === undefined ? '未配置' : String(source.annotated_record_count);
@@ -85,16 +123,12 @@ function menuConfigSummary(pathsPath: string, configPath: string, workbench: Ret
     ? '警告：workbench.sample.acquire_limit 超过可标注数量，采集会被拒绝。'
     : '';
   return [
-    'FlowmateData（Bun CLI）',
+    `[任务] current / ${workbench.sample.dataset_id} / ${workbench.sample.selection_id}`,
+    `[配置] ${configPath}；配置上限 ${annotated} 条，本次上限 ${taskLimit} 条`,
+    `[来源] ${source.source_id} / ${source.dataset_id ?? '未配置'}`,
+    `[数据集] 总量 ${total} 条，可标注 ${annotated} 条`,
+    `[说明] 获取与 MinerU 解析使用同一批 ${taskLimit} 条发票；任务完成后继续构建 Obsidian、Release、校验和备份。`,
     `路径配置：${pathsPath}`,
-    `运行配置：${configPath}`,
-    `当前来源：${source.source_id}`,
-    `当前数据集：${source.dataset_id ?? '未配置'}`,
-    `数据集发票总量：${total}`,
-    `可采集的带标注发票：${annotated}`,
-    `当前任务数量（获取与解析）：${taskLimit} 条`,
-    `执行当前任务会获取并解析同一批 ${taskLimit} 条发票。`,
-    '任务完成后会继续构建 Obsidian、Release、校验结果并创建备份。',
     ...(limitWarning ? [limitWarning] : []),
   ].join('\n');
 }
@@ -106,8 +140,10 @@ function menuCommand(args: string[], pathsPath: string, configPath: string): str
 function menuLabel(workbench: ReturnType<typeof loadWorkbenchConfig>): string {
   const taskLimit = String(workbench.sample.acquire_limit);
   return [
+    'FlowmateData（Bun CLI）',
+    `[任务] ${workbench.sample.dataset_id} / ${workbench.sample.selection_id}`,
+    `[数量] 获取与解析 ${taskLimit} 条`,
     '=========================',
-    `当前任务数量（获取与解析）：${taskLimit} 条`,
     '1. 查看来源和任务配置',
     `2. 执行当前任务（获取并解析 ${taskLimit} 条）`,
     '3. 校验当前任务',
@@ -117,6 +153,7 @@ function menuLabel(workbench: ReturnType<typeof loadWorkbenchConfig>): string {
 }
 
 interface MenuStep {
+  phase: string;
   label: string;
   commands: string[][];
 }
@@ -125,14 +162,14 @@ function menuTaskSteps(pathsPath: string, configPath: string, workbench: ReturnT
   const common = (args: string[]) => menuCommand(args, pathsPath, configPath);
   const taskLimit = workbench.sample.acquire_limit;
   return [
-    { label: '探测公开来源', commands: [common(['source', 'probe', source.source_id])] },
-    { label: `获取并固定 ${taskLimit} 条发票`, commands: [common(['acquire', source.source_id])] },
-    { label: `映射 ${taskLimit} 条标签并发布结构化镜像`, commands: [common(['labels', 'map', workbench.sample.dataset_id])] },
-    { label: `MinerU 解析同一批 ${taskLimit} 条发票`, commands: [common(['parse'])] },
-    { label: '构建 Obsidian 目录', commands: [common(['catalog', 'build'])] },
-    { label: `构建 Release（${workbench.release.version}）`, commands: [common(['release', 'build', workbench.release.version])] },
-    { label: '校验 Release 和当前任务', commands: [common(['release', 'verify', workbench.release.version]), common(['verify'])] },
-    { label: '创建备份', commands: [common(['backup', 'create'])] },
+    { phase: '探测', label: '探测公开来源', commands: [common(['source', 'probe', source.source_id])] },
+    { phase: '获取', label: `获取并固定 ${taskLimit} 条发票`, commands: [common(['acquire', source.source_id])] },
+    { phase: '标签', label: `映射 ${taskLimit} 条标签并发布结构化镜像`, commands: [common(['labels', 'map', workbench.sample.dataset_id])] },
+    { phase: 'MinerU', label: `解析同一批 ${taskLimit} 条发票`, commands: [common(['parse'])] },
+    { phase: 'Obsidian', label: '构建 Obsidian 目录', commands: [common(['catalog', 'build'])] },
+    { phase: 'Release', label: `构建 Release（${workbench.release.version}）`, commands: [common(['release', 'build', workbench.release.version])] },
+    { phase: '校验', label: '校验 Release 和当前任务', commands: [common(['release', 'verify', workbench.release.version]), common(['verify'])] },
+    { phase: '备份', label: '创建备份', commands: [common(['backup', 'create'])] },
   ];
 }
 
@@ -152,11 +189,15 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
     reader ??= createInterface({ input: options.input ?? stdin, output: output as NodeJS.WritableStream });
     return reader.question(prompt);
   });
-  const invoke = async (args: string[]): Promise<number> => execute(args, {
-    transport: options.transport,
-    parseDependencies: options.parseDependencies,
-    print: value => writeMenu(output, typeof value === 'string' ? value : JSON.stringify(value, null, 2)),
-  });
+  const invoke = async (args: string[]): Promise<{ code: number; result: unknown }> => {
+    let result: unknown;
+    const code = await execute(args, {
+      transport: options.transport,
+      parseDependencies: options.parseDependencies,
+      print: value => { result = value; },
+    });
+    return { code, result };
+  };
 
   try {
     for (;;) {
@@ -178,27 +219,40 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
         '3': [steps[6]!],
         '4': [steps[7]!],
       };
+      const taskStartedAt = Date.now();
+      if (choice === '2') {
+        writeMenu(output, `[任务] current / ${workbench.sample.dataset_id} / ${workbench.sample.selection_id} 开始`);
+        writeMenu(output, `[配置] ${configPath}；配置上限 ${source.annotated_record_count ?? '未配置'} 条，本次上限 ${workbench.sample.acquire_limit} 条`);
+        writeMenu(output, `[说明] 获取与 MinerU 解析使用同一批 ${workbench.sample.acquire_limit} 条发票；完成后构建 Obsidian、Release、校验和备份。`);
+      }
       let failed = false;
-      for (const step of stepsByChoice[choice]!) {
-        writeMenu(output, `\n${step.label}`);
-        for (const command of step.commands) {
-          let code: number;
+      const selectedSteps = stepsByChoice[choice]!;
+      for (let stepIndex = 0; stepIndex < selectedSteps.length; stepIndex += 1) {
+        const step = selectedSteps[stepIndex]!;
+        const progressLabel = `[${step.phase} ${stepIndex + 1}/${selectedSteps.length}] ${step.label}`;
+        for (let commandIndex = 0; commandIndex < step.commands.length; commandIndex += 1) {
+          const command = step.commands[commandIndex]!;
+          const stepStartedAt = Date.now();
           try {
-            code = await invoke(command);
+            writeMenu(output, `${progressLabel} 开始（累计 ${menuDuration(Date.now() - taskStartedAt)}）`);
+            const result = await invoke(command);
+            if (result.code !== 0) {
+              writeMenu(output, `${progressLabel} 失败：退出码 ${result.code}`);
+              failed = true;
+              break;
+            }
+            const suffix = step.commands.length > 1 ? `（${commandIndex + 1}/${step.commands.length}）` : '';
+            writeMenu(output, `${progressLabel}${suffix} 完成：${menuResultSummary(command, result.result)}，耗时 ${menuDuration(Date.now() - stepStartedAt)}，累计 ${menuDuration(Date.now() - taskStartedAt)}`);
           } catch (error) {
-            writeMenu(output, `操作失败：${error instanceof Error ? error.message : 'VOXEL51_FAILED'}。`);
-            failed = true;
-            break;
-          }
-          if (code !== 0) {
-            writeMenu(output, `操作失败，退出码：${code}。`);
+            writeMenu(output, `${progressLabel} 失败：${error instanceof Error ? error.message : 'VOXEL51_FAILED'}`);
             failed = true;
             break;
           }
         }
         if (failed) break;
       }
-      if (!failed) writeMenu(output, '操作完成。');
+      if (!failed) writeMenu(output, choice === '2' ? `[任务] 完成，耗时 ${menuDuration(Date.now() - taskStartedAt)}` : `[操作] 完成，耗时 ${menuDuration(Date.now() - taskStartedAt)}`);
+      else if (choice === '2') writeMenu(output, '[任务] 未完成，可重新执行当前任务。');
     }
   } finally {
     reader?.close();
