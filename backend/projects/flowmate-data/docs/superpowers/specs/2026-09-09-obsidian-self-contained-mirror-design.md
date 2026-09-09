@@ -24,28 +24,29 @@ Flowmate 当前在 `D:\obsidian\data\flowmate-data` 生成 Markdown 卡片，但
 
 ```text
 D:\obsidian\data\flowmate-data\
-├─ 01_总览.md
-├─ 02_数据集\
-│  └─ voxel51.md
-├─ 03_发票\
-│  └─ voxel51\
-│     ├─ 000001.md
-│     └─ 000001\
-│        ├─ original.jpg
-│        ├─ annotation.json
-│        ├─ fields.json
-│        ├─ record.json
-│        ├─ receipt.json
-│        ├─ snapshot.json
-│        ├─ content.md
-│        ├─ content.json
-│        ├─ pages.json
-│        ├─ parse.json
-│        └─ assets\
-└─ 05_发布\
-   └─ public-invoice-p0-v1\
-      ├─ manifest.json
-      └─ checksums.json
+└─ Evidence\
+   ├─ indexes\
+   │  ├─ overview.md
+   │  └─ voxel51.md
+   ├─ invoices\
+   │  └─ voxel51\
+   │     └─ 000001\
+   │        ├─ invoice.md
+   │        ├─ original.jpg
+   │        ├─ annotation.json
+   │        ├─ fields.json
+   │        ├─ record.json
+   │        ├─ receipt.json
+   │        ├─ snapshot.json
+   │        ├─ content.md
+   │        ├─ content.json
+   │        ├─ pages.json
+   │        ├─ parse.json
+   │        └─ assets\
+   └─ releases\
+      └─ public-invoice-p0-v1\
+         ├─ manifest.json
+         └─ checksums.json
 ```
 
 `annotation.json` 和 `fields.json` 只在记录具有发布方标注时出现。`content.md`、`content.json`、`pages.json`、`parse.json` 和解析资产来自已验证的 MinerU 规范化结果。文件名保持短且稳定，目录中的样本编号沿用数据根的持久化编号。
@@ -63,7 +64,7 @@ D:\obsidian\data\flowmate-data\
 
 - 发票卡片使用 Vault 内部相对路径或 Obsidian 嵌入，例如 `![[000001/original.jpg]]` 和 `[[000001/content.md]]`。
 - 总览和数据集页面只链接 Vault 内部 Markdown 页面。
-- Release 页面只链接 Vault 内部的 `05_发布/<version>/manifest.json`。
+- Release 页面只链接 Vault 内部的 `Evidence/releases/<version>/manifest.json`。
 - 来源主页和许可证证据可以作为普通 URL 元数据保留，但不能用本机绝对路径或 `file:///` 指向外部数据根。
 - 构建结果中不得出现 `D:\paper\Invoice`、`D:\agent-data\data\flowmate-data` 或对应的 `file:///` 文件链接。
 
@@ -72,7 +73,7 @@ D:\obsidian\data\flowmate-data\
 - 扩展目录构建计划，使其能够描述文本文件和经验证的源文件副本；计划仍只接受 Vault 内相对路径。
 - `buildCatalog` 为每个样本收集原图、记录、回执、快照、标注、字段和已验证解析文件，为 Release 收集清单文件。
 - `applyCatalog` 在 Vault 锁和暂存目录内执行文本写入与二进制复制，并复用现有用户文件冲突、路径边界和原子替换逻辑。
-- 复制操作使用独立的目标哈希校验，不使用符号链接或硬链接；目标已存在且字节相同时视为幂等，字节不同时拒绝覆盖用户文件或报告冲突。
+- 数据资产复制使用独立的目标哈希校验，不创建指向权威根的符号链接或硬链接；目标已存在且字节相同时视为幂等，字节不同时拒绝覆盖用户文件或报告冲突。Markdown 继续复用目录生成器已有的 Vault 内原子发布机制。
 - 既有只含 Markdown 的 Vault 可以通过一次 `catalog build` 补齐缺失副本；过期的 Flowmate 生成文件按现有清理规则移除，手写文件不删除。
 
 ## 无标注记录

@@ -7,7 +7,7 @@ import { stdin, stdout } from 'node:process';
 import { loadPaths, loadSourceConfig, loadWorkbenchConfig, resolveOwnedPath, sampleAcquireCounts, sampleAcquireTotal } from './config.ts';
 import type { SourceTransport } from './sources/dataset-records.ts';
 import { createSourceHttp } from './sources/dataset-records.ts';
-import { acquireVoxel51Selection, probeVoxel51, type AcquireProgress } from './sources/voxel51.ts';
+import { acquireVoxel51Selection, assertVoxel51SelectionCounts, inspectVoxel51Selection, probeVoxel51, type AcquireProgress } from './sources/voxel51.ts';
 import { mapVoxel51Selection } from './labels/voxel51.ts';
 import { publishStructuredSnapshot } from './structured-snapshot.ts';
 import { parseSelection } from './process-samples.ts';
@@ -159,6 +159,25 @@ function menuConfigSummary(pathsPath: string, configPath: string, workbench: Ret
   ].join('\n');
 }
 
+async function menuSelectionSummary(paths: ReturnType<typeof loadPaths>, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): Promise<string> {
+  try {
+    const inspection = await inspectVoxel51Selection({ paths, config: source, selectionId: workbench.sample.selection_id });
+    if (!inspection.exists) return '[选样] 尚未创建固定清单；执行任务时会按当前配置创建。';
+    if (!inspection.counts) throw new Error('VOXEL51_SELECTION_INVALID');
+    assertVoxel51SelectionCounts(workbench.sample.selection_id, sampleAcquireCounts(workbench.sample), inspection.counts, inspection.path);
+    return `[选样] ${workbench.sample.selection_id} 已固定 ${inspection.recordCount ?? 0} 条，数量与当前配置一致。`;
+  } catch (error) {
+    return `[选样] ${menuErrorSummary(error)}`;
+  }
+}
+
+async function assertMenuSelectionReady(paths: ReturnType<typeof loadPaths>, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): Promise<void> {
+  const inspection = await inspectVoxel51Selection({ paths, config: source, selectionId: workbench.sample.selection_id });
+  if (!inspection.exists) return;
+  if (!inspection.counts) throw new Error('VOXEL51_SELECTION_INVALID');
+  assertVoxel51SelectionCounts(workbench.sample.selection_id, sampleAcquireCounts(workbench.sample), inspection.counts, inspection.path);
+}
+
 function menuCommand(args: string[], pathsPath: string, configPath: string): string[] {
   return [...args, '--paths', pathsPath, '--config', configPath];
 }
@@ -227,7 +246,7 @@ function menuTaskSteps(pathsPath: string, configPath: string, workbench: ReturnT
 export async function runMenu(options: MenuOptions = {}): Promise<number> {
   const pathsPath = options.pathsPath ?? defaultPathsPath;
   const configPath = options.configPath ?? defaultWorkbenchPath;
-  loadPaths(pathsPath);
+  const paths = loadPaths(pathsPath);
   const workbench = loadWorkbenchConfig(configPath);
   const source = loadSourceConfig(sourceConfigPath(workbench.sample.source_id));
   if (source.source_id !== workbench.sample.source_id || source.dataset_id !== workbench.sample.dataset_id) throw new Error('WORKBENCH_SAMPLE_SOURCE_MISMATCH');
@@ -269,6 +288,7 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
       if (choice === '0') return 0;
       if (choice === '1') {
         writeMenu(output, menuConfigSummary(pathsPath, configPath, workbench, source));
+        writeMenu(output, await menuSelectionSummary(paths, workbench, source));
         continue;
       }
       if (!['2', '3', '4'].includes(choice)) {
@@ -282,6 +302,14 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
         '3': [steps[6]!],
         '4': [steps[7]!],
       };
+      if (choice === '2') {
+        try {
+          await assertMenuSelectionReady(paths, workbench, source);
+        } catch (error) {
+          writeMenu(output, `[配置] 当前任务未开始：${menuErrorSummary(error)}`);
+          continue;
+        }
+      }
       const taskStartedAt = Date.now();
       if (choice === '2') {
         const counts = sampleAcquireCounts(workbench.sample);
@@ -470,7 +498,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
           await verifyStructuredSnapshot(resolveOwnedPath(destinationRoots.originalRoot, name.slice(0, -'/snapshot.json'.length)));
         }
         const plan = await rebuildCatalog(restoredPaths);
-        if (!(await Bun.file(resolveOwnedPath(destinationRoots.vaultRoot, '01_总览.md')).exists())) throw new Error('BACKUP_RESTORE_CATALOG_MISSING');
+        if (!(await Bun.file(resolveOwnedPath(destinationRoots.vaultRoot, 'Evidence/indexes/overview.md')).exists())) throw new Error('BACKUP_RESTORE_CATALOG_MISSING');
         restored = true;
       } finally {
         await rm(smokeRoot, { recursive: true, force: true });

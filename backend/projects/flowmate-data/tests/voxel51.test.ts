@@ -155,7 +155,7 @@ test('acquisition stores original record objects and receipts, then reuses the p
   const offline = createSourceHttp(config, { fetch: async () => { throw new Error('NETWORK_FORBIDDEN_ON_REUSE'); } });
   expect(await acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport: offline })).toMatchObject({ added: 0, reused: 2 });
   expect(await readFile(selectionPath)).toEqual(selectionBytes);
-  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 3, transport: offline })).rejects.toThrow('SELECTION_LIMIT_CONFLICT');
+  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 3, transport: offline })).rejects.toThrow('SELECTION_LIMIT_CONFLICT: selection_id=initial-20 已固定为带发布方标注 2 条、无发布方标注 0 条（共 2 条），当前配置请求带发布方标注 3 条、无发布方标注 0 条（共 3 条）');
   const first = selection.records[0];
   const firstAnnotation = join(configuredPaths.originalRoot, datasetBase, first.sample_id, 'annotation.json');
   const originalAnnotation = await readFile(firstAnnotation);

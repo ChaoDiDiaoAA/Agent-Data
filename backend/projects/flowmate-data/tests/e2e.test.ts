@@ -57,5 +57,5 @@ test('runs the local projection chain without network or GPU', async () => {
   expect(await Bun.file(join(restoreRoot, 'vault/notes.md')).text()).toBe('# user note');
   const restoredPaths = { ...p, ...destinationRoots };
   await applyCatalog(await buildCatalog(restoredPaths));
-  expect(await Bun.file(join(destinationRoots.vaultRoot, '03_发票/e2e-dataset/s1.md')).text()).toContain('status: withdrawn');
+  expect(await Bun.file(join(destinationRoots.vaultRoot, 'Evidence/invoices/e2e-dataset/s1/invoice.md')).text()).toContain('status: withdrawn');
 });

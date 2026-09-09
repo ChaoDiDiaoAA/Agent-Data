@@ -1,26 +1,26 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMenu, type MenuOptions } from '../src/cli.ts';
-
-const validPaths = {
-  projectRoot: 'D:\\agent-data\\backend\\projects\\flowmate-data',
-  paperEngineRoot: 'D:\\agent-data\\backend\\projects\\paper-knowledge-engine',
-  originalRoot: 'D:\\paper\\Invoice',
-  dataRoot: 'D:\\agent-data\\data\\flowmate-data',
-  vaultRoot: 'D:\\obsidian\\data\\flowmate-data',
-  backupRoot: 'D:\\agent-data\\backups\\flowmate-data',
-};
+import { hashCanonical } from '../src/engine-bridge.ts';
 
 const temporaryDirectories: string[] = [];
 
-async function menuFixture(acquireLimit: number): Promise<{ pathsPath: string; configPath: string }> {
+async function menuFixture(acquireLimit: number): Promise<{ pathsPath: string; configPath: string; dataRoot: string }> {
   const directory = await mkdtemp(join(tmpdir(), 'flowmate-menu-'));
   temporaryDirectories.push(directory);
   const pathsPath = join(directory, 'paths.json');
   const configPath = join(directory, 'workbench.json');
-  await writeFile(pathsPath, JSON.stringify(validPaths));
+  const configuredPaths = {
+    projectRoot: join(import.meta.dir, '..'),
+    paperEngineRoot: join(directory, 'engine'),
+    originalRoot: join(directory, 'original'),
+    dataRoot: join(directory, 'data'),
+    vaultRoot: join(directory, 'vault'),
+    backupRoot: join(directory, 'backup'),
+  };
+  await writeFile(pathsPath, JSON.stringify(configuredPaths));
   await writeFile(configPath, JSON.stringify({
     schema_version: 1,
     sample: {
@@ -34,7 +34,7 @@ async function menuFixture(acquireLimit: number): Promise<{ pathsPath: string; c
     release: { version: 'public-invoice-p0-v1', include_originals: false },
     backup: { verify: false, restore_smoke: false },
   }));
-  return { pathsPath, configPath };
+  return { pathsPath, configPath, dataRoot: configuredPaths.dataRoot };
 }
 
 function fakeOutput(lines: string[]): MenuOptions['output'] {
@@ -193,5 +193,40 @@ describe('interactive CLI menu', () => {
     expect(output).toContain('MINERU_RESOURCE_BUSY: MinerU GPU resource is busy; wait for the other MinerU task to finish；诊断：worker failed api_key=[redacted]');
     expect(output).not.toContain('secret-token');
     expect(output).not.toContain('"source_id"');
+  });
+
+  test('blocks a changed task quantity before running any pipeline step', async () => {
+    const { pathsPath, configPath, dataRoot } = await menuFixture(7);
+    const selectionDirectory = join(dataRoot, 'tasks', 'voxel51', 'selections');
+    await mkdir(selectionDirectory, { recursive: true });
+    const content = {
+      schema_version: 1,
+      source_id: 'voxel51-invoice-ocr',
+      dataset_id: 'voxel51-hq-invoice-ocr',
+      selection_id: 'initial-20',
+      index_url: 'https://huggingface.co/datasets/Voxel51/high-quality-invoice-images-for-ocr/resolve/d21f03cfeea2b330e15a229883c66d7ebece8e69/samples.json',
+      index_sha256: 'a'.repeat(64),
+      revision: 'd21f03cfeea2b330e15a229883c66d7ebece8e69',
+      counts: { with_publisher_annotation: 2, without_publisher_annotation: 0 },
+      records: [{}, {}],
+    };
+    await writeFile(join(selectionDirectory, 'initial-20.json'), JSON.stringify({ ...content, selection_hash: hashCanonical(content) }));
+    const answers = ['2', '0'];
+    const commands: string[][] = [];
+    const lines: string[] = [];
+    await runMenu({
+      pathsPath,
+      configPath,
+      ask: async () => answers.shift()!,
+      output: fakeOutput(lines),
+      execute: async args => { commands.push(args); return 0; },
+    });
+    const output = lines.join('');
+    expect(commands).toHaveLength(0);
+    expect(output).toContain('SELECTION_LIMIT_CONFLICT');
+    expect(output).toContain('已固定为带发布方标注 2 条');
+    expect(output).toContain('当前配置请求带发布方标注 7 条');
+    expect(output).toContain('请更换 selection_id');
+    expect(output).not.toContain('[探测 1/8]');
   });
 });
