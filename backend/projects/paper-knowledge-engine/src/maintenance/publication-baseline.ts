@@ -95,7 +95,12 @@ export async function createPublicationBaseline(input: PublicationBaselineInput)
     }
     const runManifest = library.files.find(f => resolve(f.targetPath) === join(root, 'runs', publication.runId, 'mineru-jobs.json'));
     if (!runManifest || hash(await regular(join(root, 'runs', publication.runId, 'mineru-jobs.json'))) !== runManifest.sha256) fail('migrated run inputs differ');
-    for (const source of await prepareEvidenceSources(await readVerifiedRunSources({ runId: publication.runId, stateRoot: root, store: input.store }))) {
+    for (const source of await prepareEvidenceSources(await readVerifiedRunSources({
+      runId: publication.runId,
+      stateRoot: root,
+      store: input.store,
+      sourceMetadata: 'archive',
+    }))) {
       if (!publication.sources.some(row => key(row) === key(source.source))) fail('run Archive absent from legacy receipt');
       const expected = papers.get(key(source.source))?.targetFiles.find(f => f.path === 'manifest.json')?.sha256;
       if (source.source.schemaVersion !== 2 || expected !== source.archiveManifestSha256) fail('migrated run Archive binding differs');
@@ -180,6 +185,7 @@ export async function createRendererUpgradeBaseline(
       stateRoot: root,
       libraryId: input.libraryId,
       store: input.store,
+      sourceMetadata: 'archive',
     }));
     const originalKeys = new Set(publication.sources.map(source => key(source)));
     const rows = new Map(publication.sources.map(source => [key(source), source]));

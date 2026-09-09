@@ -560,6 +560,51 @@ test('a completed convenience publication remains an unchanged predecessor for c
   }
 });
 
+test('a historical Archive remains publishable after arXiv metadata is refreshed for the same version', async () => {
+  const paths = await publicationWorkspace();
+  try {
+    const service = await loadService();
+    const runA = paths.store.startRun(window, 'current', { autoResume: false });
+    await validRunSourceFixture({
+      runId: runA.id,
+      stateRoot: paths.stateRoot,
+      store: paths.store,
+      baseId: '2609.11501',
+      title: 'Metadata refresh predecessor',
+    });
+    await service.publishRunEvidence({ ...paths, runId: runA.id, lastSuccess: runA.to });
+
+    // A later arXiv response may add a category to the mutable observation row
+    // without changing the already-frozen Archive source.json.
+    paths.store.upsertSourceMetadata({
+      schemaVersion: 1,
+      baseId: '2609.11501',
+      arxivId: '2609.11501v1',
+      version: 1,
+      title: 'Metadata refresh predecessor',
+      authors: ['Ada Reservation'],
+      categories: ['cs.SE', 'cs.CY'],
+      published: '2026-09-01T00:00:00Z',
+      updated: '2026-09-02T00:00:00Z',
+    });
+
+    const runB = paths.store.startRun(nextWindow, 'current', { autoResume: false });
+    await validRunSourceFixture({
+      runId: runB.id,
+      stateRoot: paths.stateRoot,
+      store: paths.store,
+      baseId: '2609.11502',
+      title: 'Metadata refresh successor',
+    });
+
+    const result = await service.publishRunEvidence({ ...paths, runId: runB.id, lastSuccess: runB.to });
+    expect(result).toMatchObject({ status: 'completed', sourceCount: 2 });
+  } finally {
+    paths.store.close();
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
 test('an interrupted apply is failed after reservation and explicit recovery completes the same publication once', async () => {
   const paths = await publicationWorkspace();
   try {

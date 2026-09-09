@@ -188,6 +188,13 @@ export async function readVerifiedRunSources(input: {
   stateRoot: string;
   paths?: LibraryPaths;
   libraryId?: LibraryId;
+  /**
+   * `state` authenticates against the mutable discovery metadata row and is
+   * appropriate for an active run. `archive` trusts the already-frozen
+   * Archive source.json for historical runs; the row may have been refreshed
+   * by a later arXiv observation for the same version.
+   */
+  sourceMetadata?: 'state' | 'archive';
   store: Pick<StateStore, 'findSuccessfulParse' | 'findSourceMetadata'>;
 }): Promise<VerifiedArchiveSource[]> {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(input.runId)) throw new Error('run manifest path must be a safe run ID');
@@ -218,7 +225,9 @@ export async function readVerifiedRunSources(input: {
       const parse = await input.store.findSuccessfulParse({ baseId: job.baseId, version: job.version, sha256: job.sha256, model: job.model, method: job.method }) as unknown;
       if (!isRecord(parse) || typeof parse.outputDir !== 'string' || resolve(parse.outputDir) !== expected) throw new Error('selected successful parse root differs');
       assertSourceMatchesParse(source, job, parse);
-      if (!('sourceKind' in source)) assertFrozenMetadata(source, await input.store.findSourceMetadata(source.baseId, source.version));
+      if (input.sourceMetadata !== 'archive' && !('sourceKind' in source)) {
+        assertFrozenMetadata(source, await input.store.findSourceMetadata(source.baseId, source.version));
+      }
       const assets = m.files.filter(entry => entry.path.startsWith('assets/')).map(entry => ({
         sourcePath: join(v2.root, entry.path), relativePath: entry.path, sha256: entry.sha256, bytes: entry.bytes,
         contents: new Uint8Array(v2.payloads.get(entry.path)!),
@@ -236,7 +245,9 @@ export async function readVerifiedRunSources(input: {
     const sourceFile = await file(archiveRoot, 'source.json', 'source.json');
     const source = parseSource(sourceFile.bytes);
     assertSourceMatchesParse(source, job, parse);
-    if (!('sourceKind' in source)) assertFrozenMetadata(source, await input.store.findSourceMetadata(source.baseId, source.version));
+    if (input.sourceMetadata !== 'archive' && !('sourceKind' in source)) {
+      assertFrozenMetadata(source, await input.store.findSourceMetadata(source.baseId, source.version));
+    }
 
     const snapshot = await readArchiveSnapshot(archiveRoot);
     const actualManifest = [...snapshot.values()]

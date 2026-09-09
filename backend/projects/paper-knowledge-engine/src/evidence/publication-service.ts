@@ -13,8 +13,11 @@ import { asLibraryId, type LibraryId } from '../shared/identity.ts';
 
 export type EvidencePublicationEligibility = 'normal' | 'failed-recovery' | 'historical';
 
-async function readPublicationRunSources(input: Parameters<typeof readVerifiedRunSources>[0]): Promise<VerifiedArchiveSource[]> {
-  return prepareEvidenceSources(await readVerifiedRunSources(input));
+async function readPublicationRunSources(
+  input: Parameters<typeof readVerifiedRunSources>[0],
+  sourceMetadata: 'state' | 'archive' = 'state',
+): Promise<VerifiedArchiveSource[]> {
+  return prepareEvidenceSources(await readVerifiedRunSources({ ...input, sourceMetadata }));
 }
 
 export interface EvidencePublicationResult {
@@ -181,7 +184,7 @@ async function verifyCompletedHistory(input: {
       stateRoot: input.stateRoot,
       store: input.store,
       libraryId,
-    });
+    }, 'archive');
     const verifiedByKey = new Map<string, VerifiedArchiveSource>();
     for (const source of verified) {
       const row = rows.get(sourceKey(source.source));
