@@ -139,6 +139,8 @@ bun run typecheck
 | `release.include_originals`                   | 是否在 Release 复制允许再分发的原件                      | `false`                        |
 | `backup.verify` / `backup.restore_smoke`    | 备份命令默认是否校验、独立恢复演练                       | `true` / `true`              |
 
+`selection_id` 对应 `dataRoot/tasks/voxel51/selections/<selection_id>.json`，提交后会固定带发布方标注和无发布方标注两组数量。修改 `sample.acquire` 时必须同时换用新的 `selection_id`；菜单会在执行任务前读取本地清单，发现数量不一致会在探测、下载和 MinerU 之前停止并给出已固定数量、当前请求数量和新 ID 示例，避免运行到获取步骤才失败。
+
 命令行的 `--selection`、`--limit`、`--publish-snapshot`、`--include-originals`、`--verify` 和 `--restore-smoke` 会覆盖或开启对应默认值；没有显式 `--config` 时读取本机的 `config/workbench.local.json`。
 
 下载并发、重试策略、来源跳转白名单、图片 32 MiB 大小上限和索引 16 MiB 大小上限属于安全实现约束，不放进业务配置，避免一次配置误把全库或不受信任的跳转放开。

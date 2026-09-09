@@ -223,10 +223,8 @@ async function preserveStableDatasetMetadata(path: string, bytes: Uint8Array, da
   await immutableBytes(path, bytes);
 }
 
-function checkSelection(bytes: Uint8Array, config: SourceConfig, selectionId: string, expectedCounts: AcquireCounts): StoredSelection {
-  const value = object(JSON.parse(Buffer.from(bytes).toString('utf8')));
-  const { selection_hash, ...content } = value;
-  if (selection_hash !== hashCanonical(content) || value.schema_version !== 1 || value.source_id !== config.source_id || value.dataset_id !== config.dataset_id || value.selection_id !== selectionId || !Array.isArray(value.records)) return fail('VOXEL51_SELECTION_INVALID');
+function selectionCounts(value: JsonObject): AcquireCounts {
+  if (!Array.isArray(value.records)) return fail('VOXEL51_SELECTION_INVALID');
   const countsValue = value.counts;
   const counts: AcquireCounts = countsValue && typeof countsValue === 'object' && !Array.isArray(countsValue)
     ? { with_publisher_annotation: nonNegativeInteger((countsValue as JsonObject).with_publisher_annotation, 'VOXEL51_SELECTION_INVALID'), without_publisher_annotation: nonNegativeInteger((countsValue as JsonObject).without_publisher_annotation, 'VOXEL51_SELECTION_INVALID') }
@@ -234,13 +232,68 @@ function checkSelection(bytes: Uint8Array, config: SourceConfig, selectionId: st
         const row = entry && typeof entry === 'object' ? entry as JsonObject : {};
         return row.annotation_status !== 'unannotated';
       }).length, without_publisher_annotation: 0 };
-  if (counts.with_publisher_annotation + counts.without_publisher_annotation !== value.records.length
-    || counts.with_publisher_annotation !== expectedCounts.with_publisher_annotation
-    || counts.without_publisher_annotation !== expectedCounts.without_publisher_annotation) return fail('SELECTION_LIMIT_CONFLICT');
+  if (counts.with_publisher_annotation + counts.without_publisher_annotation !== value.records.length) return fail('VOXEL51_SELECTION_INVALID');
+  return counts;
+}
+
+function selectionPath(paths: FlowmatePaths, config: SourceConfig, selectionId: string): string {
+  safeId(selectionId);
+  if (!config.dataset_id) return fail('VOXEL51_MISSING_DATASET_ID');
+  return resolveOwnedPath(paths.dataRoot, `${datasetTasks(config.dataset_id)}/selections/${selectionId}.json`);
+}
+
+function selectionCountText(counts: AcquireCounts): string {
+  return `带发布方标注 ${counts.with_publisher_annotation} 条、无发布方标注 ${counts.without_publisher_annotation} 条（共 ${counts.with_publisher_annotation + counts.without_publisher_annotation} 条）`;
+}
+
+function selectionLimitConflict(selectionId: string, expectedCounts: AcquireCounts, actualCounts: AcquireCounts, selectionFile?: string): Error {
+  const suggestedId = `${selectionId}-a${expectedCounts.with_publisher_annotation}-u${expectedCounts.without_publisher_annotation}`;
+  const location = selectionFile ? `；固定清单路径：${selectionFile}` : '';
+  const error = new Error(`SELECTION_LIMIT_CONFLICT: selection_id=${selectionId} 已固定为${selectionCountText(actualCounts)}，当前配置请求${selectionCountText(expectedCounts)}。固定选样清单不可覆盖，请更换 selection_id（修改配置中的 selection_id，例如 ${suggestedId}）后重试${location}`);
+  return Object.assign(error, { code: 'SELECTION_LIMIT_CONFLICT', selectionId, existingCounts: actualCounts, expectedCounts, selectionPath: selectionFile });
+}
+
+export function assertVoxel51SelectionCounts(selectionId: string, expectedCounts: AcquireCounts, actualCounts: AcquireCounts, selectionFile?: string): void {
+  if (actualCounts.with_publisher_annotation !== expectedCounts.with_publisher_annotation
+    || actualCounts.without_publisher_annotation !== expectedCounts.without_publisher_annotation) throw selectionLimitConflict(selectionId, expectedCounts, actualCounts, selectionFile);
+}
+
+function parseStoredSelection(bytes: Uint8Array, config: SourceConfig, selectionId: string): StoredSelection {
+  const value = object(JSON.parse(Buffer.from(bytes).toString('utf8')));
+  const { selection_hash, ...content } = value;
+  if (selection_hash !== hashCanonical(content) || value.schema_version !== 1 || value.source_id !== config.source_id || value.dataset_id !== config.dataset_id || value.selection_id !== selectionId || !Array.isArray(value.records)) return fail('VOXEL51_SELECTION_INVALID');
+  const counts = selectionCounts(value);
   if (typeof value.revision !== 'string') return fail('VOXEL51_SELECTION_INVALID');
   assertRevision(value.revision);
   if (value.index_url !== fileUrl(config, value.revision, config.record_locator!.index_path)) return fail('VOXEL51_SELECTION_INVALID');
   return { ...(value as unknown as StoredSelection), counts };
+}
+
+export interface Voxel51SelectionInspection {
+  selectionId: string;
+  path: string;
+  exists: boolean;
+  counts?: AcquireCounts;
+  recordCount?: number;
+  revision?: string;
+  selectionHash?: string;
+}
+
+/** Read the local fixed-selection intent without resolving the public source or downloading files. */
+export async function inspectVoxel51Selection(options: { paths: FlowmatePaths; config: SourceConfig; selectionId: string }): Promise<Voxel51SelectionInspection> {
+  const { paths, config, selectionId } = options;
+  if (config.source_id !== 'voxel51-invoice-ocr' || config.dataset_id !== 'voxel51-hq-invoice-ocr') return fail('VOXEL51_SOURCE_IDENTITY_MISMATCH');
+  const path = selectionPath(paths, config, selectionId);
+  const saved = await optionalBytes(path);
+  if (!saved) return { selectionId, path, exists: false };
+  const selection = parseStoredSelection(saved, config, selectionId);
+  return { selectionId, path, exists: true, counts: selection.counts, recordCount: selection.records.length, revision: selection.revision, selectionHash: selection.selection_hash };
+}
+
+function checkSelection(bytes: Uint8Array, config: SourceConfig, selectionId: string, expectedCounts: AcquireCounts, selectionFile?: string): StoredSelection {
+  const selection = parseStoredSelection(bytes, config, selectionId);
+  assertVoxel51SelectionCounts(selectionId, expectedCounts, selection.counts, selectionFile);
+  return selection;
 }
 
 export async function acquireVoxel51Selection(options: {
@@ -273,7 +326,7 @@ async function acquireVoxel51SelectionUnlocked(options: {
   let selection: StoredSelection;
   let records: Voxel51Record[];
   if (saved) {
-    selection = checkSelection(saved, config, selectionId, counts);
+    selection = checkSelection(saved, config, selectionId, counts, selectionPath);
     let cached: Uint8Array | undefined = await optionalBytes(indexPath);
     if (!cached) {
       // A committed manifest is the recovery intent; never resolve main again to fill its cache.

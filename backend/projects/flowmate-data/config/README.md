@@ -301,6 +301,8 @@ bun src/cli.ts catalog build --paths config/paths.local.json --config config/wor
 
 `selection_id` 不是目录名数量，也不是随机种子。它对应 `dataRoot/tasks/voxel51/selections/<selection_id>.json`，其中保存 revision、record ID、图片路径、标注定位和 selection hash。已提交 selection 存在时，重复采集不会重新选择另一批记录。发票编号单独持久化，增加任务数量不会重排已有编号。
 
+选样清单一旦提交，带发布方标注数和无发布方标注数就与 `selection_id` 一起固定，不能只修改 `sample.acquire` 后继续复用原 ID。菜单执行完整任务前会先读取本地清单并比较两组数量；发现不一致时会在探测、下载和 MinerU 之前停止，并显示已固定数量、当前配置数量以及可直接参考的新 ID（例如 `initial-20-a10-u10`）。此时只需修改 `sample.selection_id` 后重新运行菜单，旧清单和已下载数据会保留。
+
 ### `knowledge` 参数
 
 | 参数 | 作用 |
