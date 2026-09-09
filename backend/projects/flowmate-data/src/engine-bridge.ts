@@ -1,4 +1,5 @@
 export { canonicalJson, hashCanonical } from '../../paper-knowledge-engine/src/shared/manifest.ts';
+import { replaceFileWithRetry, type ReplaceFileOptions } from '../../paper-knowledge-engine/src/evidence/atomic-replace.ts';
 export { replaceFileWithRetry } from '../../paper-knowledge-engine/src/evidence/atomic-replace.ts';
 import { createHttpClient as createPaperHttpClient, ResearchAdapterError, type HttpFetch, type HttpScope, type ResearchHttpClient } from '../../paper-knowledge-engine/src/research/http-client.ts';
 
@@ -12,7 +13,7 @@ export function createHttpClient(options: { fetch?: HttpFetch } = {}): ResearchH
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { cp, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { loadSharedMachineRuntime } from '../../paper-knowledge-engine/src/shared/engine-context.ts';
 import { loadMinerULocalConfig, type MinerULocalConfig } from '../../paper-knowledge-engine/src/mineru/mineru-local-config.ts';
@@ -29,6 +30,11 @@ import type { FlowmatePaths } from './contracts.ts';
 export type { MinerULocalConfig, ProcessContext };
 export { realTree };
 export { withRunLock };
+
+/** Publish a parsed directory while tolerating short Windows sharing violations. */
+export function moveNormalizedDirectory(source: string, destination: string, options: ReplaceFileOptions = {}): Promise<void> {
+  return replaceFileWithRetry(source, destination, { maxAttempts: 12, ...options });
+}
 
 /** Source downloads may reuse only the shared machine proxy; MinerU settings are Flowmate-owned. */
 export function loadSharedEngineNetwork(root: string): HttpScope['network'] {
@@ -261,7 +267,7 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
       try { await lstat(assets); await cp(assets, join(normalized.normalizedDir, 'assets'), { recursive: true, errorOnExist: true, force: false }); }
       catch (error) { if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error; }
       const normalizedDir = join(outputDir, 'normalized');
-      await rename(normalized.normalizedDir, normalizedDir);
+      await moveNormalizedDirectory(normalized.normalizedDir, normalizedDir);
       for (const name of ['content-list.json', 'pages.json']) {
         const path = join(normalizedDir, name);
         await writeFile(path, JSON.stringify(JSON.parse(await readFile(path, 'utf8')), null, 2) + '\n');

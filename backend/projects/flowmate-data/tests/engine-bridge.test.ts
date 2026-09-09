@@ -1,6 +1,6 @@
 import { sampleDirectory, datasetTasks, datasetAlias } from '../src/layout.ts';
 import { afterEach, expect, test } from 'bun:test';
-import { cp, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as bridge from '../src/engine-bridge.ts';
@@ -39,6 +39,26 @@ async function setup() {
   expect(await Bun.file(join(paths.paperEngineRoot, 'config/engine.yaml')).exists()).toBe(false);
   return { paths, runtime, input: { sampleId: 'invoice-a', sourcePath: join(fixture, 'invoice.png'), outputDir: join(paths.dataRoot, 'datasets', 'test', 'samples', 'invoice-a', 'parsed'), ...runtime } };
 }
+
+test('publishes a normalized directory after a transient Windows sharing error', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'flowmate-publish-')); roots.push(root);
+  const source = join(root, 'normalized'); const destination = join(root, 'published');
+  await mkdir(source); await writeFile(join(source, 'content-list.json'), '{}');
+  let attempts = 0; const sleeps: number[] = [];
+  await bridge.moveNormalizedDirectory(source, destination, {
+    platform: 'win32', maxAttempts: 3,
+    rename: async (from, to) => {
+      attempts += 1;
+      if (attempts < 3) throw Object.assign(new Error('sharing violation'), { code: 'EPERM' });
+      await rename(from, to);
+    },
+    sleep: async milliseconds => { sleeps.push(milliseconds); },
+  });
+  expect(attempts).toBe(3);
+  expect(sleeps).toEqual([50, 100]);
+  expect(await Bun.file(join(destination, 'content-list.json')).exists()).toBe(true);
+  expect(await Bun.file(join(source, 'content-list.json')).exists()).toBe(false);
+});
 
 test('standalone bridge routes only original input, explicit output/config and Flowmate process roots through a disposed session', async () => {
   const { paths, runtime, input } = await setup();
