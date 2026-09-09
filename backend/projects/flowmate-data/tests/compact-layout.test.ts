@@ -50,7 +50,7 @@ test('numeric acquisition completes CLI map, parse, catalog, release, verify and
     expect(text).toBe(JSON.stringify(JSON.parse(text), null, 2) + '\n');
   }
   expect((await readdir(paths.originalRoot)).sort()).toEqual(['voxel51']);
-  expect((await readdir(paths.vaultRoot)).sort()).toEqual(['01_总览.md', '02_数据集', '03_发票']);
+  expect((await readdir(paths.vaultRoot)).sort()).toEqual(['.flowmate-assets.json', '01_总览.md', '02_数据集', '03_发票', '05_发布']);
   expect(await readFile(join(paths.vaultRoot, '02_数据集/voxel51.md'), 'utf8')).toContain('[[03_发票/voxel51/000001]]');
 });
 

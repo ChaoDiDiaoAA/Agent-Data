@@ -225,7 +225,7 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 | `paperEngineRoot` | 共享 Paper Knowledge Engine 根目录；只通过 bridge 复用 HTTP 代理等底层能力 | `D:\agent-data\backend\projects\paper-knowledge-engine` |
 | `originalRoot` | 网上下载的原始文件、发布方原始标注，以及结构化镜像 | `D:\paper\Invoice` |
 | `dataRoot` | 机器记录、selection、标签、MinerU 结果、Release 和策略文件 | `D:\agent-data\data\flowmate-data` |
-| `vaultRoot` | 可重建的 Obsidian Markdown 卡片和索引 | `D:\obsidian\data\flowmate-data` |
+| `vaultRoot` | 自包含 Obsidian Vault；保存物理数据副本、可重建 Markdown 卡片和索引 | `D:\obsidian\data\flowmate-data` |
 | `backupRoot` | SHA-256 校验的静止备份和恢复演练目录 | `D:\agent-data\backups\flowmate-data` |
 
 ### 存储位置与配置参数的关系
@@ -233,9 +233,43 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 - 原始数据保存到 `originalRoot`，不是 `dataRoot`。
 - 结构化镜像也保存到 `originalRoot`，但只能由 `dataRoot` 单向发布。
 - 机器记录和解析结果保存到 `dataRoot`。
-- Obsidian 只保存由机器记录重建的 Markdown，不保存原图、PDF 或结构化镜像副本。
+- Obsidian 保存一份由权威根复制而来的发票原图、PDF、发布方标注、统一字段、record、receipt、snapshot、MinerU 结构化结果和 Release 文件，同时保存由机器记录重建的 Markdown；这些文件是副本，不会回写权威根。
 - 不使用 `raw/<sha256>/` 目录；SHA-256 写在记录、快照和 manifest 中，用于校验和身份追踪。
 - 来源探测和原始文件下载会复用 `paperEngineRoot/config/machine.local.yaml` 的 `network.http_proxy`；直连不稳定时必须先启动该代理。MinerU 的全部运行参数和进程策略保存在 Flowmate 自己的 `config/mineru.local.json`；Flowmate 不读取 `paperEngineRoot/config/engine.yaml` 的 MinerU 配置。`workbench.local.json` 只负责来源、当前任务数量、Release 和备份默认值。
+
+### Obsidian 自包含副本
+
+`catalog build` 是权威根到 Vault 的单向物理复制。数据资产不会创建指向权威根的符号链接或硬链接；Markdown 的临时发布只在 Vault 内部完成。Markdown 中也不会写入 `file:///` 或 `D:\paper\Invoice`、`D:\agent-data\data\flowmate-data` 的绝对路径，卡片中的 `[[...]]` 和 `![[...]]` 只指向 Vault 内文件。
+
+目录结构保持精简：
+
+```text
+D:\obsidian\data\flowmate-data\
+├─ 01_总览.md
+├─ 02_数据集\voxel51.md
+├─ 03_发票\voxel51\000001.md
+├─ 03_发票\voxel51\000001\
+│  ├─ original.jpg
+│  ├─ annotation.json       # 仅发布方带标注样本
+│  ├─ fields.json           # 仅已完成标注映射的样本
+│  ├─ record.json
+│  ├─ receipt.json
+│  ├─ snapshot.json
+│  ├─ content.md、content.json、pages.json、parse.json
+│  └─ assets\
+└─ 05_发布\<version>\manifest.json、checksums.json
+```
+
+`D:\paper\Invoice` 与 `D:\agent-data\data\flowmate-data` 仍是权威位置：前者负责原件、发布方原始标注和结构化镜像，后者负责机器记录、统一字段、MinerU 结果、任务和 Release。Vault 副本由这些位置生成，Vault 中的手工修改不会被当作新的来源；相同 hash 的文件可重复执行，检测到手工改写或符号链接时会以冲突错误停止。
+
+清空或升级旧的 Markdown-only Vault 后，直接运行：
+
+```powershell
+Set-Location 'D:\agent-data\backend\projects\flowmate-data'
+bun src/cli.ts catalog build --paths config/paths.local.json --config config/workbench.local.json
+```
+
+`.flowmate-assets.json` 是 Vault 内部的复制清单，用来识别此前由 Flowmate 写入的二进制文件并安全地更新；不要手工编辑或删除它。
 
 ## 文件二：`workbench.local.json`
 
