@@ -205,6 +205,28 @@ async function within<T>(promise: Promise<T>, ms = 1500): Promise<T> {
   } finally { clearTimeout(timer); }
 }
 
+test('MinerU sessions sharing one installation serialize the model resource', async () => {
+  await withSessionFixture(async ({ config, processContext }) => {
+    const processes = createManagedProcessDouble({ onLaunch(launch) {
+      launch.signal?.addEventListener('abort', () => launch.resolve({ reason: 'cancelled' }), { once: true });
+    } });
+    const healthy = () => healthyPayload(config);
+    const first = createMineruApiSession({ config: { ...config, apiPort: 17_861 }, processContext,
+      dependencies: { checkPortAvailable: async () => {}, fetchHealth: async () => healthy(), managedProcess: processes.managedProcess } });
+    const second = createMineruApiSession({ config: { ...config, apiPort: 17_862 }, processContext,
+      dependencies: { checkPortAvailable: async () => {}, fetchHealth: async () => healthy(), managedProcess: processes.managedProcess } });
+    try {
+      await first.ensureReady();
+      await assert.rejects(within(second.ensureReady()), { code: 'MINERU_RESOURCE_BUSY' });
+      await first.dispose();
+      await second.ensureReady();
+    } finally {
+      await first.dispose();
+      await second.dispose();
+    }
+  });
+});
+
 test('silent health connection times out and closes its socket when startup fails', async () => {
   await withSessionFixture(async ({ config, processContext }) => {
     await withHealthListener(() => {}, async (apiPort, closed) => {
@@ -755,6 +777,43 @@ test('server exit before readiness throws MINERU_API_UNAVAILABLE', async () => {
     processes.launches[0]?.finish.resolve(baseResult({ reason: 'exit', exitCode: 1, cleanupConfirmed: true }));
     await assert.rejects(() => pending, (error: unknown) => {
       assert.equal((error as { code?: string }).code, 'MINERU_API_UNAVAILABLE');
+      return true;
+    });
+  });
+});
+
+test('server startup failure preserves bounded redacted API diagnostics', async () => {
+  await withSessionFixture(async ({ config, processContext }) => {
+    const processes = createManagedProcessDouble({
+      onLaunch(launch) {
+        launch.stderr('CUDA out of memory api_key=server-secret https://example.test/startup\\n');
+      },
+    });
+    const session = createMineruApiSession({
+      config,
+      processContext,
+      dependencies: {
+        checkPortAvailable: async () => {},
+        fetchHealth: async () => await new Promise<never>(() => {}),
+        managedProcess: processes.managedProcess,
+        runClient: async () => {
+          throw new Error('runClient should not be called');
+        },
+        sleep: async () => {},
+      },
+    });
+
+    const pending = session.ensureReady();
+    for (let index = 0; index < 20 && processes.launches.length === 0; index += 1) await Promise.resolve();
+    assert.equal(processes.launches.length, 1);
+    processes.launches[0]?.finish.resolve(baseResult({ reason: 'exit', exitCode: 1, cleanupConfirmed: true }));
+    await assert.rejects(() => pending, (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'MINERU_API_UNAVAILABLE');
+      const record = error as { message?: string; stderrSummary?: string; apiStderrSummary?: string };
+      assert.match(record.message ?? '', /CUDA out of memory/);
+      assert.match(record.stderrSummary ?? '', /\[MinerU API\]/);
+      assert.doesNotMatch(JSON.stringify(record), /server-secret|example\.test/);
+      assert.ok((record.stderrSummary?.length ?? 0) <= 4_000);
       return true;
     });
   });

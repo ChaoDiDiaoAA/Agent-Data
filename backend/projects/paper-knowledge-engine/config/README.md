@@ -50,7 +50,7 @@ evidence:
 
 `pipeline_batch_ratio` 支持 1、2、4、8、16，通过 MinerU 的 `MINERU_VIRTUAL_VRAM_SIZE` 兼容设置约束 Pipeline 内部批量；当前为 1。`max_concurrency` 控制请求并发，`processing_window_size` 控制处理页窗口，二者当前也为 1。`vlm_batch_size`、`vlm_cache_max_entry_count` 只作用于 VLM。
 
-`task_timeout_seconds` 同时约束 Bun 客户端和 MinerU 结果等待；`result_download_timeout_seconds` 只控制结果下载。`api_startup_timeout_seconds` 单独约束任务级 API 的启动就绪时间。每个解析操作共享一个本地 API，退出时清理。
+`task_timeout_seconds` 同时约束 Bun 客户端和 MinerU 结果等待；`result_download_timeout_seconds` 只控制结果下载。`api_startup_timeout_seconds` 单独约束任务级 API 的启动就绪时间。每个解析操作共享一个本地 API，退出时清理。所有使用同一 `source_root` 的 Paper Knowledge Engine 和 Flowmate 会话还会共享 `source_root` 上一级的 `.fsd-mineru-resource.lock`，在 API 会话全生命周期内串行化 GPU 模型；锁被其他项目持有时返回 `MINERU_RESOURCE_BUSY`，不要手工删除运行中锁文件。
 
 `local_import` 控制递归、文件数、PDF 页数、文件大小和默认 Track。MinerU Markdown 与页文本引用的本地资源先归一化进 Archive，再按 Evidence v3 路径发布。
 

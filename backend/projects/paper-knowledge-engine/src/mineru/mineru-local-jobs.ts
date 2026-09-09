@@ -153,6 +153,7 @@ function classifyProcessFailure(execution: Partial<MinerUExecution> | undefined)
   if (execution?.errorCode === 'MINERU_API_UNAVAILABLE') return 'mineru_api_unavailable';
   if (execution?.errorCode === 'MINERU_API_STARTUP_TIMEOUT') return 'mineru_api_startup_timeout';
   if (execution?.errorCode === 'MINERU_API_PORT_IN_USE') return 'mineru_api_port_in_use';
+  if (execution?.errorCode === 'MINERU_RESOURCE_BUSY') return 'mineru_resource_busy';
   const text = `${execution?.stderrSummary ?? ''}
 ${execution?.stdoutSummary ?? ''}`;
   if (execution?.errorCode === 'MINERU_PATH_TOO_LONG' || /路径过长|path too long|filename or extension is too long/i.test(text)) return 'path_too_long';

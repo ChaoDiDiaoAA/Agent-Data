@@ -29,7 +29,7 @@ bun install --frozen-lockfile
 bun run typecheck
 ```
 
-共享引擎的 `mineru-config` 只属于 Paper Knowledge Engine 自身的诊断命令，不是 Flowmate 的配置入口；Flowmate 的 `parse` 会通过 bridge 创建任务级 MinerU API，会话结束后自动回收。不要同时启动第二个 MinerU 服务，也不要从 PDF 目录或 Obsidian 目录执行下面的命令。
+共享引擎的 `mineru-config` 只属于 Paper Knowledge Engine 自身的诊断命令，不是 Flowmate 的配置入口；Flowmate 的 `parse` 会通过 bridge 创建任务级 MinerU API，会话结束后自动回收。两个项目共用 MinerU 安装时，bridge 会通过安装目录上一级的 `.fsd-mineru-resource.lock` 串行化 GPU 模型会话；FSD 正在解析时执行 Flowmate 会得到明确的 `MINERU_RESOURCE_BUSY`，应在 FSD 完成后重试。不要手工删除运行中任务持有的锁文件，也不要从 PDF 目录或 Obsidian 目录执行下面的命令。
 
 ## 配置
 
@@ -42,18 +42,18 @@ bun run typecheck
 
 `workbench.local.json` 的关键字段如下：
 
-| 配置路径 | 含义 | 示例 |
-| --- | --- | --- |
-| `sample.source_id` | 样本来源登记 ID，对应 `config/sources/<source_id>.json` | `voxel51-invoice-ocr` |
-| `sample.dataset_id` | 处理数据和 Obsidian 的数据集分区 | `voxel51-hq-invoice-ocr` |
-| `sample.selection_id` | 固定选样清单 ID；同一 ID 重跑读取已提交清单 | `initial-20` |
-| `sample.acquire_limit` | 当前任务获取并交给 MinerU 解析的带标注样本数 | `20` |
-| `sample.publish_snapshot` | 标签映射后是否同步发布 `D:\paper\Invoice` 结构化镜像 | `true` |
-| `knowledge.source_ids` | 已登记的知识来源列表 | `[]`（当前不启用额外知识来源） |
-| `knowledge.parse_source_ids` | 已登记且允许解析的知识来源 | `[]` |
-| `release.version` | 默认 Release 版本 | `public-invoice-p0-v1` |
-| `release.include_originals` | 是否在 Release 复制允许再分发的原件 | `false` |
-| `backup.verify` / `backup.restore_smoke` | 备份命令默认是否校验、独立恢复演练 | `true` / `true` |
+| 配置路径                                     | 含义                                                     | 示例                             |
+| -------------------------------------------- | -------------------------------------------------------- | -------------------------------- |
+| `sample.source_id`                         | 样本来源登记 ID，对应`config/sources/<source_id>.json` | `voxel51-invoice-ocr`          |
+| `sample.dataset_id`                        | 处理数据和 Obsidian 的数据集分区                         | `voxel51-hq-invoice-ocr`       |
+| `sample.selection_id`                      | 固定选样清单 ID；同一 ID 重跑读取已提交清单              | `initial-20`                   |
+| `sample.acquire_limit`                     | 当前任务获取并交给 MinerU 解析的带标注样本数             | `20`                           |
+| `sample.publish_snapshot`                  | 标签映射后是否同步发布`D:\paper\Invoice` 结构化镜像    | `true`                         |
+| `knowledge.source_ids`                     | 已登记的知识来源列表                                     | `[]`（当前不启用额外知识来源） |
+| `knowledge.parse_source_ids`               | 已登记且允许解析的知识来源                               | `[]`                           |
+| `release.version`                          | 默认 Release 版本                                        | `public-invoice-p0-v1`         |
+| `release.include_originals`                | 是否在 Release 复制允许再分发的原件                      | `false`                        |
+| `backup.verify` / `backup.restore_smoke` | 备份命令默认是否校验、独立恢复演练                       | `true` / `true`              |
 
 命令行的 `--selection`、`--limit`、`--publish-snapshot`、`--include-originals`、`--verify` 和 `--restore-smoke` 会覆盖或开启对应默认值；没有显式 `--config` 时读取本机的 `config/workbench.local.json`。
 

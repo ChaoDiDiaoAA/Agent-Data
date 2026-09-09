@@ -6,6 +6,7 @@ import type { MinerUCliConfig } from '../types/config.ts';
 import type { MinerUCliJob, MinerUExecution } from '../types/jobs.ts';
 import type { ManagedProcessResult, ProcessContext } from '../runtime/process.ts';
 import { inspectProcessRecord, resolveProcessRecord, runManagedProcess } from '../runtime/process.ts';
+import { withRunLock } from '../runtime/run-lock.ts';
 import { buildMinerUProcessEnv, runMineruCli } from './mineru-cli-runner.ts';
 import { pipelineBatchRatioToVirtualVram } from './mineru-local-config.ts';
 import { redactErrorMessage } from '../shared/redaction.ts';
@@ -49,6 +50,49 @@ const HEALTH_REQUEST_TIMEOUT_MS = 1000;
 const HEALTH_BODY_LIMIT_BYTES = 16 * 1024;
 const DIAGNOSTIC_PART_LIMIT = 1_900;
 const API_DIAGNOSTIC_BUFFER_LIMIT = 8_000;
+const MINERU_RESOURCE_LOCK_NAME = '.fsd-mineru-resource.lock';
+
+interface MineruResourceLease {
+  release(): Promise<void>;
+}
+
+/**
+ * MinerU loads a process-wide model onto the machine GPU. A port check only
+ * prevents two servers from binding the same socket; it cannot prevent
+ * Flowmate and the paper engine from loading the model concurrently on two
+ * different ports. Hold a small cross-project run lock for the complete API
+ * session lifetime so callers either wait at the explicit boundary or get a
+ * stable resource-busy error.
+ */
+async function acquireMineruResourceLease(config: Pick<MinerUCliConfig, 'sourceRoot'>, jobId: string): Promise<MineruResourceLease> {
+  const lockPath = join(dirname(config.sourceRoot), MINERU_RESOURCE_LOCK_NAME);
+  let releaseHeld!: () => void;
+  let lockRun!: Promise<void>;
+  const held = new Promise<void>(resolve => { releaseHeld = resolve; });
+  const acquired = new Promise<MineruResourceLease>((resolve, reject) => {
+    lockRun = withRunLock(lockPath, async () => {
+      let released = false;
+      const release = async () => {
+        if (!released) {
+          released = true;
+          releaseHeld();
+        }
+        await lockRun;
+      };
+      resolve({ release });
+      await held;
+    }, { jobId });
+    void lockRun.catch(reject);
+  });
+  try {
+    return await acquired;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'PROJECT_BUSY') {
+      throw sessionError('MINERU_RESOURCE_BUSY', 'MinerU GPU resource is busy; wait for the other MinerU task to finish');
+    }
+    throw error;
+  }
+}
 
 function diagnosticPart(value: unknown): string {
   return redactErrorMessage(String(value ?? '')).slice(-DIAGNOSTIC_PART_LIMIT);
@@ -85,8 +129,16 @@ function sessionDisposedError() {
   return sessionError('MINERU_API_SESSION_DISPOSED', 'MinerU API session has been disposed');
 }
 
-function apiUnavailableError(message: string) {
-  return sessionError('MINERU_API_UNAVAILABLE', message);
+function apiUnavailableError(message: string, result?: ManagedProcessResult, apiStderr = '') {
+  const diagnostic = diagnosticPart(apiStderr);
+  const error = sessionError('MINERU_API_UNAVAILABLE', diagnostic ? `${message}\n[MinerU API]\n${diagnostic}` : message);
+  return Object.assign(error, {
+    exitCode: result?.exitCode,
+    elapsedMs: result?.elapsedMs,
+    cleanupConfirmed: result?.cleanupConfirmed,
+    apiStderrSummary: diagnostic || undefined,
+    stderrSummary: diagnostic ? `[MinerU API]\n${diagnostic}` : undefined,
+  });
 }
 
 function isHealthyPayload(value: unknown, config: Pick<MinerUCliConfig, 'maxConcurrency' | 'processingWindowSize'>) {
@@ -213,9 +265,9 @@ function syncStateWithSettledLaunch(state: SessionState): SessionState {
   return state;
 }
 
-function unavailableFromEndedLaunch(launch: ServerLaunch): never {
+function unavailableFromEndedLaunch(launch: ServerLaunch, apiStderr = ''): never {
   if (launch.outcome?.kind === 'result') {
-    unavailableFromLaunchResult(launch.outcome.result, 'MinerU API is no longer available for this operation');
+    unavailableFromLaunchResult(launch.outcome.result, 'MinerU API is no longer available for this operation', apiStderr);
   }
   throw cleanupUnconfirmedError();
 }
@@ -228,9 +280,9 @@ async function waitForLaunchResult(launch: ServerLaunch): Promise<ManagedProcess
   }
 }
 
-function unavailableFromLaunchResult(result: ManagedProcessResult, message: string) {
+function unavailableFromLaunchResult(result: ManagedProcessResult, message: string, apiStderr = '') {
   if (!result.cleanupConfirmed) throw cleanupUnconfirmedError();
-  throw apiUnavailableError(message);
+  throw apiUnavailableError(message, result, apiStderr);
 }
 
 export function createMineruApiSession(options: {
@@ -252,6 +304,13 @@ export function createMineruApiSession(options: {
   const apiSafetyRoot = join(dirname(processContext.safetyRoot), 'mineru-api-process');
   let apiStderrBuffer = '';
   let state: SessionState = { kind: 'idle' };
+  let resourceLease: MineruResourceLease | undefined;
+
+  const releaseResourceLease = async () => {
+    const lease = resourceLease;
+    resourceLease = undefined;
+    await lease?.release();
+  };
 
   const observeLaunch = (launch: ServerLaunch) => {
     launch.finished.then(
@@ -269,6 +328,7 @@ export function createMineruApiSession(options: {
 
   const startLaunch = (launch: ServerLaunch) => (async () => {
     try {
+      resourceLease = await acquireMineruResourceLease(config, `mineru-api-${config.apiPort}`);
       await ensureCleanupRecordClear(apiSafetyRoot);
       try {
         await dependencies.checkPortAvailable('127.0.0.1', config.apiPort);
@@ -334,7 +394,7 @@ export function createMineruApiSession(options: {
             (error) => ({ kind: 'finished-error' as const, error }),
           ),
         ]).finally(() => probe.abort());
-        if (outcome.kind === 'finished') unavailableFromLaunchResult(outcome.result, 'MinerU API exited before readiness');
+        if (outcome.kind === 'finished') unavailableFromLaunchResult(outcome.result, 'MinerU API exited before readiness', apiStderrBuffer);
         if (outcome.kind === 'finished-error') throw cleanupUnconfirmedError();
         if (outcome.kind === 'health' && isHealthyPayload(outcome.health, config)) return apiUrl;
         remainingMs = Math.min(remainingMs, deadline - performance.now());
@@ -348,7 +408,7 @@ export function createMineruApiSession(options: {
             (error) => ({ kind: 'finished-error' as const, error }),
           ),
         ]);
-        if (pause.kind === 'finished') unavailableFromLaunchResult(pause.result, 'MinerU API exited before readiness');
+        if (pause.kind === 'finished') unavailableFromLaunchResult(pause.result, 'MinerU API exited before readiness', apiStderrBuffer);
         if (pause.kind === 'finished-error') throw cleanupUnconfirmedError();
         remainingMs -= delayMs;
       }
@@ -359,6 +419,10 @@ export function createMineruApiSession(options: {
       throw sessionError('MINERU_API_STARTUP_TIMEOUT', 'MinerU API did not become healthy before the startup timeout');
     } catch (error) {
       if (!launch.outcome) launch.rejectFinished(error);
+      // Startup failures cannot reach the normal dispose path when the state
+      // promise transitions back to idle. Release the machine lease here so a
+      // later retry is never blocked by a failed launch.
+      await releaseResourceLease();
       throw error;
     }
   })();
@@ -367,7 +431,7 @@ export function createMineruApiSession(options: {
     while (true) {
       state = syncStateWithSettledLaunch(state);
       if (state.kind === 'disposed') throw sessionDisposedError();
-      if (state.kind === 'ended') unavailableFromEndedLaunch(state.launch);
+      if (state.kind === 'ended') unavailableFromEndedLaunch(state.launch, apiStderrBuffer);
       if (state.kind === 'ready') return { apiUrl: state.apiUrl, launch: state.launch };
       if (state.kind === 'starting') {
         const current = state.launch;
@@ -375,7 +439,12 @@ export function createMineruApiSession(options: {
           const readyUrl = await state.ready;
           return { apiUrl: readyUrl, launch: current };
         } catch (error) {
-          if (state.kind === 'starting' && state.launch === current) state = { kind: 'idle' };
+          // The launch observer can settle `finished` in the same turn as
+          // `ready` rejects, changing the state to `ended` before this catch
+          // runs. Both states belong to this failed launch and must be reset
+          // so a caller can retry after a transient/resource-busy failure.
+          const settledState = state as SessionState;
+          if ((settledState.kind === 'starting' || settledState.kind === 'ended') && settledState.launch === current) state = { kind: 'idle' };
           throw error;
         }
         continue;
@@ -427,13 +496,14 @@ export function createMineruApiSession(options: {
 
       if (outcome.kind === 'client') return attachFailureDiagnostics(outcome.result, apiStderrBuffer);
       if (outcome.kind === 'client-error') throw outcome.error;
-      if (outcome.kind === 'finished') unavailableFromLaunchResult(outcome.result, 'MinerU API became unavailable during request');
+      if (outcome.kind === 'finished') unavailableFromLaunchResult(outcome.result, 'MinerU API became unavailable during request', apiStderrBuffer);
       throw cleanupUnconfirmedError();
     },
     async dispose() {
       if (state.kind === 'disposed') return;
       if (state.kind === 'idle') {
         state = { kind: 'disposed' };
+        await releaseResourceLease();
         return;
       }
       const currentState = state;
@@ -443,10 +513,14 @@ export function createMineruApiSession(options: {
       // because the configured port is occupied). In that case there is
       // nothing to clean up; preserve the original startup error instead of
       // replacing it with a cleanup failure from the rejected promise.
-      if (current.startedPid === undefined && current.outcome?.kind === 'error') return;
-      if (currentState.kind !== 'ended') current.controller.abort();
-      const result = await waitForLaunchResult(current);
-      if (!result.cleanupConfirmed) throw cleanupUnconfirmedError();
+      try {
+        if (current.startedPid === undefined && current.outcome?.kind === 'error') return;
+        if (currentState.kind !== 'ended') current.controller.abort();
+        const result = await waitForLaunchResult(current);
+        if (!result.cleanupConfirmed) throw cleanupUnconfirmedError();
+      } finally {
+        await releaseResourceLease();
+      }
     },
   };
 }

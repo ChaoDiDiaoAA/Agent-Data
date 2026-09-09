@@ -93,6 +93,36 @@ for (const mode of ['missing', 'failed', 'throw', 'dispose-failed'] as const) te
   expect(await Bun.file(input.lockPath).exists()).toBe(false);
 });
 
+test('MinerU execution failures preserve bounded redacted client diagnostics', async () => {
+  const { input } = await setup();
+  const dependencies: bridge.ParseDependencies = { createSession() { return {
+    async ensureReady() { return 'fake'; },
+    async run() {
+      return {
+        exitCode: 1,
+        errorCode: null,
+        cleanupConfirmed: true,
+        stderrSummary: 'MinerU task failed: api_key=secret-token https://example.test/task',
+        clientStderrSummary: 'MinerU task failed: api_key=secret-token https://example.test/task',
+        apiStderrSummary: 'worker failed',
+      };
+    },
+    async dispose() {},
+  }; } };
+  let caught: unknown;
+  try { await bridge.parseInvoice(input, dependencies); }
+  catch (error) { caught = error; }
+  expect(caught).toMatchObject({
+    code: 'MINERU_PARSE_FAILED',
+    mineruErrorCode: null,
+    exitCode: 1,
+  });
+  expect(caught).toSatisfy((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('MinerU task failed') && message.includes('[redacted]') && !message.includes('secret-token') && !message.includes('example.test');
+  });
+});
+
 test('attempts never overwrite old output and changed parser settings produce a different key', async () => {
   const { input } = await setup();
   const dependencies: bridge.ParseDependencies = { now: () => new Date('2026-01-01'), createSession: () => ({ async ensureReady() { return 'fake'; }, async run(job) { await cp(join(fixture, 'mineru-output'), job.outputDir, { recursive: true }); return { exitCode: 0 }; }, async dispose() {} }) };

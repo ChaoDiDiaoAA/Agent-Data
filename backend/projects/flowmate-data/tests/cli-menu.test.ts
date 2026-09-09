@@ -123,4 +123,25 @@ describe('interactive CLI menu', () => {
     expect(backup.commands).toHaveLength(1);
     expect(backup.commands[0]).toEqual(expect.arrayContaining(['backup', 'create']));
   });
+
+  test('prints a compact MinerU diagnostic when the task fails', async () => {
+    const { pathsPath, configPath } = await menuFixture(1);
+    const answers = ['2', '0'];
+    const lines: string[] = [];
+    await runMenu({
+      pathsPath,
+      configPath,
+      ask: async () => answers.shift()!,
+      output: fakeOutput(lines),
+      execute: async args => {
+        if (args[0] === 'parse') throw Object.assign(new Error('MinerU GPU resource is busy; wait for the other MinerU task to finish'), { code: 'MINERU_RESOURCE_BUSY', stderrSummary: 'worker failed\napi_key=secret-token' });
+        return 0;
+      },
+    });
+    const output = lines.join('');
+    expect(output).toContain('MinerU 4/8');
+    expect(output).toContain('MINERU_RESOURCE_BUSY: MinerU GPU resource is busy; wait for the other MinerU task to finish；诊断：worker failed api_key=[redacted]');
+    expect(output).not.toContain('secret-token');
+    expect(output).not.toContain('"source_id"');
+  });
 });

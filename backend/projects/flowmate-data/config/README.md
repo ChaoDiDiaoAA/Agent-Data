@@ -157,6 +157,11 @@ bun run typecheck
 
 `parse` 命令会通过 bridge 启动任务级 MinerU API，并在任务结束后回收；不需要先手工启动第二个 MinerU 服务。Flowmate 默认使用 `17861`，Paper Knowledge Engine 默认使用 `17860`，两个项目不要共用同一个端口。
 
+两个项目虽然使用独立配置和端口，但通常共用同一套 MinerU 安装、模型和 GPU。共享会话会在
+`source_root` 的上一级创建 `.fsd-mineru-resource.lock`，并在整个 API 会话期间持有它；因此
+FSD 正在解析论文时，Flowmate 会在启动前明确报告 `MINERU_RESOURCE_BUSY`，等待 FSD 完成后再重试，
+不会再让两个任务同时加载模型导致客户端只返回退出码 `1`。不要手工删除仍由运行中进程持有的锁文件。
+
 ## 先看结论：从哪里获取、获取多少
 
 ### 从哪里获取

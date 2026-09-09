@@ -19,6 +19,7 @@ import { loadMinerULocalConfig, type MinerULocalConfig } from '../../paper-knowl
 import { createMineruApiSession } from '../../paper-knowledge-engine/src/mineru/mineru-api-session.ts';
 import { createProcessContext, type ProcessContext } from '../../paper-knowledge-engine/src/runtime/process.ts';
 import { withRunLock } from '../../paper-knowledge-engine/src/runtime/run-lock.ts';
+import { redactErrorMessage } from '../../paper-knowledge-engine/src/shared/redaction.ts';
 import { normalizeLocalMinerUResult } from '../../paper-knowledge-engine/src/mineru/mineru-local-result.ts';
 import { archiveReferences, realTree } from '../../paper-knowledge-engine/src/shared/archive-v2.ts';
 import { canonicalJson, hashCanonical } from '../../paper-knowledge-engine/src/shared/manifest.ts';
@@ -63,6 +64,37 @@ export interface ParseDependencies {
   onParsed?: (receipt: ParseReceipt) => Promise<void>;
 }
 const digest = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
+
+function mineruParseFailure(execution: {
+  exitCode: number;
+  errorCode?: string | null;
+  timedOut?: boolean;
+  cleanupConfirmed?: boolean;
+  elapsedMs?: number;
+  pid?: number | null;
+  activePids?: number[];
+  stderrSummary?: string;
+  clientStderrSummary?: string;
+  apiStderrSummary?: string;
+}) {
+  const failureCode = execution.errorCode ?? (execution.timedOut ? 'ETIMEDOUT' : execution.exitCode || 1);
+  const diagnostics = redactErrorMessage(execution.stderrSummary
+    || [execution.clientStderrSummary, execution.apiStderrSummary].filter(Boolean).join('\n')).trim().slice(-4_000);
+  const message = `MINERU_PARSE_FAILED: ${failureCode}${diagnostics ? `\n${diagnostics}` : ''}`;
+  return Object.assign(new Error(message), {
+    code: 'MINERU_PARSE_FAILED',
+    mineruErrorCode: execution.errorCode ?? null,
+    exitCode: execution.exitCode,
+    timedOut: execution.timedOut ?? false,
+    cleanupConfirmed: execution.cleanupConfirmed,
+    elapsedMs: execution.elapsedMs,
+    pid: execution.pid ?? null,
+    activePids: execution.activePids ?? [],
+    stderrSummary: diagnostics,
+    clientStderrSummary: execution.clientStderrSummary,
+    apiStderrSummary: execution.apiStderrSummary,
+  });
+}
 
 const mineruConfigFields = [
   'source_root', 'expected_version', 'expected_commit', 'python_version', 'venv_root',
@@ -198,7 +230,7 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
     try {
       const execution = await session.run({ model: config.model, fileSource: input.sourcePath, outputDir,
         method: config.pipelineMethod, language: config.pipelineLanguage, formula: config.formulaEnabled, table: config.tableEnabled, timeoutMs: config.taskTimeoutMs });
-      if (execution.exitCode !== 0 || execution.timedOut || execution.cleanupConfirmed === false || execution.errorCode) throw new Error(`MINERU_PARSE_FAILED: ${execution.errorCode ?? execution.exitCode}`);
+      if (execution.exitCode !== 0 || execution.timedOut || execution.cleanupConfirmed === false || execution.errorCode) throw mineruParseFailure(execution);
       // A newly created attempt cannot contain stale artifacts. ZIP extraction
       // may retain timestamps older than this attempt, so do not filter by mtime.
       const normalized = await normalizeLocalMinerUResult({ model: config.model, cliBackend: config.cliBackend, outputDir });

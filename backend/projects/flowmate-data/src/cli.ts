@@ -16,6 +16,7 @@ import { buildRelease, loadReleaseRecords, loadReleaseSourceConfig, verifyReleas
 import { createBackup, restoreBackup, verifyBackup, verifyRestoredBackup } from './backup.ts';
 import { verifyStructuredSnapshot } from './structured-snapshot.ts';
 import { sha256File } from './file-store.ts';
+import { redactErrorMessage } from '../../paper-knowledge-engine/src/shared/redaction.ts';
 
 export const usage = 'Usage: flowmate-data [menu] | [--paths <path>] [--config <path>] <command>';
 
@@ -93,6 +94,17 @@ function menuRecord(value: unknown): Record<string, unknown> {
 function menuText(value: unknown, fallback = 'unknown', length = 16): string {
   if (typeof value !== 'string' || !value) return fallback;
   return value.length <= length ? value : `${value.slice(0, length)}...`;
+}
+
+function menuErrorSummary(error: unknown): string {
+  const record = menuRecord(error);
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : 'VOXEL51_FAILED';
+  const code = typeof record.code === 'string' && record.code ? record.code : '';
+  const diagnostic = typeof record.stderrSummary === 'string' ? record.stderrSummary : '';
+  const coded = code && !message.includes(code) ? `${code}: ${message}` : message;
+  const combined = diagnostic && !coded.includes(diagnostic) ? `${coded}；诊断：${diagnostic}` : coded;
+  const singleLine = redactErrorMessage(combined).replace(/\s+/g, ' ').trim();
+  return singleLine.length <= 360 ? singleLine : `${singleLine.slice(0, 357)}...`;
 }
 
 function menuResultSummary(args: string[], value: unknown): string {
@@ -244,7 +256,7 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
             const suffix = step.commands.length > 1 ? `（${commandIndex + 1}/${step.commands.length}）` : '';
             writeMenu(output, `${progressLabel}${suffix} 完成：${menuResultSummary(command, result.result)}，耗时 ${menuDuration(Date.now() - stepStartedAt)}，累计 ${menuDuration(Date.now() - taskStartedAt)}`);
           } catch (error) {
-            writeMenu(output, `${progressLabel} 失败：${error instanceof Error ? error.message : 'VOXEL51_FAILED'}`);
+            writeMenu(output, `${progressLabel} 失败：${menuErrorSummary(error)}`);
             failed = true;
             break;
           }
