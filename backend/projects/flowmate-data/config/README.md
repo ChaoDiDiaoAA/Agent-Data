@@ -292,6 +292,10 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 它的 `mineru` 对象沿用共享 MinerU runner 的字段名称，但值由 Flowmate 单独维护；
 `tempRoot`、`outputRoot` 和论文库身份不会从文件读取，而是固定派生为
 `dataRoot/work`、`dataRoot/datasets`，并且不设置 `libraryId/libraryPaths`。
+MinerU API 下载结果先写入短路径 `dataRoot/work/m/<attempt-id>`，规整并校验后只将
+`normalized` 目录移动到 `dataRoot/datasets/.../parsed/<attempt-id>/`；成功或失败都会清理
+这个临时目录。这样可避免 MinerU 在 Windows 解压图片时因数据集、样本和 attempt 路径过深而触发
+`[Errno 2] No such file or directory`，同时保留最终解析结果和 receipt 的既有路径契约。
 
 ### 顶层参数
 

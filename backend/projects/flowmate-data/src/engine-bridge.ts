@@ -12,7 +12,7 @@ export function createHttpClient(options: { fetch?: HttpFetch } = {}): ResearchH
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { loadSharedMachineRuntime } from '../../paper-knowledge-engine/src/shared/engine-context.ts';
 import { loadMinerULocalConfig, type MinerULocalConfig } from '../../paper-knowledge-engine/src/mineru/mineru-local-config.ts';
@@ -225,24 +225,46 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
       if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') throw new Error('ATTEMPT_EXISTS');
       throw error;
     }
-    const session = (dependencies.createSession ?? createMineruApiSession)({ config, processContext });
+    // MinerU's client extracts API results into paths that include the
+    // generated asset names.  The final Flowmate attempt path contains the
+    // dataset/sample identity and can exceed Windows' legacy path limit even
+    // though the input path and the configured output directory pass the
+    // runner's shallow path check.  Keep the external extraction workspace
+    // short, then publish only the normalized, self-contained artifacts to
+    // the immutable attempt directory.
+    const mineruOutputDir = resolveOwnedPath(config.tempRoot, `m/${attemptId}`);
+    await mkdir(dirname(mineruOutputDir), { recursive: true });
+    await mkdir(mineruOutputDir, { recursive: false });
+    let session: ReturnType<typeof createMineruApiSession> | undefined;
     let receipt: ParseReceipt;
     try {
-      const execution = await session.run({ model: config.model, fileSource: input.sourcePath, outputDir,
+      session = (dependencies.createSession ?? createMineruApiSession)({ config, processContext });
+      const execution = await session.run({ model: config.model, fileSource: input.sourcePath, outputDir: mineruOutputDir,
         method: config.pipelineMethod, language: config.pipelineLanguage, formula: config.formulaEnabled, table: config.tableEnabled, timeoutMs: config.taskTimeoutMs });
       if (execution.exitCode !== 0 || execution.timedOut || execution.cleanupConfirmed === false || execution.errorCode) throw mineruParseFailure(execution);
       // A newly created attempt cannot contain stale artifacts. ZIP extraction
       // may retain timestamps older than this attempt, so do not filter by mtime.
-      const normalized = await normalizeLocalMinerUResult({ model: config.model, cliBackend: config.cliBackend, outputDir });
+      const normalized = await normalizeLocalMinerUResult({ model: config.model, cliBackend: config.cliBackend, outputDir: mineruOutputDir });
       // The shared archive normalizer uses attempt-relative assets. Make the
       // standalone normalized directory self-contained without changing its text.
-      const assets = join(outputDir, 'assets');
+      const assets = join(mineruOutputDir, 'assets');
       try { await lstat(assets); await cp(assets, join(normalized.normalizedDir, 'assets'), { recursive: true, errorOnExist: true, force: false }); }
       catch (error) { if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error; }
-      const verified = await verifyNormalizedOutput(normalized.normalizedDir);
+      const normalizedDir = join(outputDir, 'normalized');
+      await rename(normalized.normalizedDir, normalizedDir);
+      const verified = await verifyNormalizedOutput(normalizedDir);
       if (verified.contentHash !== normalized.contentHash || digest(await readFile(input.sourcePath)) !== originalSha256) throw new Error('PARSE_HASH_MISMATCH');
-      receipt = { sampleId: input.sampleId, parserKey, attemptId, originalSha256, startedAt, outputDir, normalizedDir: normalized.normalizedDir, ...verified };
-    } finally { await session.dispose(); }
+      receipt = { sampleId: input.sampleId, parserKey, attemptId, originalSha256, startedAt, outputDir, normalizedDir, ...verified };
+    } finally {
+      try { await session?.dispose(); }
+      finally {
+        // The final attempt keeps only normalized artifacts and its receipt. A
+        // failed API extraction may leave partial files in the short staging
+        // directory; remove them without masking the original parse/cleanup
+        // error.
+        await rm(mineruOutputDir, { recursive: true, force: true }).catch(() => undefined);
+      }
+    }
     await writeFile(join(outputDir, 'receipt.json'), canonicalJson(receipt), { flag: 'wx' });
     await dependencies.onParsed?.(receipt);
     return receipt;

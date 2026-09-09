@@ -51,7 +51,10 @@ test('standalone bridge routes only original input, explicit output/config and F
     expect(options.processContext).toBe(input.processContext);
     return { async ensureReady() { return 'fake'; }, async run(job) {
       expect(job.fileSource).toBe(input.sourcePath);
-      expect(job.outputDir.startsWith(input.outputDir)).toBe(true);
+      expect(job.outputDir).not.toBe(input.outputDir);
+      expect(job.outputDir.startsWith(join(input.mineruConfig.tempRoot, 'm'))).toBe(true);
+      expect(job.outputDir.includes(`${input.mineruConfig.outputRoot}${process.platform === 'win32' ? '\\' : '/'}`)).toBe(false);
+      expect(job.outputDir.length).toBeLessThan(180);
       expect(Object.keys(job).sort()).toEqual(['fileSource', 'formula', 'language', 'method', 'model', 'outputDir', 'table', 'timeoutMs']);
       expect(await Bun.file(runtime.lockPath).exists()).toBe(true);
       await cp(join(fixture, 'mineru-output'), job.outputDir, { recursive: true });
@@ -64,6 +67,7 @@ test('standalone bridge routes only original input, explicit output/config and F
   } });
   expect(disposed).toBe(1);
   expect(await Bun.file(runtime.lockPath).exists()).toBe(false);
+  expect(result.normalizedDir).toBe(join(result.outputDir, 'normalized'));
   expect(result.parserKey).toContain('mineru@3.4.5');
   expect(result.parserKey).toContain(input.mineruConfig.expectedCommit);
   for (const key of ['model=', 'backend=', 'method=', 'language=', 'formula=', 'table=']) expect(result.parserKey).toContain(key);
@@ -81,15 +85,19 @@ test('Flowmate MinerU runtime requires its own config and never falls back to en
 });
 
 for (const mode of ['missing', 'failed', 'throw', 'dispose-failed'] as const) test(`parse rejects ${mode} and disposes the session`, async () => {
-  const { input } = await setup(); let disposed = 0;
+  const { input } = await setup(); let disposed = 0; let stagingDir: string | undefined;
   await expect(bridge.parseInvoice(input, { createSession() { return {
     async ensureReady() { return 'fake'; }, async run(job) {
+      stagingDir = job.outputDir;
+      await writeFile(join(job.outputDir, 'cleanup-probe.txt'), 'probe');
       if (mode === 'throw') throw new Error('client failed');
       if (mode === 'dispose-failed') await cp(join(fixture, 'mineru-output'), job.outputDir, { recursive: true });
       return { exitCode: mode === 'failed' ? 1 : 0 };
     }, async dispose() { disposed++; if (mode === 'dispose-failed') throw new Error('cleanup failed'); },
   }; } })).rejects.toThrow({ missing: 'structured content list required', failed: 'MINERU_PARSE_FAILED', throw: 'client failed', 'dispose-failed': 'cleanup failed' }[mode]);
   expect(disposed).toBe(1);
+  expect(stagingDir).toBeDefined();
+  expect(await Bun.file(join(stagingDir!, 'cleanup-probe.txt')).exists()).toBe(false);
   expect(await Bun.file(input.lockPath).exists()).toBe(false);
 });
 
