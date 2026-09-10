@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "sample": {
+    "source_id": "voxel51-invoice-ocr",
+    "dataset_id": "voxel51-hq-invoice-ocr",
+    "selection_id": "initial-295-a195-u100",
+    "acquire": {
+      "with_publisher_annotation": 195,
+      "without_publisher_annotation": 100
+    },
+    "publish_snapshot": true
+  },
+  "knowledge": {
+    "source_ids": [],
+    "parse_source_ids": []
+  },
+  "release": {
+    "version": "public-invoice-p0-v1",
+    "include_originals": false
+  },
+  "backup": {
+    "verify": true,
+    "restore_smoke": true
+  }
+}
