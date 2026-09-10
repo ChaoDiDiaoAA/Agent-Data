@@ -16,6 +16,7 @@ fsd-code2doc/output/
 /data/
 /backups/
 /tools/MinerU/
+/tools/.fsd-mineru-resource.lock
 /upstream/*
 !/upstream/README.md
 **/node_modules/
