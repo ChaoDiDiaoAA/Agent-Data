@@ -77,12 +77,15 @@ test('gates original redistribution and detects payload tampering', async () => 
   await expect(verifyRelease(result.path)).rejects.toThrow('RELEASE_CHECKSUM_MISMATCH');
 });
 
-test('same version is immutable when record content changes', async () => {
+test('rebuilds the configured version when record content changes', async () => {
   const paths = await fixturePaths();
   const record = await seed(paths);
   await buildRelease({ paths, version: 'immutable', records: [record], includeOriginals: false, sourceConfig });
   const changed = await saveSampleRecord(paths, { ...record, dataset_revision: 'rev-2' });
-  await expect(buildRelease({ paths, version: 'immutable', records: [changed], includeOriginals: false, sourceConfig })).rejects.toThrow('RELEASE_VERSION_CONFLICT');
+  const rebuilt = await buildRelease({ paths, version: 'immutable', records: [changed], includeOriginals: false, sourceConfig });
+  expect(rebuilt.manifest.version).toBe('immutable');
+  expect(rebuilt.manifest.entries[0]?.dataset_revision).toBe('rev-2');
+  expect((await verifyRelease(rebuilt.path)).manifest.entries[0]?.dataset_revision).toBe('rev-2');
 });
 
 test('rejects machine absolute paths in copied record metadata', async () => {

@@ -123,11 +123,13 @@ test('acquisition stores original record objects and receipts, then reuses the p
   const config = loadSourceConfig(sourcePath);
   const imageA = Buffer.from([0xff, 0xd8, 0xff, 1]);
   const imageB = Buffer.from([0xff, 0xd8, 0xff, 2]);
+  const imageC = Buffer.from([0xff, 0xd8, 0xff, 3]);
   const transport = createSourceHttp(config, { fetch: async url => {
     if (url === config.revision.url) return Response.json({ sha: revision });
     if (url.endsWith(`/${revision}/samples.json`)) return new Response(indexBytes);
     if (url.endsWith(`/${revision}/data/batch1-0494.jpg`)) return new Response(imageA, { headers: { 'content-type': 'image/jpeg' } });
     if (url.endsWith(`/${revision}/data/batch1-0489.jpg`)) return new Response(imageB, { headers: { 'content-type': 'image/jpeg' } });
+    if (url.endsWith(`/${revision}/data/batch1-0499.jpg`)) return new Response(imageC, { headers: { 'content-type': 'image/jpeg' } });
     throw new Error(`UNEXPECTED_URL ${url}`);
   } });
   const result = await acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport });
@@ -155,7 +157,6 @@ test('acquisition stores original record objects and receipts, then reuses the p
   const offline = createSourceHttp(config, { fetch: async () => { throw new Error('NETWORK_FORBIDDEN_ON_REUSE'); } });
   expect(await acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport: offline })).toMatchObject({ added: 0, reused: 2 });
   expect(await readFile(selectionPath)).toEqual(selectionBytes);
-  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 3, transport: offline })).rejects.toThrow('SELECTION_LIMIT_CONFLICT: selection_id=initial-20 已固定为带发布方标注 2 条、无发布方标注 0 条（共 2 条），当前配置请求带发布方标注 3 条、无发布方标注 0 条（共 3 条）');
   const first = selection.records[0];
   const firstAnnotation = join(configuredPaths.originalRoot, datasetBase, first.sample_id, 'annotation.json');
   const originalAnnotation = await readFile(firstAnnotation);
@@ -171,8 +172,14 @@ test('acquisition stores original record objects and receipts, then reuses the p
   await unlink(join(configuredPaths.dataRoot, datasetBase, first.sample_id, 'record.json'));
   expect(await acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport })).toMatchObject({ added: 1, reused: 1 });
   expect(await readdir(join(configuredPaths.dataRoot, 'work', 'downloads'))).toEqual([]);
-  await writeFile(join(configuredPaths.originalRoot, datasetBase, first.sample_id, 'original.jpg'), 'tampered');
+  const firstOriginal = join(configuredPaths.originalRoot, datasetBase, first.sample_id, 'original.jpg');
+  const originalImage = await readFile(firstOriginal);
+  await writeFile(firstOriginal, 'tampered');
   await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 2, transport: offline })).rejects.toThrow('VOXEL51_ORIGINAL_HASH_MISMATCH');
+  await writeFile(firstOriginal, originalImage);
+  const refreshed = await acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'initial-20', limit: 3, transport });
+  expect(refreshed).toMatchObject({ added: 1, reused: 2, total: 3 });
+  expect(JSON.parse(await readFile(selectionPath, 'utf8')).records).toHaveLength(3);
 });
 
 test('keeps dataset metadata immutable while allowing a later source revision', async () => {

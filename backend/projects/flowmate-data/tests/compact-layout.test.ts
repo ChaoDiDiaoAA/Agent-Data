@@ -69,6 +69,43 @@ test('reparse failure retains both latest snapshots; successful reparse replaces
   expect((await realTree(machine)).some(name => name.includes('attempt-'))).toBe(false);
 });
 
+test('resumed selection skips verified parsed invoices and continues with the first incomplete invoice', async () => {
+  const { paths } = await setup();
+  await acquireVoxel51Selection({ paths, config, selectionId: 'resume', limit: 2, transport: transport() });
+  let calls = 0;
+  await expect(parseSelection({ paths, selectionId: 'resume', limit: 2 }, {
+    ...parser('2026-01-01'),
+    createSession: () => ({
+      async ensureReady() { return 'fake'; },
+      async run(job) {
+        calls += 1;
+        if (calls === 2) throw new Error('interrupted');
+        await cp(join(import.meta.dir, 'fixtures/mineru-output'), job.outputDir, { recursive: true });
+        return { exitCode: 0 };
+      },
+      async dispose() {},
+    }),
+  })).rejects.toThrow('interrupted');
+  const resumed: string[] = [];
+  const progress: string[] = [];
+  const result = await parseSelection({ paths, selectionId: 'resume', limit: 2, resume: true }, {
+    ...parser('2026-01-02'),
+    createSession: () => ({
+      async ensureReady() { return 'fake'; },
+      async run(job) {
+        resumed.push(job.fileSource);
+        await cp(join(import.meta.dir, 'fixtures/mineru-output'), job.outputDir, { recursive: true });
+        return { exitCode: 0 };
+      },
+      async dispose() {},
+    }),
+    onProgress: value => { if (value.status === 'skipped') progress.push(value.sampleId); },
+  });
+  expect(result).toMatchObject({ parsed: 1, skipped: 1, total: 2 });
+  expect(progress).toEqual(['000001']);
+  expect(resumed).toHaveLength(1);
+});
+
 test('persisted IDs survive revised ordering, new source IDs and changed source bytes', async () => {
   const { paths } = await setup();
   await acquireVoxel51Selection({ paths, config, selectionId: 'first', limit: 1, transport: transport() });

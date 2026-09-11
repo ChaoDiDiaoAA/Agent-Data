@@ -156,6 +156,24 @@ describe('source configuration', () => {
 });
 
 describe('workbench configuration', () => {
+  test('fills fixed source, selection, release, and knowledge defaults when omitted', () => {
+    const config = validateWorkbenchConfig({
+      schema_version: 1,
+      sample: {
+        acquire: { with_publisher_annotation: 2, without_publisher_annotation: 3 },
+        publish_snapshot: true,
+      },
+      release: { include_originals: false },
+      backup: { verify: true, restore_smoke: true },
+    });
+
+    expect(config.sample.source_id).toBe('voxel51-invoice-ocr');
+    expect(config.sample.dataset_id).toBe('voxel51-hq-invoice-ocr');
+    expect(config.sample.selection_id).toBe('current');
+    expect(config.knowledge).toEqual({ source_ids: [], parse_source_ids: [] });
+    expect(config.release.version).toBe('public-invoice-p0-v1');
+  });
+
   test('loads acquisition, processing, knowledge, release, and backup defaults', async () => {
     const directory = await temporaryDirectory();
     const configPath = join(directory, 'workbench.json');

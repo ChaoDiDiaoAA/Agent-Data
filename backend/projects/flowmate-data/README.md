@@ -122,62 +122,44 @@ bun run typecheck
 路径和运行参数分开配置：
 
 - `config/paths.local.json`：本机目录位置配置；不会提交到 Git。字段和示例值见 [config/README.md](config/README.md)。
-- `config/workbench.local.json`：本次工作台的采集、解析、知识资料、Release 和备份默认参数；不会提交到 Git。仓库不再保留 example 模板，首次使用按 [config/README.md](config/README.md) 创建。
-- `config/mineru.local.json`：Flowmate 独立的 MinerU 安装、模型、GPU、解析和进程策略；不会提交到 Git，不能用 `paper-knowledge-engine/config/engine.yaml` 替代。
+- `config/workbench.local.json`：本次工作台的采集、解析、Release 和备份默认参数；当前工作区保留这份配置，修改后可直接运行并提交。仓库不再保留 example 模板，首次使用按 [config/README.md](config/README.md) 创建。
+- `config/mineru.local.json`：Flowmate 独立的 MinerU 安装、模型、GPU、解析和进程策略；当前工作区保留已确认配置，不能用 `paper-knowledge-engine/config/engine.yaml` 替代。
 - `config/sources/*.json`：公开来源登记，真正的获取位置在这里，包括主页、revision API 或内容 URL、文件 URL、允许的重定向域名、许可证和是否解析。
 
-`workbench.local.json` 的关键字段如下：
+`workbench.local.json` 只保留需要人工调整的参数。来源、数据集、选样清单名称、知识来源和 Release 版本都由当前 Flowmate 实现固定或自动生成，不需要随着数量修改。
+
+```json
+{
+  "schema_version": 1,
+  "sample": {
+    "acquire": {
+      "with_publisher_annotation": 10,
+      "without_publisher_annotation": 10
+    },
+    "publish_snapshot": true
+  },
+  "release": { "include_originals": false },
+  "backup": { "verify": true, "restore_smoke": true }
+}
+```
+
+`workbench.local.json` 的可调整字段如下：
 
 | 配置路径                                        | 含义                                                     | 示例                             |
 | ----------------------------------------------- | -------------------------------------------------------- | -------------------------------- |
-| `sample.source_id`                            | 样本来源登记 ID，对应`config/sources/<source_id>.json` | `voxel51-invoice-ocr`          |
-| `sample.dataset_id`                           | 处理数据和 Obsidian 的数据集分区                         | `voxel51-hq-invoice-ocr`       |
-| `sample.selection_id`                         | 固定选样清单 ID；同一 ID 重跑读取已提交清单              | `initial-20`                   |
 | `sample.acquire.with_publisher_annotation`    | 当前任务获取并交给 MinerU 解析的带发布方标注样本数       | `10`                           |
 | `sample.acquire.without_publisher_annotation` | 当前任务获取并交给 MinerU 解析的无发布方标注样本数       | `10`                           |
 | `sample.acquire`                              | 两个数量之和就是本次获取与解析总数                       | `20`                           |
 | `sample.publish_snapshot`                     | 标签映射后是否同步发布`D:\paper\Invoice` 结构化镜像    | `true`                         |
-| `knowledge.source_ids`                        | 已登记的知识来源列表                                     | `[]`（当前不启用额外知识来源） |
-| `knowledge.parse_source_ids`                  | 已登记且允许解析的知识来源                               | `[]`                           |
-| `release.version`                             | 默认 Release 版本                                        | `public-invoice-p0-v1`         |
 | `release.include_originals`                   | 是否在 Release 复制允许再分发的原件                      | `false`                        |
 | `backup.verify` / `backup.restore_smoke`    | 备份命令默认是否校验、独立恢复演练                       | `true` / `true`              |
 
-`selection_id` 是固定选样清单的名称，不是数量参数，也不是随机种子。它对应
-`dataRoot/tasks/voxel51/selections/<selection_id>.json`，清单中保存来源 revision、具体
-record ID、图片路径、标注定位和 selection hash。首次执行时，程序按
-`sample.acquire.with_publisher_annotation` 与 `sample.acquire.without_publisher_annotation`
-选出两组记录并提交清单；之后使用相同 ID 和相同数量重跑，会复用完全相同的发票，适合
-失败后重试。
-
-选样清单一旦提交，两组数量就与 `selection_id` 一起固定。此后只要修改
-`sample.acquire` 中任意一个数量，就必须换用新的 `selection_id`；即使总数不变、只是调整
-两类样本比例，也必须换 ID。菜单会在探测、下载和 MinerU 之前检查本地清单，发现数量不一致
-就停止，并显示已固定数量、当前请求数量和新 ID 示例，避免执行到下载阶段才失败。尚未生成
-清单的首次运行前可以直接调整数量，但建议让 ID 与批次含义一致。
-
-例如，20 条（10 条带标注、10 条无标注）可以使用：
-
-```json
-"selection_id": "initial-20",
-"acquire": {
-  "with_publisher_annotation": 10,
-  "without_publisher_annotation": 10
-}
-```
-
-改为 40 条（20+20）时应改成新的 ID：
-
-```json
-"selection_id": "initial-40-a20-u20",
-"acquire": {
-  "with_publisher_annotation": 20,
-  "without_publisher_annotation": 20
-}
-```
-
-只修改 MinerU、Release、备份或路径参数时，不需要更换 `selection_id`。旧清单和已下载数据
-会保留，新 ID 表示一个新的可复现批次。
+来源固定为 `voxel51-invoice-ocr`，数据集固定为 `voxel51-hq-invoice-ocr`，当前选样清单内部使用
+`current` 名称保存到 `dataRoot/tasks/voxel51/selections/current.json`。因此只需修改
+`sample.acquire`，不需要维护 `source_id`、`dataset_id` 或 `selection_id`。同一数量重跑会复用清单；
+数量变化时程序会自动刷新清单，旧的原件、record 和发票编号仍保留。Release 默认版本为
+`public-invoice-p0-v1`，内容变化时会在校验通过后自动重建；不需要修改版本号。旧配置中仍存在的
+这些字段仅为兼容历史脚本而读取，新配置不要再添加。
 
 命令行的 `--selection`、`--limit`、`--publish-snapshot`、`--include-originals`、`--verify` 和 `--restore-smoke` 会覆盖或开启对应默认值；没有显式 `--config` 时读取本机的 `config/workbench.local.json`。
 
@@ -210,7 +192,20 @@ bun src/cli.ts
 
 菜单会从 `config/workbench.local.json` 读取两个 `sample.acquire` 数量，并显示带标注、无标注及合计。菜单的“执行当前任务”会用同一批合计数量完成获取、标签映射、MinerU 解析、Obsidian、Release、校验和备份；菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
 
+“执行当前任务”会在 `D:\agent-data\data\flowmate-data\tasks\voxel51\runs\` 写入一份运行清单，并在同级使用任务锁。清单保存当前来源、选样名称、两个数量、配置哈希和九个阶段的状态；任务锁覆盖探测、获取、标签、解析、目录、Release、校验和备份的整个流程，避免两个终端同时修改同一批次。这个行为对应 `paper-knowledge-engine` 的 workflow lock、run record 和原子 manifest 设计。进程中断或某个阶段失败后，用同一条菜单命令再次选择 **2**，会自动找到相同配置下最近的未完成批次：已完成的阶段显示“恢复……跳过”，从第一个未完成阶段继续。MinerU 还会按发票检查 `record.json`、原图哈希、解析器配置和结构化解析文件；仍然有效的发票显示“跳过（已存在可复用解析结果）”，只有未完成或校验不通过的发票重新解析。修改 `sample.acquire`、`selection_id`、来源配置或 `config/mineru.local.json` 后，配置哈希变化会自动开始新批次，不需要手工改运行 ID。运行清单是机器状态，不能手工删除正在运行的批次；清空四个数据根重新开始时，运行清单也会一并清除。
+
+Obsidian 目录发布使用 `D:\obsidian\data\flowmate-data\.flowmate-catalog.lock` 作为带进程身份的文件锁。正常退出会自动删除锁；进程被中止后，下一次运行会根据 PID 和启动身份回收已经退出进程留下的锁，并清理 `.flowmate-catalog-staging-*` 孤立目录。旧版本遗留的空锁目录也会在确认后迁移清理；没有 `.flowmate-assets.json` 的旧 Vault 会只对同一发票目录中带 `generated_by: flowmate-data` 卡片旁的旧资产建立一次迁移清单，再安全刷新 `record.json`、解析结果等副本。非空锁目录、符号链接、未标记卡片或用户文件仍会阻止发布；冲突信息会包含 Vault 内相对路径，便于定位。
+
 获取阶段和 MinerU 阶段都会按顺序显示 `[发票 1/100]`、`[发票 2/100]` 等逐条进度。获取阶段会标明“带标注/无标注”，并显示开始、完成或失败；某条发票的“开始”与“完成”之间暂时没有新行时，表示该条仍在等待网络下载或 MinerU 返回。
+
+Obsidian 阶段只显示外层阶段的开始和完成：`[Obsidian 5/8] 构建 Obsidian 目录 开始` 与对应的完成行。目录内部不会逐文件打印；开始后暂时没有新行时，表示正在读取、校验或写入当前目录。
+
+任务开始前会先执行 PKE 的 MinerU 进程安全检查；`dataRoot/work/processes/active.json` 存在且无法确认清理完成时，任务会在探测前停止，避免先下载一批数据再在解析阶段失败。按 PKE 手册先检查并安全解决该记录，再重新选择 **2**：
+
+```powershell
+bun 'D:\agent-data\backend\projects\paper-knowledge-engine\src\runtime\process-supervisor.ts' --inspect 'D:\agent-data\data\flowmate-data\work\processes\active.json'
+bun 'D:\agent-data\backend\projects\paper-knowledge-engine\src\runtime\process-supervisor.ts' --resolve 'D:\agent-data\data\flowmate-data\work\processes\active.json'
+```
 
 直接子命令仍可用于调试、自动化和兼容已有脚本，但属于高级模式。直接模式可显式传入 `--paths`、`--config`，并在确有需要时用 `--limit` 临时覆盖配置：
 

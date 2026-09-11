@@ -26,6 +26,23 @@ const schemaVersion = 1;
 export interface CatalogFile { path: string; content: string }
 export interface CatalogAsset { path: string; sourcePath: string; sha256: string; bytes: number }
 export interface CatalogPlan { vaultRoot: string; directories: string[]; files: CatalogFile[]; assets: CatalogAsset[] }
+export interface CatalogProgress {
+  phase: 'plan' | 'sample-assets' | 'knowledge-assets' | 'publish';
+  status: 'started' | 'progress' | 'completed';
+  current: number;
+  total: number;
+  item?: string;
+  detail?: string;
+  elapsedMs: number;
+}
+
+interface CatalogBuildOptions {
+  onProgress?: (progress: CatalogProgress) => void | Promise<void>;
+}
+
+interface CatalogPublishOptions {
+  onProgress?: (progress: CatalogProgress) => void | Promise<void>;
+}
 
 function yaml(value: string): string { return /^[A-Za-z0-9_.-]+$/.test(value) ? value : JSON.stringify(value); }
 function frontmatter(properties: Record<string, string>): string {
@@ -48,6 +65,7 @@ function samplePath(record: SampleRecord): string {
 function sampleParseStatus(record: SampleRecord, withdrawn: boolean): string { return withdrawn ? 'withdrawn' : record.derived_ref ? 'parsed' : record.processing_status === 'failed' ? 'failed' : 'not_parsed'; }
 
 function fail(code: string): never { throw new Error(code); }
+function failAsset(code: string, path: string): never { throw new Error(`${code}: ${path}`); }
 
 function catalogSegment(value: string): string {
   if (typeof value !== 'string' || value.length === 0 || /\p{Cc}/u.test(value)
@@ -220,7 +238,7 @@ async function addCatalogAsset(assets: Map<string, CatalogAsset>, destination: s
   const normalized = destination.replaceAll('\\', '/');
   const candidate = { path: normalized, sourcePath, sha256: await sha256File(sourcePath), bytes: Number(info.size) };
   const existing = assets.get(normalized);
-  if (existing && (existing.sha256 !== candidate.sha256 || existing.bytes !== candidate.bytes)) fail('CATALOG_ASSET_SOURCE_CONFLICT');
+  if (existing && (existing.sha256 !== candidate.sha256 || existing.bytes !== candidate.bytes)) failAsset('CATALOG_ASSET_SOURCE_CONFLICT', normalized);
   if (!existing) assets.set(normalized, candidate);
   return existing ?? candidate;
 }
@@ -301,15 +319,30 @@ async function buildKnowledgeAssets(paths: FlowmatePaths, record: KnowledgeRecor
   return [...assets.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
-export async function buildCatalog(paths: FlowmatePaths): Promise<CatalogPlan> {
+export async function buildCatalog(paths: FlowmatePaths, options: CatalogBuildOptions = {}): Promise<CatalogPlan> {
+  const startedAt = Date.now();
+  await options.onProgress?.({ phase: 'plan', status: 'started', current: 0, total: 1, detail: '读取发票和知识记录', elapsedMs: 0 });
   const aliases = (await directories(paths.dataRoot)).filter(id => !['datasets', 'tasks', 'work', 'releases'].includes(id));
   const datasetIds = aliases.map(id => id === 'voxel51' ? 'voxel51-hq-invoice-ocr' : id);
   const samples = (await Promise.all(datasetIds.map(dataset => loadSampleRecords(paths, dataset)))).flat().sort((left, right) => `${left.dataset_id}/${left.sample_id}`.localeCompare(`${right.dataset_id}/${right.sample_id}`));
   const knowledge = await knowledgeRecords(paths);
   const withdrawals = await loadWithdrawalList(withdrawalListPath(paths.dataRoot));
   const releaseRecords = await releases(paths);
-  const sampleAssets = await Promise.all(samples.map(record => buildSampleAssets(paths, record)));
-  const knowledgeAssets = await Promise.all(knowledge.map(record => buildKnowledgeAssets(paths, record)));
+  const sampleAssets = await Promise.all(samples.map(async (record, index) => {
+    const sampleStartedAt = Date.now();
+    const assets = await buildSampleAssets(paths, record);
+    // `current` is the stable position in the sorted record list. Asset
+    // collection remains concurrent, so the output can report a finished
+    // record immediately without making catalog generation sequential.
+    await options.onProgress?.({ phase: 'sample-assets', status: 'completed', current: index + 1, total: samples.length, item: record.sample_id, detail: `资产 ${assets.length} 个`, elapsedMs: Date.now() - sampleStartedAt });
+    return assets;
+  }));
+  const knowledgeAssets = await Promise.all(knowledge.map(async (record, index) => {
+    const knowledgeStartedAt = Date.now();
+    const assets = await buildKnowledgeAssets(paths, record);
+    await options.onProgress?.({ phase: 'knowledge-assets', status: 'completed', current: index + 1, total: knowledge.length, item: `${record.source_id}/${record.file_id}`, detail: `资产 ${assets.length} 个`, elapsedMs: Date.now() - knowledgeStartedAt });
+    return assets;
+  }));
   const assets = [...sampleAssets.flat(), ...knowledgeAssets.flat()];
   for (const release of releaseRecords) {
     const manifest = await addCatalogAsset(new Map(), `${vaultReleasesRoot}/${catalogSegment(release.version)}/manifest.json`, release.manifest, true);
@@ -345,15 +378,16 @@ export async function buildCatalog(paths: FlowmatePaths): Promise<CatalogPlan> {
     assets: assets.sort((left, right) => left.path.localeCompare(right.path)),
   };
   validatePlan(plan);
+  await options.onProgress?.({ phase: 'plan', status: 'completed', current: 1, total: 1, detail: `文件 ${plan.files.length} 个，资产 ${plan.assets.length} 个`, elapsedMs: Date.now() - startedAt });
   return plan;
 }
 
 /** Build and publish the Vault projection while the machine data roots are quiescent. */
-export async function rebuildCatalog(paths: FlowmatePaths, options: { lockHeld?: boolean } = {}): Promise<CatalogPlan> {
+export async function rebuildCatalog(paths: FlowmatePaths, options: { lockHeld?: boolean; onProgress?: (progress: CatalogProgress) => void | Promise<void> } = {}): Promise<CatalogPlan> {
   const operation = async () => {
     await recoverPublications(paths);
-    const plan = await buildCatalog(paths);
-    await applyCatalog(plan);
+    const plan = await buildCatalog(paths, { onProgress: options.onProgress });
+    await applyCatalog(plan, { onProgress: options.onProgress });
     return plan;
   };
   return options.lockHeld
@@ -420,45 +454,107 @@ async function pruneObsoleteGenerated(plan: CatalogPlan): Promise<void> {
   }
 }
 
-export async function applyCatalog(plan: CatalogPlan): Promise<void> {
+const catalogLockName = '.flowmate-catalog.lock';
+const catalogStagingPrefix = '.flowmate-catalog-staging-';
+
+/**
+ * The first catalog implementation used an empty directory as its lock.  A
+ * terminated process could leave that directory behind forever, so migrate
+ * only an empty legacy directory before acquiring the owner-aware file lock.
+ * Non-empty or unexpected entries are treated as a real conflict and are
+ * never removed automatically.
+ */
+async function removeLegacyCatalogLock(lock: string): Promise<void> {
+  const info = await optionalLstat(lock);
+  if (!info) return;
+  if (info.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
+  if (!info.isDirectory()) return;
+  const entries = await readdir(lock, { withFileTypes: true });
+  if (entries.length > 0) fail('CATALOG_LOCKED');
+  const quarantine = join(dirname(lock), `.flowmate-catalog-legacy-${crypto.randomUUID()}`);
+  await assertNewVaultPathBound(dirname(lock), quarantine);
+  try {
+    await rename(lock, quarantine);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && ['EEXIST', 'EPERM', 'EACCES'].includes(String(error.code))) fail('CATALOG_LOCKED');
+    throw error;
+  }
+  try {
+    const moved = await optionalLstat(quarantine);
+    if (!moved || moved.isSymbolicLink() || !moved.isDirectory()) fail('CATALOG_LOCKED');
+    if ((await readdir(quarantine)).length > 0) fail('CATALOG_LOCKED');
+    await rm(quarantine, { recursive: true, force: true });
+  } catch (error) {
+    // Keep an unexpected legacy entry available for manual inspection rather
+    // than silently deleting it.
+    if (error instanceof Error && error.message === 'CATALOG_LOCKED') throw error;
+    throw error;
+  }
+}
+
+/** Remove only staging directories owned by this catalog writer. */
+async function removeOrphanedCatalogStaging(vaultRoot: string): Promise<void> {
+  const entries = await readdir(vaultRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.name.startsWith(catalogStagingPrefix)) continue;
+    const path = join(vaultRoot, entry.name);
+    if (entry.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
+    if (!entry.isDirectory()) fail('CATALOG_LOCKED');
+    await rm(path, { recursive: true, force: true });
+  }
+}
+
+async function withCatalogLock<T>(vaultRoot: string, operation: () => Promise<T>): Promise<T> {
+  const lock = join(vaultRoot, catalogLockName);
+  await removeLegacyCatalogLock(lock);
+  return withRunLock(lock, async () => {
+    await removeOrphanedCatalogStaging(vaultRoot);
+    return operation();
+  }, { jobId: 'flowmate-catalog' });
+}
+
+export async function applyCatalog(plan: CatalogPlan, options: CatalogPublishOptions = {}): Promise<void> {
   const targets = validatePlan(plan);
   await mkdir(plan.vaultRoot, { recursive: true });
   await assertDirectory(plan.vaultRoot, true);
-  const previousAssets = await loadAssetManifest(plan.vaultRoot);
-  const previousByPath = new Map(previousAssets?.assets.map(asset => [pathKey(asset.path), asset]) ?? []);
-  const lock = join(plan.vaultRoot, '.flowmate-catalog.lock');
-  try {
-    const lockInfo = await optionalLstat(lock);
-    if (lockInfo?.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
-    await mkdir(lock);
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') fail('CATALOG_LOCKED');
-    throw error;
-  }
-  const stagingRoot = join(plan.vaultRoot, `.flowmate-catalog-staging-${crypto.randomUUID()}`);
-  try {
-    await mkdir(stagingRoot);
-    await assertDirectory(stagingRoot);
-    for (const target of targets.filter(target => target.kind === 'directory')) await ensureDirectory(target.absolutePath, plan.vaultRoot);
-    for (const target of targets.filter(target => target.kind === 'file')) await assertFileOwnership(target.absolutePath);
-    for (const asset of plan.assets) await verifyAssetSource(asset);
-    for (const target of targets.filter(target => target.kind === 'file')) {
-      const file = plan.files.find(candidate => catalogPath(plan.vaultRoot, candidate.path) === target.absolutePath);
-      if (!file) fail('CATALOG_PLAN_INVALID');
-      await atomicWriteOwned(plan.vaultRoot, target.relativePath, file.content, stagingRoot);
+  await withCatalogLock(plan.vaultRoot, async () => {
+    const publishStartedAt = Date.now();
+    const publishTargets = targets.filter(target => target.kind !== 'directory');
+    await options.onProgress?.({ phase: 'publish', status: 'started', current: 0, total: publishTargets.length, detail: `目录 ${plan.directories.length} 个，文件 ${plan.files.length} 个，资产 ${plan.assets.length} 个`, elapsedMs: 0 });
+    const previousAssets = await loadAssetManifest(plan.vaultRoot) ?? await inferLegacyAssetManifest(plan);
+    const previousByPath = new Map(previousAssets?.assets.map(asset => [pathKey(asset.path), asset]) ?? []);
+    const stagingRoot = join(plan.vaultRoot, `${catalogStagingPrefix}${crypto.randomUUID()}`);
+    let published = 0;
+    const reportPublished = async (target: CatalogTarget): Promise<void> => {
+      published += 1;
+      await options.onProgress?.({ phase: 'publish', status: 'progress', current: published, total: publishTargets.length, item: target.relativePath, detail: '写入', elapsedMs: Date.now() - publishStartedAt });
+    };
+    try {
+      await mkdir(stagingRoot);
+      await assertDirectory(stagingRoot);
+      for (const target of targets.filter(target => target.kind === 'directory')) await ensureDirectory(target.absolutePath, plan.vaultRoot);
+      for (const target of targets.filter(target => target.kind === 'file')) await assertFileOwnership(target.absolutePath);
+      for (const asset of plan.assets) await verifyAssetSource(asset);
+      for (const target of targets.filter(target => target.kind === 'file')) {
+        const file = plan.files.find(candidate => catalogPath(plan.vaultRoot, candidate.path) === target.absolutePath);
+        if (!file) fail('CATALOG_PLAN_INVALID');
+        await atomicWriteOwned(plan.vaultRoot, target.relativePath, file.content, stagingRoot);
+        await reportPublished(target);
+      }
+      for (const target of targets.filter(target => target.kind === 'asset')) {
+        const asset = plan.assets.find(candidate => catalogPath(plan.vaultRoot, candidate.path) === target.absolutePath);
+        if (!asset) fail('CATALOG_PLAN_INVALID');
+        await atomicCopyAsset(plan.vaultRoot, asset, stagingRoot, previousByPath.get(pathKey(asset.path)));
+        await reportPublished(target);
+      }
+      await pruneObsoleteAssets(plan.vaultRoot, previousAssets, plan.assets);
+      await writeAssetManifest(plan.vaultRoot, plan.assets, stagingRoot);
+      await pruneObsoleteGenerated(plan);
+      await options.onProgress?.({ phase: 'publish', status: 'completed', current: publishTargets.length, total: publishTargets.length, detail: `文件 ${plan.files.length} 个，资产 ${plan.assets.length} 个`, elapsedMs: Date.now() - publishStartedAt });
+    } finally {
+      await rm(stagingRoot, { recursive: true, force: true });
     }
-    for (const target of targets.filter(target => target.kind === 'asset')) {
-      const asset = plan.assets.find(candidate => catalogPath(plan.vaultRoot, candidate.path) === target.absolutePath);
-      if (!asset) fail('CATALOG_PLAN_INVALID');
-      await atomicCopyAsset(plan.vaultRoot, asset, stagingRoot, previousByPath.get(pathKey(asset.path)));
-    }
-    await pruneObsoleteAssets(plan.vaultRoot, previousAssets, plan.assets);
-    await writeAssetManifest(plan.vaultRoot, plan.assets, stagingRoot);
-    await pruneObsoleteGenerated(plan);
-  } finally {
-    await rm(stagingRoot, { recursive: true, force: true });
-    await rm(lock, { recursive: true, force: true });
-  }
+  });
 }
 
 interface FileState { exists: boolean; generated: boolean }
@@ -467,6 +563,44 @@ interface AssetManifestEntry { path: string; sha256: string; bytes: number }
 interface AssetManifest { schema_version: 1; assets: AssetManifestEntry[] }
 
 function assetManifestPath(vaultRoot: string): string { return join(vaultRoot, '.flowmate-assets.json'); }
+
+function legacyAssetCardPath(assetPath: string): string | undefined {
+  const normalized = assetPath.replaceAll('\\', '/');
+  if (normalized.startsWith(`${vaultInvoicesRoot}/`)) {
+    const parts = normalized.slice(`${vaultInvoicesRoot}/`.length).split('/');
+    if (parts.length >= 2) return `${vaultInvoicesRoot}/${parts[0]}/${parts[1]}/invoice.md`;
+  }
+  if (normalized.startsWith(`${vaultKnowledgeRoot}/`)) {
+    const parts = normalized.slice(`${vaultKnowledgeRoot}/`.length).split('/');
+    if (parts.length >= 2) return `${vaultKnowledgeRoot}/${parts[0]}/${parts[1]}/knowledge.md`;
+  }
+  return undefined;
+}
+
+/**
+ * Reconstruct the previous asset manifest for the first rebuild after the
+ * manifest was introduced. Only assets beside a Flowmate-generated card are
+ * admitted, so an arbitrary file in the Vault is never silently replaced.
+ */
+async function inferLegacyAssetManifest(plan: CatalogPlan): Promise<AssetManifest | undefined> {
+  const assets: AssetManifestEntry[] = [];
+  for (const asset of plan.assets) {
+    const destination = catalogPath(plan.vaultRoot, asset.path);
+    const info = await optionalLstat(destination);
+    if (!info) continue;
+    if (info.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
+    if (!info.isFile()) failAsset('CATALOG_ASSET_CONFLICT', asset.path);
+    const cardRelativePath = legacyAssetCardPath(asset.path);
+    if (!cardRelativePath) continue;
+    const cardPath = catalogPath(plan.vaultRoot, cardRelativePath);
+    const card = await optionalLstat(cardPath);
+    if (!card) continue;
+    if (card.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
+    if (!card.isFile() || !isGenerated(await readFile(cardPath, 'utf8'))) continue;
+    assets.push({ path: asset.path, sha256: await sha256File(destination), bytes: Number(info.size) });
+  }
+  return assets.length > 0 ? { schema_version: 1, assets } : undefined;
+}
 
 async function loadAssetManifest(vaultRoot: string): Promise<AssetManifest | undefined> {
   const path = assetManifestPath(vaultRoot);
@@ -513,7 +647,7 @@ async function pruneObsoleteAssets(vaultRoot: string, previous: AssetManifest | 
     const info = await optionalLstat(destination);
     if (!info) continue;
     if (info.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
-    if (!info.isFile() || Number(info.size) !== entry.bytes || await sha256File(destination) !== entry.sha256) fail('CATALOG_ASSET_CONFLICT');
+    if (!info.isFile() || Number(info.size) !== entry.bytes || await sha256File(destination) !== entry.sha256) failAsset('CATALOG_ASSET_CONFLICT', entry.path);
     await assertVaultBound(vaultRoot, destination);
     await unlink(destination);
   }
@@ -659,10 +793,10 @@ async function atomicCopyAsset(vaultRoot: string, asset: CatalogAsset, stagingRo
   const existing = await optionalLstat(destination);
   if (existing) {
     if (existing.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
-    if (!existing.isFile()) fail('CATALOG_ASSET_CONFLICT');
+    if (!existing.isFile()) failAsset('CATALOG_ASSET_CONFLICT', asset.path);
     await assertVaultBound(vaultRoot, destination);
     if (Number(existing.size) === asset.bytes && await sha256File(destination) === asset.sha256) return;
-    if (!previous || Number(existing.size) !== previous.bytes || await sha256File(destination) !== previous.sha256) fail('CATALOG_ASSET_CONFLICT');
+    if (!previous || Number(existing.size) !== previous.bytes || await sha256File(destination) !== previous.sha256) failAsset('CATALOG_ASSET_CONFLICT', asset.path);
   }
 
   await assertVaultBound(vaultRoot, stagingRoot);
@@ -695,7 +829,7 @@ async function atomicCopyAsset(vaultRoot: string, asset: CatalogAsset, stagingRo
       if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) throw error;
       const raced = await optionalLstat(destination);
       if (raced?.isSymbolicLink()) fail('CATALOG_PATH_SYMLINK');
-      if (!raced?.isFile() || Number(raced.size) !== asset.bytes || await sha256File(destination) !== asset.sha256) fail('CATALOG_ASSET_CONFLICT');
+      if (!raced?.isFile() || Number(raced.size) !== asset.bytes || await sha256File(destination) !== asset.sha256) failAsset('CATALOG_ASSET_CONFLICT', asset.path);
       return;
     }
     if (moved) { await unlink(recovery); moved = false; }

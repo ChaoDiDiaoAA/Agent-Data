@@ -7,18 +7,19 @@ import { stdin, stdout } from 'node:process';
 import { loadPaths, loadSourceConfig, loadWorkbenchConfig, resolveOwnedPath, sampleAcquireCounts, sampleAcquireTotal } from './config.ts';
 import type { SourceTransport } from './sources/dataset-records.ts';
 import { createSourceHttp } from './sources/dataset-records.ts';
-import { acquireVoxel51Selection, assertVoxel51SelectionCounts, inspectVoxel51Selection, probeVoxel51, type AcquireProgress } from './sources/voxel51.ts';
+import { acquireVoxel51Selection, inspectVoxel51Selection, probeVoxel51, type AcquireProgress } from './sources/voxel51.ts';
 import { mapVoxel51Selection } from './labels/voxel51.ts';
 import { publishStructuredSnapshot } from './structured-snapshot.ts';
 import { parseSelection } from './process-samples.ts';
-import { canonicalJson, hashCanonical, loadSharedEngineNetwork, realTree, verifyNormalizedOutput, withRunLock, type ParseDependencies, type ParseProgress } from './engine-bridge.ts';
+import { assertProcessSafety, canonicalJson, createFlowmateMinerURuntime, hashCanonical, loadSharedEngineNetwork, realTree, verifyNormalizedOutput, withRunLock, type ParseDependencies, type ParseProgress } from './engine-bridge.ts';
 import { acquirePublicFiles, parsePublicKnowledge } from './sources/public-files.ts';
-import { rebuildCatalog } from './catalog.ts';
+import { rebuildCatalog, type CatalogProgress } from './catalog.ts';
 import { buildRelease, loadReleaseRecords, loadReleaseSourceConfig, verifyRelease } from './release.ts';
 import { createBackup, restoreBackup, verifyBackup, verifyRestoredBackup } from './backup.ts';
 import { verifyStructuredSnapshot } from './structured-snapshot.ts';
 import { sha256File } from './file-store.ts';
 import { redactErrorMessage } from '../../paper-knowledge-engine/src/shared/redaction.ts';
+import { createOrResumeTaskRun, markTaskStageCompleted, markTaskStageFailed, markTaskStageRunning, taskStageKeys, withTaskRunLock, type TaskRun, type TaskStage } from './task-run.ts';
 
 export const usage = 'Usage: flowmate-data [menu] | [--paths <path>] [--config <path>] <command> [--limit <n> | --with-publisher-annotation <n> --without-publisher-annotation <n>]';
 
@@ -128,7 +129,7 @@ function menuResultSummary(args: string[], value: unknown): string {
   if (args[0] === 'labels') {
     return `映射 ${String(result.mapped ?? 0)} 条，跳过无标注 ${String(result.skipped_unannotated ?? 0)} 条，提供 ${String(result.provided ?? 0)}，缺失 ${String(result.missing ?? 0)}，歧义 ${String(result.ambiguous ?? 0)}，镜像 ${String(result.snapshots ?? 0)}`;
   }
-  if (args[0] === 'parse') return `解析 ${String(result.parsed ?? 0)} 条`;
+  if (args[0] === 'parse') return `解析 ${String(result.parsed ?? 0)} 条，跳过 ${String(result.skipped ?? 0)} 条（共 ${String(result.total ?? result.parsed ?? 0)} 条）`;
   if (args[0] === 'catalog') return `写入 ${String(result.files ?? 0)} 个文件`;
   if (args[0] === 'release' && args[1] === 'build') return `version=${menuText(result.version, args[2] ?? 'unknown')}，条目 ${String(result.entries ?? 0)}，省略原件 ${String(result.omitted_originals ?? 0)}`;
   if (args[0] === 'release' && args[1] === 'verify') return `version=${menuText(result.version, args[2] ?? 'unknown')}，文件 ${String(result.files ?? 0)} 个`;
@@ -164,7 +165,11 @@ async function menuSelectionSummary(paths: ReturnType<typeof loadPaths>, workben
     const inspection = await inspectVoxel51Selection({ paths, config: source, selectionId: workbench.sample.selection_id });
     if (!inspection.exists) return '[选样] 尚未创建固定清单；执行任务时会按当前配置创建。';
     if (!inspection.counts) throw new Error('VOXEL51_SELECTION_INVALID');
-    assertVoxel51SelectionCounts(workbench.sample.selection_id, sampleAcquireCounts(workbench.sample), inspection.counts, inspection.path);
+    const requested = sampleAcquireCounts(workbench.sample);
+    if (inspection.counts.with_publisher_annotation !== requested.with_publisher_annotation
+      || inspection.counts.without_publisher_annotation !== requested.without_publisher_annotation) {
+      return `[选样] ${workbench.sample.selection_id} 当前为 ${inspection.recordCount ?? 0} 条；配置已改为 ${sampleAcquireTotal(workbench.sample)} 条，执行任务时会自动刷新。`;
+    }
     return `[选样] ${workbench.sample.selection_id} 已固定 ${inspection.recordCount ?? 0} 条，数量与当前配置一致。`;
   } catch (error) {
     return `[选样] ${menuErrorSummary(error)}`;
@@ -172,10 +177,7 @@ async function menuSelectionSummary(paths: ReturnType<typeof loadPaths>, workben
 }
 
 async function assertMenuSelectionReady(paths: ReturnType<typeof loadPaths>, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): Promise<void> {
-  const inspection = await inspectVoxel51Selection({ paths, config: source, selectionId: workbench.sample.selection_id });
-  if (!inspection.exists) return;
-  if (!inspection.counts) throw new Error('VOXEL51_SELECTION_INVALID');
-  assertVoxel51SelectionCounts(workbench.sample.selection_id, sampleAcquireCounts(workbench.sample), inspection.counts, inspection.path);
+  await inspectVoxel51Selection({ paths, config: source, selectionId: workbench.sample.selection_id });
 }
 
 function menuCommand(args: string[], pathsPath: string, configPath: string): string[] {
@@ -184,6 +186,10 @@ function menuCommand(args: string[], pathsPath: string, configPath: string): str
 
 function menuParseProgress(output: MenuOutput, progress: ParseProgress): void {
   const label = `[发票 ${progress.index}/${progress.total}] ${progress.sampleId}`;
+  if (progress.status === 'skipped') {
+    writeMenu(output, `${label} 跳过（已存在可复用解析结果）`);
+    return;
+  }
   if (progress.status === 'started') {
     writeMenu(output, `${label} 开始（MinerU）`);
     return;
@@ -223,6 +229,7 @@ interface MenuStep {
   phase: string;
   label: string;
   commands: string[][];
+  stageKeys: TaskStage[];
 }
 
 function menuTaskSteps(pathsPath: string, configPath: string, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>): MenuStep[] {
@@ -231,15 +238,35 @@ function menuTaskSteps(pathsPath: string, configPath: string, workbench: ReturnT
   const counts = sampleAcquireCounts(workbench.sample);
   const quantity = `${taskLimit} 条（带标注 ${counts.with_publisher_annotation}，无标注 ${counts.without_publisher_annotation}）`;
   return [
-    { phase: '探测', label: '探测公开来源', commands: [common(['source', 'probe', source.source_id])] },
-    { phase: '获取', label: `获取并固定 ${quantity} 发票`, commands: [common(['acquire', source.source_id])] },
-    { phase: '标签', label: `映射可用发布方标注并发布结构化镜像`, commands: [common(['labels', 'map', workbench.sample.dataset_id])] },
-    { phase: 'MinerU', label: `逐条解析 ${taskLimit} 条发票`, commands: [common(['parse'])] },
-    { phase: 'Obsidian', label: '构建 Obsidian 目录', commands: [common(['catalog', 'build'])] },
-    { phase: 'Release', label: `构建 Release（${workbench.release.version}）`, commands: [common(['release', 'build', workbench.release.version])] },
-    { phase: '校验', label: '校验 Release 和当前任务', commands: [common(['release', 'verify', workbench.release.version]), common(['verify'])] },
-    { phase: '备份', label: '创建备份', commands: [common(['backup', 'create'])] },
+    { phase: '探测', label: '探测公开来源', commands: [common(['source', 'probe', source.source_id])], stageKeys: ['probe'] },
+    { phase: '获取', label: `获取/刷新 ${quantity} 发票`, commands: [common(['acquire', source.source_id])], stageKeys: ['acquire'] },
+    { phase: '标签', label: `映射可用发布方标注并发布结构化镜像`, commands: [common(['labels', 'map', workbench.sample.dataset_id])], stageKeys: ['labels'] },
+    { phase: 'MinerU', label: `逐条解析 ${taskLimit} 条发票`, commands: [common(['parse'])], stageKeys: ['parse'] },
+    { phase: 'Obsidian', label: '构建 Obsidian 目录', commands: [common(['catalog', 'build'])], stageKeys: ['catalog'] },
+    { phase: 'Release', label: `构建 Release（${workbench.release.version}）`, commands: [common(['release', 'build', workbench.release.version])], stageKeys: ['release'] },
+    { phase: '校验', label: '校验 Release 和当前任务', commands: [common(['release', 'verify', workbench.release.version]), common(['verify'])], stageKeys: ['release_verify', 'verify'] },
+    { phase: '备份', label: '创建备份', commands: [common(['backup', 'create'])], stageKeys: ['backup'] },
   ];
+}
+
+async function menuTaskIdentity(paths: ReturnType<typeof loadPaths>, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>) {
+  let mineru: unknown = null;
+  try {
+    mineru = JSON.parse(await readFile(resolveOwnedPath(paths.projectRoot, 'config/mineru.local.json'), 'utf8'));
+  } catch (error) {
+    if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
+  }
+  const counts = sampleAcquireCounts(workbench.sample);
+  return {
+    source_id: workbench.sample.source_id,
+    dataset_id: workbench.sample.dataset_id,
+    selection_id: workbench.sample.selection_id,
+    counts,
+    // The same data root can be pointed at a different original/Vault root.
+    // Include all resolved roots so a resume can never bind records to a
+    // different filesystem layout by accident.
+    config_sha256: hashCanonical({ paths, workbench, source, mineru }),
+  };
 }
 
 /** Run the interactive Flowmate menu. The menu never asks for a quantity; it reads the local config. */
@@ -258,6 +285,7 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
     reader ??= createInterface({ input: options.input ?? stdin, output: output as NodeJS.WritableStream });
     return reader.question(prompt);
   });
+  let resumeTask = false;
   const invoke = async (args: string[]): Promise<{ code: number; result: unknown }> => {
     let result: unknown;
     const parseDependencies = args[0] === 'parse'
@@ -275,6 +303,7 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
     const code = await execute(args, {
       transport: options.transport,
       parseDependencies,
+      ...(args[0] === 'parse' ? { resumeTask } : {}),
       ...(acquireProgress ? { acquireProgress } : {}),
       print: value => { result = value; },
     });
@@ -310,49 +339,77 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
           continue;
         }
       }
-      const taskStartedAt = Date.now();
-      if (choice === '2') {
-        const counts = sampleAcquireCounts(workbench.sample);
-        const total = sampleAcquireTotal(workbench.sample);
-        writeMenu(output, `[任务] current / ${workbench.sample.dataset_id} / ${workbench.sample.selection_id} 开始`);
-        writeMenu(output, `[配置] ${configPath}；带发布方标注 ${counts.with_publisher_annotation} 条，无发布方标注 ${counts.without_publisher_annotation} 条，合计 ${total} 条`);
-        writeMenu(output, `[说明] 获取与 MinerU 解析使用同一批 ${total} 条发票；完成后构建 Obsidian、Release、校验和备份。`);
-      }
-      let failed = false;
-      const selectedSteps = stepsByChoice[choice]!;
-      for (let stepIndex = 0; stepIndex < selectedSteps.length; stepIndex += 1) {
-        const step = selectedSteps[stepIndex]!;
-        const progressLabel = `[${step.phase} ${stepIndex + 1}/${selectedSteps.length}] ${step.label}`;
-        for (let commandIndex = 0; commandIndex < step.commands.length; commandIndex += 1) {
-          const command = step.commands[commandIndex]!;
-          const stepStartedAt = Date.now();
-          try {
-            writeMenu(output, `${progressLabel} 开始（累计 ${menuDuration(Date.now() - taskStartedAt)}）`);
-            const result = await invoke(command);
-            if (result.code !== 0) {
-              writeMenu(output, `${progressLabel} 失败：退出码 ${result.code}`);
+      const runSelected = async () => {
+        const taskStartedAt = Date.now();
+        let taskRun: TaskRun | undefined;
+        resumeTask = false;
+        if (choice === '2') {
+          // Match PKE's workflow admission: reject an unconfirmed MinerU
+          // process before probe/acquisition can create more work.
+          await assertProcessSafety(createFlowmateMinerURuntime(paths).processContext);
+          const counts = sampleAcquireCounts(workbench.sample);
+          const total = sampleAcquireTotal(workbench.sample);
+          writeMenu(output, `[任务] current / ${workbench.sample.dataset_id} / ${workbench.sample.selection_id} 开始`);
+          writeMenu(output, `[配置] ${configPath}；带发布方标注 ${counts.with_publisher_annotation} 条，无发布方标注 ${counts.without_publisher_annotation} 条，合计 ${total} 条`);
+          writeMenu(output, `[说明] 获取与 MinerU 解析使用同一批 ${total} 条发票；完成后构建 Obsidian、Release、校验和备份。`);
+          const resumed = await createOrResumeTaskRun(paths, await menuTaskIdentity(paths, workbench, source));
+          taskRun = resumed.run;
+          resumeTask = resumed.resumed;
+          if (resumed.resumed) {
+            const completed = Object.values(taskRun.stages).filter(status => status === 'completed').length;
+            writeMenu(output, `[恢复] 继续 run ${taskRun.run_id}，已完成 ${completed}/${taskStageKeys.length} 个阶段。`);
+          }
+        }
+        let failed = false;
+        const selectedSteps = stepsByChoice[choice]!;
+        for (let stepIndex = 0; stepIndex < selectedSteps.length; stepIndex += 1) {
+          const step = selectedSteps[stepIndex]!;
+          const progressLabel = `[${step.phase} ${stepIndex + 1}/${selectedSteps.length}] ${step.label}`;
+          for (let commandIndex = 0; commandIndex < step.commands.length; commandIndex += 1) {
+            const command = step.commands[commandIndex]!;
+            const stageKey = step.stageKeys[commandIndex]!;
+            if (taskRun?.stages[stageKey] === 'completed') {
+              writeMenu(output, `[恢复] ${progressLabel}${step.commands.length > 1 ? ` 子步骤 ${commandIndex + 1}/${step.commands.length}` : ''} 已完成，跳过。`);
+              continue;
+            }
+            const stepStartedAt = Date.now();
+            try {
+              writeMenu(output, `${progressLabel} 开始（累计 ${menuDuration(Date.now() - taskStartedAt)}）`);
+              if (taskRun) await markTaskStageRunning(taskRun, stageKey);
+              const result = await invoke(command);
+              if (result.code !== 0) {
+                if (taskRun) await markTaskStageFailed(taskRun, stageKey);
+                writeMenu(output, `${progressLabel} 失败：退出码 ${result.code}`);
+                failed = true;
+                break;
+              }
+              if (taskRun) await markTaskStageCompleted(taskRun, stageKey);
+              const suffix = step.commands.length > 1 ? `（${commandIndex + 1}/${step.commands.length}）` : '';
+              writeMenu(output, `${progressLabel}${suffix} 完成：${menuResultSummary(command, result.result)}，耗时 ${menuDuration(Date.now() - stepStartedAt)}，累计 ${menuDuration(Date.now() - taskStartedAt)}`);
+            } catch (error) {
+              if (taskRun) await markTaskStageFailed(taskRun, stageKey);
+              writeMenu(output, `${progressLabel} 失败：${menuErrorSummary(error)}`);
               failed = true;
               break;
             }
-            const suffix = step.commands.length > 1 ? `（${commandIndex + 1}/${step.commands.length}）` : '';
-            writeMenu(output, `${progressLabel}${suffix} 完成：${menuResultSummary(command, result.result)}，耗时 ${menuDuration(Date.now() - stepStartedAt)}，累计 ${menuDuration(Date.now() - taskStartedAt)}`);
-          } catch (error) {
-            writeMenu(output, `${progressLabel} 失败：${menuErrorSummary(error)}`);
-            failed = true;
-            break;
           }
+          if (failed) break;
         }
-        if (failed) break;
+        if (!failed) writeMenu(output, choice === '2' ? `[任务] 完成，耗时 ${menuDuration(Date.now() - taskStartedAt)}` : `[操作] 完成，耗时 ${menuDuration(Date.now() - taskStartedAt)}`);
+        else if (choice === '2') writeMenu(output, '[任务] 未完成，可重新执行当前任务，系统会从断点继续。');
+      };
+      try {
+        await withTaskRunLock(paths, runSelected);
+      } catch (error) {
+        writeMenu(output, `${choice === '2' ? '[任务]' : '[操作]'} 失败：${menuErrorSummary(error)}`);
       }
-      if (!failed) writeMenu(output, choice === '2' ? `[任务] 完成，耗时 ${menuDuration(Date.now() - taskStartedAt)}` : `[操作] 完成，耗时 ${menuDuration(Date.now() - taskStartedAt)}`);
-      else if (choice === '2') writeMenu(output, '[任务] 未完成，可重新执行当前任务。');
     }
   } finally {
     reader?.close();
   }
 }
 
-export async function runCli(arguments_: string[], options: { transport?: SourceTransport; print?: (value: unknown) => void; parseDependencies?: ParseDependencies; acquireProgress?: (progress: AcquireProgress) => void | Promise<void> } = {}): Promise<number> {
+export async function runCli(arguments_: string[], options: { transport?: SourceTransport; print?: (value: unknown) => void; parseDependencies?: ParseDependencies; acquireProgress?: (progress: AcquireProgress) => void | Promise<void>; catalogProgress?: (progress: CatalogProgress) => void | Promise<void>; resumeTask?: boolean } = {}): Promise<number> {
   const positional: string[] = [];
   const flags = new Map<string, string>();
   let publishSnapshotFlag = false;
@@ -442,7 +499,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
   const backupVerify = backupVerifyFlag || workbench.backup.verify;
   const restoreSmoke = restoreSmokeFlag || workbench.backup.restore_smoke;
   if (catalogBuild) {
-    const plan = await rebuildCatalog(paths);
+    const plan = await rebuildCatalog(paths, { onProgress: options.catalogProgress });
     (options.print ?? (value => console.log(JSON.stringify(value, null, 2))))({ files: plan.files.length });
     return 0;
   }
@@ -508,7 +565,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
     return 0;
   }
   if (parse) {
-    const result = await parseSelection({ paths, selectionId, ...(parseLimit === undefined ? {} : { limit: parseLimit }) }, options.parseDependencies);
+    const result = await parseSelection({ paths, selectionId, ...(parseLimit === undefined ? {} : { limit: parseLimit }), ...(options.resumeTask ? { resume: true } : {}) }, options.parseDependencies);
     (options.print ?? (value => console.log(JSON.stringify(value, null, 2))))(result);
     return 0;
   }

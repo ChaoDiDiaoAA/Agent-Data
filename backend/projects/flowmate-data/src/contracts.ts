@@ -40,8 +40,11 @@ export interface SourceConfig {
 export interface WorkbenchConfig {
   schema_version: 1;
   sample: {
+    /** Runtime-resolved source identity; omitted from new local config files. */
     source_id: string;
+    /** Runtime-resolved dataset identity; omitted from new local config files. */
     dataset_id: string;
+    /** Runtime selection key; new local config files use the internal `current` default. */
     selection_id: string;
     /**
      * Counts are split by whether the public dataset supplies a publisher
@@ -53,10 +56,12 @@ export interface WorkbenchConfig {
     publish_snapshot: boolean;
   };
   knowledge: {
+    /** Runtime defaults to empty because only the Voxel51 invoice source is enabled. */
     source_ids: string[];
     parse_source_ids: string[];
   };
   release: {
+    /** Runtime default is `public-invoice-p0-v1`; new local config files omit it. */
     version: string;
     include_originals: boolean;
   };

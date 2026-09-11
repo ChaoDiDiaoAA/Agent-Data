@@ -11,6 +11,16 @@ const sourceFields = [
   'redistribution', 'origin_kind', 'language', 'document_kind', 'applicable_period',
 ] as const;
 
+/**
+ * The current workbench has one supported invoice source.  These defaults are
+ * kept in code so the local workbench file only contains values that operators
+ * actually change between runs (primarily the acquisition split).
+ */
+export const DEFAULT_WORKBENCH_SOURCE_ID = 'voxel51-invoice-ocr';
+export const DEFAULT_WORKBENCH_DATASET_ID = 'voxel51-hq-invoice-ocr';
+export const DEFAULT_WORKBENCH_SELECTION_ID = 'current';
+export const DEFAULT_WORKBENCH_RELEASE_VERSION = 'public-invoice-p0-v1';
+
 function fail(code: string): never {
   throw new Error(code);
 }
@@ -154,11 +164,11 @@ export function loadSourceConfig(path: string): SourceConfig {
 export function validateWorkbenchConfig(value: unknown): WorkbenchConfig {
   const config = closedObject(value, ['schema_version', 'sample', 'knowledge', 'release', 'backup']);
   const sample = closedObject(config.sample, ['source_id', 'dataset_id', 'selection_id', 'acquire', 'acquire_limit', 'publish_snapshot']);
-  const knowledge = closedObject(config.knowledge, ['source_ids', 'parse_source_ids']);
+  const knowledge = config.knowledge === undefined ? {} : closedObject(config.knowledge, ['source_ids', 'parse_source_ids']);
   const release = closedObject(config.release, ['version', 'include_originals']);
   const backup = closedObject(config.backup, ['verify', 'restore_smoke']);
-  const sourceIds = stringArray(knowledge.source_ids).map(safeConfigId);
-  const parseSourceIds = stringArray(knowledge.parse_source_ids).map(safeConfigId);
+  const sourceIds = knowledge.source_ids === undefined ? [] : stringArray(knowledge.source_ids).map(safeConfigId);
+  const parseSourceIds = knowledge.parse_source_ids === undefined ? [] : stringArray(knowledge.parse_source_ids).map(safeConfigId);
   if (parseSourceIds.some(sourceId => !sourceIds.includes(sourceId))) fail('INVALID_CONFIG');
   if (sample.acquire !== undefined && sample.acquire_limit !== undefined) fail('INVALID_CONFIG');
   let acquire: AcquireCounts | undefined;
@@ -179,14 +189,16 @@ export function validateWorkbenchConfig(value: unknown): WorkbenchConfig {
   return {
     schema_version: config.schema_version === 1 ? 1 : fail('INVALID_CONFIG'),
     sample: {
-      source_id: safeConfigId(sample.source_id),
-      dataset_id: safeConfigId(sample.dataset_id),
-      selection_id: safeConfigId(sample.selection_id),
+      // These fields remain accepted for old local files and scripts, but are
+      // optional.  New configs use the fixed defaults above instead.
+      source_id: sample.source_id === undefined ? DEFAULT_WORKBENCH_SOURCE_ID : safeConfigId(sample.source_id),
+      dataset_id: sample.dataset_id === undefined ? DEFAULT_WORKBENCH_DATASET_ID : safeConfigId(sample.dataset_id),
+      selection_id: sample.selection_id === undefined ? DEFAULT_WORKBENCH_SELECTION_ID : safeConfigId(sample.selection_id),
       ...(acquire ? { acquire } : { acquire_limit: positiveInteger(sample.acquire_limit) }),
       publish_snapshot: booleanValue(sample.publish_snapshot),
     },
     knowledge: { source_ids: sourceIds, parse_source_ids: parseSourceIds },
-    release: { version: safeConfigId(release.version), include_originals: booleanValue(release.include_originals) },
+    release: { version: release.version === undefined ? DEFAULT_WORKBENCH_RELEASE_VERSION : safeConfigId(release.version), include_originals: booleanValue(release.include_originals) },
     backup: { verify: booleanValue(backup.verify), restore_smoke: booleanValue(backup.restore_smoke) },
   };
 }

@@ -163,6 +163,24 @@ describe('interactive CLI menu', () => {
     expect(output).toContain('[发票 2/2] invoice-b 开始（获取，无标注）');
   });
 
+  test('prints only Obsidian stage boundaries while the catalog is building', async () => {
+    const { pathsPath, configPath } = await menuFixture(2);
+    const answers = ['2', '0'];
+    const lines: string[] = [];
+    await runMenu({
+      pathsPath,
+      configPath,
+      ask: async () => answers.shift()!,
+      output: fakeOutput(lines),
+      execute: async () => 0,
+    });
+    const output = lines.join('');
+    expect(output).toContain('[Obsidian 5/8] 构建 Obsidian 目录 开始');
+    expect(output).toContain('[Obsidian 5/8] 构建 Obsidian 目录 完成');
+    expect(output).not.toContain('[Obsidian] 目录资产');
+    expect(output).not.toContain('[Obsidian] 写入');
+  });
+
   test('maps verify and backup entries to the correct commands', async () => {
     const verification = await runChoice('3');
     expect(verification.commands).toHaveLength(2);
@@ -195,7 +213,57 @@ describe('interactive CLI menu', () => {
     expect(output).not.toContain('"source_id"');
   });
 
-  test('blocks a changed task quantity before running any pipeline step', async () => {
+  test('resumes the failed task at its first incomplete stage', async () => {
+    const fixture = await menuFixture(2);
+    const firstAnswers = ['2', '0'];
+    const firstCommands: string[][] = [];
+    const firstLines: string[] = [];
+    await runMenu({
+      pathsPath: fixture.pathsPath,
+      configPath: fixture.configPath,
+      ask: async () => firstAnswers.shift()!,
+      output: fakeOutput(firstLines),
+      execute: async args => {
+        firstCommands.push(args);
+        if (args[0] === 'parse') throw new Error('INTERRUPTED');
+        return 0;
+      },
+    });
+    expect(firstCommands.map(command => command[0])).toEqual(['source', 'acquire', 'labels', 'parse']);
+
+    const resumedAnswers = ['2', '0'];
+    const resumedCommands: string[][] = [];
+    const resumedLines: string[] = [];
+    await runMenu({
+      pathsPath: fixture.pathsPath,
+      configPath: fixture.configPath,
+      ask: async () => resumedAnswers.shift()!,
+      output: fakeOutput(resumedLines),
+      execute: async args => { resumedCommands.push(args); return 0; },
+    });
+    expect(resumedCommands.map(command => command[0])).toEqual(['parse', 'catalog', 'release', 'release', 'verify', 'backup']);
+    expect(resumedLines.join('')).toContain('[恢复]');
+  });
+
+  test('checks MinerU process safety before starting any task stage', async () => {
+    const fixture = await menuFixture(2);
+    await mkdir(join(fixture.dataRoot, 'work', 'processes'), { recursive: true });
+    await writeFile(join(fixture.dataRoot, 'work', 'processes', 'active.json'), '{}');
+    const answers = ['2', '0'];
+    const commands: string[][] = [];
+    const lines: string[] = [];
+    await runMenu({
+      pathsPath: fixture.pathsPath,
+      configPath: fixture.configPath,
+      ask: async () => answers.shift()!,
+      output: fakeOutput(lines),
+      execute: async args => { commands.push(args); return 0; },
+    });
+    expect(commands).toHaveLength(0);
+    expect(lines.join('')).toContain('PROCESS_CLEANUP_UNCONFIRMED');
+  });
+
+  test('allows a changed task quantity and refreshes the configured selection during acquisition', async () => {
     const { pathsPath, configPath, dataRoot } = await menuFixture(7);
     const selectionDirectory = join(dataRoot, 'tasks', 'voxel51', 'selections');
     await mkdir(selectionDirectory, { recursive: true });
@@ -222,11 +290,9 @@ describe('interactive CLI menu', () => {
       execute: async args => { commands.push(args); return 0; },
     });
     const output = lines.join('');
-    expect(commands).toHaveLength(0);
-    expect(output).toContain('SELECTION_LIMIT_CONFLICT');
-    expect(output).toContain('已固定为带发布方标注 2 条');
-    expect(output).toContain('当前配置请求带发布方标注 7 条');
-    expect(output).toContain('请更换 selection_id');
-    expect(output).not.toContain('[探测 1/8]');
+    expect(commands).toHaveLength(9);
+    expect(commands[1]).toContain('acquire');
+    expect(output).toContain('[探测 1/8]');
+    expect(output).not.toContain('SELECTION_LIMIT_CONFLICT');
   });
 });

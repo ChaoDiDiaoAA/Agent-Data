@@ -26,7 +26,8 @@ bun src/cli.ts <command> --paths config/paths.local.json --config config/workben
 `sample.acquire.without_publisher_annotation` 分别决定两类发票的数量，二者都会获取并交给 MinerU 解析。
 菜单会在进入时显示这个任务数量，不会再要求手工输入数量，也不会为菜单生成 `--limit` 参数；修改配置后重新运行命令即可。
 
-`paths.local.json`、`workbench.local.json` 和 `mineru.local.json` 都是本机文件，不提交到 Git。仓库不再保留 `*.example.json` 模板；首次使用按下面的完整结构创建这三个文件：
+`paths.local.json` 是本机路径文件，不提交到 Git；当前工作区保留并跟踪 `workbench.local.json` 与
+`mineru.local.json`，修改这两个配置后可以直接提交和运行。仓库不再保留 `*.example.json` 模板；首次使用按下面的完整结构创建这三个文件：
 
 创建 `config/paths.local.json`：
 
@@ -47,20 +48,13 @@ bun src/cli.ts <command> --paths config/paths.local.json --config config/workben
 {
   "schema_version": 1,
   "sample": {
-    "source_id": "voxel51-invoice-ocr",
-    "dataset_id": "voxel51-hq-invoice-ocr",
-    "selection_id": "initial-20",
     "acquire": {
       "with_publisher_annotation": 10,
       "without_publisher_annotation": 10
     },
     "publish_snapshot": true
   },
-  "knowledge": {
-    "source_ids": [],
-    "parse_source_ids": []
-  },
-  "release": { "version": "public-invoice-p0-v1", "include_originals": false },
+  "release": { "include_originals": false },
   "backup": { "verify": true, "restore_smoke": true }
 }
 ```
@@ -175,7 +169,7 @@ FSD 正在解析论文时，Flowmate 会在启动前明确报告 `MINERU_RESOURC
 | 文件 | 来源 | 实际获取位置 |
 |---|---|---|
 | `sources/voxel51-invoice-ocr.json` | Voxel51 发票图片数据集 | `revision.url` 获取固定 revision；`record_locator.file_url_template` 获取 `samples.json` 和每条图片；`record_locator.index_path` 指定索引文件 |
-| `workbench.local.json` | 选择启用哪些来源 | `sample.source_id` 选择样本来源；当前 `knowledge.source_ids` 和 `parse_source_ids` 都为空 |
+| `workbench.local.json` | 设置本次两类样本的数量 | 来源和数据集固定为 Voxel51；这里只修改 `sample.acquire` |
 
 Voxel51 是当前唯一登记的原始数据来源。数据集卡片声明总计 8,181 张发票图片，其中 1,489 条带结构化标注；获取流程先访问 revision API 和 `samples.json`，按来源 record ID 分别选择带发布方标注和无发布方标注记录，然后下载选中的图片。带标注记录另存发布方原始标注；无标注记录不会生成伪造标注。不会因为页面显示的总样本数而下载整个数据集。
 
@@ -211,7 +205,7 @@ bun src/cli.ts parse --limit 3 --paths config/paths.local.json --config config/w
 
 上面的 `--limit` 只适合高级模式下临时覆盖单个子命令，兼容旧脚本时表示带发布方标注数量。要在高级模式分别指定两类数量，可对 `acquire` 使用 `--with-publisher-annotation` 和 `--without-publisher-annotation`；菜单始终使用配置中的两个字段，因此获取和解析数量一致。
 
-当前没有启用额外知识来源；`knowledge.source_ids` 和 `knowledge.parse_source_ids` 必须保持空数组。保留 `public-files` 读取器代码是为了复用和后续扩展，不代表当前会下载其他来源。
+当前没有启用额外知识来源；新配置不再填写 `knowledge`。代码中的 `public-files` 读取器只为后续扩展保留，不代表当前会下载其他来源。
 
 ## 文件一：`paths.local.json`
 
@@ -275,7 +269,7 @@ bun src/cli.ts catalog build --paths config/paths.local.json --config config/wor
 
 ## 文件二：`workbench.local.json`
 
-这个文件控制一次工作台运行的默认行为。它是本机配置，不提交到 Git。
+这个文件控制一次工作台运行的默认行为。当前工作区跟踪它，修改数量后直接重新运行即可。
 
 ### 顶层参数
 
@@ -283,17 +277,13 @@ bun src/cli.ts catalog build --paths config/paths.local.json --config config/wor
 |---|---|---|
 | `schema_version` | `1` | 工作台配置格式版本；当前只能是 `1` |
 | `sample` | object | 样本数据集采集和解析默认值 |
-| `knowledge` | object | 预留知识来源和解析范围；当前两个列表均为空 |
-| `release` | object | Release 默认版本和是否复制原件 |
+| `release` | object | Release 是否复制原件 |
 | `backup` | object | 备份命令默认校验和恢复演练开关 |
 
 ### `sample` 参数
 
 | 参数 | 作用 | 当前值 |
 |---|---|---|
-| `source_id` | 样本来源登记 ID；程序读取 `sources/<source_id>.json` | `voxel51-invoice-ocr` |
-| `dataset_id` | 数据集身份标识，保存在记录中；该来源的磁盘目录使用短名 `voxel51` | `voxel51-hq-invoice-ocr` |
-| `selection_id` | 固定选样清单 ID；第一次采集提交清单，之后按同一清单重试 | `initial-20` |
 | `acquire.with_publisher_annotation` | 当前任务选取、下载并交给 `parse` 命令处理的带发布方标注样本数 | `10` |
 | `acquire.without_publisher_annotation` | 当前任务选取、下载并交给 `parse` 命令处理的无发布方标注样本数 | `10` |
 | `acquire` | 两个数量之和，即当前任务获取与 MinerU 解析总数 | `20` |
@@ -301,64 +291,22 @@ bun src/cli.ts catalog build --paths config/paths.local.json --config config/wor
 
 旧配置中的 `sample.acquire_limit` 仍可被读取并按“全部带发布方标注”兼容处理，但新配置不要再使用它；只要同时需要两类样本，就必须填写上面的 `acquire` 对象。
 
-`selection_id` 不是目录名数量，也不是随机种子，而是固定选样清单的名称。它对应
-`dataRoot/tasks/voxel51/selections/<selection_id>.json`，其中保存 revision、具体 record ID、
-图片路径、标注定位和 selection hash。首次执行会按 `acquire` 的两组数量生成并提交清单；
-已提交 selection 存在时，使用相同 ID 和相同数量重跑会复用完全相同的记录，不会重新选择另一批
-发票。发票编号单独持久化，增加任务数量不会重排已有编号。
-
-选样清单一旦提交，带发布方标注数和无发布方标注数就与 `selection_id` 一起固定。此后只要
-修改 `sample.acquire` 中任意一个数量，就必须同时更换 `selection_id`；即使总数不变、只是
-调整两类样本比例，也不能继续复用原 ID。菜单会在探测、下载和 MinerU 之前读取本地清单并
-比较两组数量；发现不一致时停止，并显示已固定数量、当前配置数量以及可直接参考的新 ID。
-尚未生成清单的首次运行前可以直接调整数量，但建议让 ID 与批次含义一致。只修改 MinerU、
-Release、备份或路径参数时，不需要更换 `selection_id`。旧清单和已下载数据会保留，新 ID 表示
-一个新的可复现批次。
-
-例如，20 条（10 条带标注、10 条无标注）使用：
-
-```json
-"selection_id": "initial-20",
-"acquire": {
-  "with_publisher_annotation": 10,
-  "without_publisher_annotation": 10
-}
-```
-
-改为 40 条（20+20）时使用新的 ID：
-
-```json
-"selection_id": "initial-40-a20-u20",
-"acquire": {
-  "with_publisher_annotation": 20,
-  "without_publisher_annotation": 20
-}
-```
-
-### `knowledge` 参数
-
-| 参数 | 作用 |
-|---|---|
-| `source_ids` | 允许 `knowledge acquire` 采集的来源 ID 列表；每个 ID 对应 `sources/<source_id>.json` |
-| `parse_source_ids` | 允许 `knowledge parse` 解析的来源 ID 列表；必须是 `source_ids` 的子集 |
-
-当前默认值：
-
-```json
-"source_ids": [],
-"parse_source_ids": []
-```
-
-当前不启用额外知识来源；`public-files` 读取器仍保留在代码中，后续需要扩展时再登记来源配置。
+来源固定为 `voxel51-invoice-ocr`，数据集固定为 `voxel51-hq-invoice-ocr`，当前选样清单内部使用
+`current` 名称保存到 `dataRoot/tasks/voxel51/selections/current.json`。因此只需修改
+`sample.acquire`，不需要维护 `source_id`、`dataset_id` 或 `selection_id`。同一数量重跑会复用清单；
+数量变化时程序会自动刷新清单，旧的原件、record 和发票编号仍保留。额外知识来源当前不启用，
+代码中的 `public-files` 读取器只为后续扩展保留。
 
 ### `release` 参数
 
 | 参数 | 作用 |
 |---|---|
-| `version` | `release build` 未提供版本参数时使用的 Release 目录名，例如 `public-invoice-p0-v1` |
 | `include_originals` | 是否尝试把允许再分发的原件复制到 Release；`false` 时只发布索引、记录、标签、解析结果和来源证据 |
 
 即使设置 `include_originals=true`，来源的 `redistribution` 不是 `allowed` 时也会失败，不会绕过许可限制。
+
+Release 输出版本固定为 `public-invoice-p0-v1`。内容变化时会在校验通过后自动重建同名目录，
+因此修改 `sample.acquire` 后不需要同步修改版本号；如果需要保留旧版本，请先复制 Release 目录或创建备份。
 
 ### `backup` 参数
 
@@ -373,7 +321,7 @@ Release、备份或路径参数时，不需要更换 `selection_id`。旧清单�
 
 ## 文件三：`mineru.local.json`
 
-这个文件只描述 Flowmate 调用 MinerU 所需的本机运行环境，不描述来源和样本数量。
+这个文件只描述 Flowmate 调用 MinerU 所需的本机运行环境，不描述来源和样本数量；当前工作区跟踪已确认的运行配置。
 它的 `mineru` 对象沿用共享 MinerU runner 的字段名称，但值由 Flowmate 单独维护；
 `tempRoot`、`outputRoot` 和论文库身份不会从文件读取，而是固定派生为
 `dataRoot/work` 和程序数据根，并且不设置 `libraryId/libraryPaths`。
@@ -462,8 +410,8 @@ MinerU API 下载结果先写入 `dataRoot/work` 下的短临时目录，规整�
 | 参数 | 作用 |
 |---|---|
 | `schema_version` | 来源登记格式版本，当前为 `1` |
-| `source_id` | 来源身份；必须与 workbench 的 `sample.source_id` 一致 |
-| `dataset_id` | 来源数据集身份；必须与 workbench 的 `sample.dataset_id` 一致 |
+| `source_id` | 来源身份；当前固定为 `voxel51-invoice-ocr`，由程序与工作台内部默认值校验 |
+| `dataset_id` | 来源数据集身份；当前固定为 `voxel51-hq-invoice-ocr`，由程序与工作台内部默认值校验 |
 | `reader` | 读取器类型；Voxel51 使用 `dataset-records` |
 | `homepage` | 来源说明页，用于记录 provenance 和卡片链接 |
 | `record_count` | 数据集总发票图片数；当前为 `8181` |
@@ -509,6 +457,17 @@ origin 加入本文件并补充回归测试，不能改成通配符或自动接�
 
 菜单使用 `workbench.local.json` 的 `sample.acquire` 作为数量的唯一来源；选择采集或解析时不会要求输入数量，也不会自动添加 `--limit`。获取和 MinerU 菜单步骤都会按顺序处理每条发票，并显示 `[发票 i/总数]` 的开始、完成或失败状态；获取进度还会标明“带标注/无标注”。直接子命令仍支持命令行参数，适合调试、自动化和兼容已有脚本。
 
+构建 Obsidian 时，菜单只显示 `[Obsidian 5/8] 构建 Obsidian 目录` 阶段的开始和完成行，不逐文件打印目录内部进度；开始后暂时没有新行时，表示正在进行来源校验、目录写入或清理。
+
+菜单选择 **2** 执行的是一个完整工作流。运行状态保存在
+`dataRoot/tasks/voxel51/runs/<run-id>/run.json`，同级任务锁覆盖整个工作流；如果进程中断或某个阶段失败，重新运行菜单并再次选择 **2** 会自动恢复相同配置下最近的未完成批次，跳过已经完成的阶段。MinerU 还会按原图 SHA-256、解析器身份、`parse.json` 和结构化文件清单验证已完成发票，只有验证通过的记录才会跳过。修改数量、`selection_id`、来源或 `mineru.local.json` 后，配置身份改变，会创建新的批次。
+
+Obsidian 发布阶段另外使用 `vaultRoot/.flowmate-catalog.lock` 文件锁，文件中保存进程 PID 和启动身份。正常退出会清理锁；进程异常中止后，下一次目录构建会只回收已经退出进程的锁，并删除工具生成的 `.flowmate-catalog-staging-*` 孤立目录。空的旧版锁目录会自动迁移清理；没有 `.flowmate-assets.json` 的旧 Vault 只会在发票目录卡片带 `generated_by: flowmate-data` 时重建一次旧资产清单并刷新副本；非空目录、符号链接、未标记卡片和用户文件会保留并报告包含相对路径的冲突，不会自动删除。
+
+任务开始前还会检查 `dataRoot/work/processes/active.json`。存在未确认清理的 MinerU 进程记录时会在探测前停止；应按
+[Paper Knowledge Engine 运行时手册](../../paper-knowledge-engine/src/runtime/README.md)
+先执行 `--inspect` / `--resolve`，确认安全后再重新选择 **2**，不能直接删除记录。
+
 从高到低依次是：
 
 1. 命令行显式参数，例如 `--limit 3`、`--with-publisher-annotation 5 --without-publisher-annotation 2`、`--selection regression-2026-09`。
@@ -527,7 +486,7 @@ bun src/cli.ts acquire voxel51-invoice-ocr --limit 5 --paths config/paths.local.
 # 分别取 5 条带标注和 2 条无标注（高级模式临时覆盖）
 bun src/cli.ts acquire voxel51-invoice-ocr --with-publisher-annotation 5 --without-publisher-annotation 2 --paths config/paths.local.json --config config/workbench.local.json
 
-# 解析已提交 selection 中的全部样本；获取和解析数量由 selection 固定
+# 解析当前 selection 中的全部样本；数量来自 workbench.local.json，数量变化时 selection 会自动刷新
 bun src/cli.ts parse --paths config/paths.local.json --config config/workbench.local.json
 
 # 仅调试时临时解析前 2 条（不会改变 selection）
@@ -539,7 +498,7 @@ bun src/cli.ts parse --limit 2 --paths config/paths.local.json --config config/w
 
 以下规则固定在实现中，不能通过配置扩大范围：
 
-- 下载和解析并发固定为 1，并使用 `dataRoot/work/run.lock` 串行化任务。
+- 单个发票下载和解析并发固定为 1；完整菜单任务另使用 `dataRoot/tasks/voxel51/task.lock`，各阶段内部使用 `dataRoot/work/run.lock` 串行化。
 - Voxel51 revision API 读取上限为 2 MiB，`samples.json` 索引读取上限为 16 MiB，单张图片下载上限为 32 MiB。
 - 重定向只能去 `redirect_origins` 明确登记的 origin。
 - 不建立通用爬虫，不执行网页脚本，不把发现的新链接自动加入采集范围。

@@ -246,6 +246,11 @@ function selectionCountText(counts: AcquireCounts): string {
   return `带发布方标注 ${counts.with_publisher_annotation} 条、无发布方标注 ${counts.without_publisher_annotation} 条（共 ${counts.with_publisher_annotation + counts.without_publisher_annotation} 条）`;
 }
 
+function sameAcquireCounts(left: AcquireCounts, right: AcquireCounts): boolean {
+  return left.with_publisher_annotation === right.with_publisher_annotation
+    && left.without_publisher_annotation === right.without_publisher_annotation;
+}
+
 function selectionLimitConflict(selectionId: string, expectedCounts: AcquireCounts, actualCounts: AcquireCounts, selectionFile?: string): Error {
   const suggestedId = `${selectionId}-a${expectedCounts.with_publisher_annotation}-u${expectedCounts.without_publisher_annotation}`;
   const location = selectionFile ? `；固定清单路径：${selectionFile}` : '';
@@ -323,21 +328,25 @@ async function acquireVoxel51SelectionUnlocked(options: {
   const selectionPath = data(`selections/${selectionId}.json`);
   const indexPath = data(`selections/${selectionId}.index.json`);
   const saved = await optionalBytes(selectionPath);
-  let selection: StoredSelection;
-  let records: Voxel51Record[];
+  let selection: StoredSelection | undefined;
+  let records: Voxel51Record[] = [];
   if (saved) {
-    selection = checkSelection(saved, config, selectionId, counts, selectionPath);
-    let cached: Uint8Array | undefined = await optionalBytes(indexPath);
-    if (!cached) {
-      // A committed manifest is the recovery intent; never resolve main again to fill its cache.
-      const result = await transport.http.get(selection.index_url, metadataScope(config, 16 * 1024 * 1024));
-      if (digest(result.bytes) !== selection.index_sha256) return fail('VOXEL51_INDEX_HASH_MISMATCH');
-      await immutableBytes(indexPath, result.bytes);
-      cached = result.bytes;
+    const existing = parseStoredSelection(saved, config, selectionId);
+    if (sameAcquireCounts(existing.counts, counts)) {
+      selection = existing;
+      let cached: Uint8Array | undefined = await optionalBytes(indexPath);
+      if (!cached) {
+        // A committed manifest is the recovery intent; never resolve main again to fill its cache.
+        const result = await transport.http.get(selection.index_url, metadataScope(config, 16 * 1024 * 1024));
+        if (digest(result.bytes) !== selection.index_sha256) return fail('VOXEL51_INDEX_HASH_MISMATCH');
+        await immutableBytes(indexPath, result.bytes);
+        cached = result.bytes;
+      }
+      if (digest(cached) !== selection.index_sha256) return fail('VOXEL51_INDEX_HASH_MISMATCH');
+      records = readVoxel51Index(cached);
     }
-    if (digest(cached) !== selection.index_sha256) return fail('VOXEL51_INDEX_HASH_MISMATCH');
-    records = readVoxel51Index(cached);
-  } else {
+  }
+  if (!selection) {
     const revision = await resolveHuggingFaceRevision(config, { http: transport.http });
     const index = await readIndex(config, revision, transport);
     const selected = selectVoxel51(index.records, { counts, revision });
@@ -356,7 +365,9 @@ async function acquireVoxel51SelectionUnlocked(options: {
     // Recover the old cache-first ordering: without a manifest, this cache has no committed identity.
     // Remove it before committing intent so a crash cannot bind an old cache to a new revision.
     await unlink(indexPath).catch(error => { if (error.code !== 'ENOENT') throw error; });
-    await immutableBytes(selectionPath, Buffer.from(canonicalJson(selection)));
+    // The workbench config is the current task intent.  A changed acquire split refreshes
+    // the same logical selection instead of requiring a new selection_id in the config.
+    await writeCanonicalJson(selectionPath, selection);
     await immutableBytes(indexPath, index.bytes);
     records = index.records;
   }

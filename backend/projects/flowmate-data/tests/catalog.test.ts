@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { FlowmatePaths } from '../src/contracts.ts';
-import { applyCatalog, buildCatalog, type CatalogPlan } from '../src/catalog.ts';
+import { applyCatalog, buildCatalog, type CatalogPlan, type CatalogProgress } from '../src/catalog.ts';
 import { sha256File } from '../src/file-store.ts';
 import { runCli } from '../src/cli.ts';
 import { saveSampleRecord, type SampleRecord } from '../src/task-store.ts';
@@ -65,6 +65,30 @@ test('creates only the compact invoice catalog directories for an empty vault', 
   }
 });
 
+test('recovers a legacy catalog lock and removes orphaned staging before rebuilding', async () => {
+  const paths = await fixturePaths();
+  await mkdir(join(paths.vaultRoot, '.flowmate-catalog.lock'), { recursive: true });
+  await mkdir(join(paths.vaultRoot, '.flowmate-catalog-staging-legacy'), { recursive: true });
+  await Bun.write(join(paths.vaultRoot, '.flowmate-catalog-staging-legacy', 'partial.tmp'), 'partial');
+
+  await applyCatalog(await buildCatalog(paths));
+
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/indexes/overview.md')).exists()).toBe(true);
+  expect(await Bun.file(join(paths.vaultRoot, '.flowmate-catalog.lock')).exists()).toBe(false);
+  expect(await Bun.file(join(paths.vaultRoot, '.flowmate-catalog-staging-legacy', 'partial.tmp')).exists()).toBe(false);
+});
+
+test('reclaims a stale owner catalog lock without blocking a rebuild', async () => {
+  const paths = await fixturePaths();
+  await mkdir(paths.vaultRoot, { recursive: true });
+  await writeFile(join(paths.vaultRoot, '.flowmate-catalog.lock'), JSON.stringify({ pid: process.pid, startedAt: 'stale-process-identity', jobId: 'flowmate-catalog', token: 'stale-token' }));
+
+  await applyCatalog(await buildCatalog(paths));
+
+  expect(await Bun.file(join(paths.vaultRoot, 'Evidence/indexes/overview.md')).exists()).toBe(true);
+  expect(await Bun.file(join(paths.vaultRoot, '.flowmate-catalog.lock')).exists()).toBe(false);
+});
+
 test('builds deterministic Obsidian cards and a compact overview from machine records', async () => {
   const paths = await fixturePaths();
   await seed(paths);
@@ -107,6 +131,31 @@ test('builds deterministic Obsidian cards and a compact overview from machine re
     expect(text).toContain('generated_by: flowmate-data');
     expect(text).not.toMatch(/supplier|PO|business/i);
   }
+});
+
+test('reports catalog planning progress for invoice assets and the final plan', async () => {
+  const paths = await fixturePaths();
+  await seed(paths);
+  const progress: CatalogProgress[] = [];
+
+  const plan = await buildCatalog(paths, { onProgress: event => { progress.push(event); } });
+
+  expect(progress.some(event => event.phase === 'sample-assets' && event.status === 'completed' && event.current === 1 && event.total === 2 && event.item === 'sample-a')).toBe(true);
+  expect(progress.some(event => event.phase === 'sample-assets' && event.status === 'completed' && event.current === 2 && event.total === 2)).toBe(true);
+  expect(progress.at(-1)).toMatchObject({ phase: 'plan', status: 'completed', current: 1, total: 1, detail: `文件 ${plan.files.length} 个，资产 ${plan.assets.length} 个` });
+});
+
+test('reports publish progress while writing the Obsidian catalog', async () => {
+  const paths = await fixturePaths();
+  await seed(paths);
+  const plan = await buildCatalog(paths);
+  const progress: CatalogProgress[] = [];
+
+  await applyCatalog(plan, { onProgress: event => { progress.push(event); } });
+
+  expect(progress[0]).toMatchObject({ phase: 'publish', status: 'started', current: 0, total: plan.files.length + plan.assets.length });
+  expect(progress.some(event => event.phase === 'publish' && event.status === 'progress' && event.current === 1 && event.item)).toBe(true);
+  expect(progress.at(-1)).toMatchObject({ phase: 'publish', status: 'completed', current: plan.files.length + plan.assets.length, total: plan.files.length + plan.assets.length, detail: `文件 ${plan.files.length} 个，资产 ${plan.assets.length} 个` });
 });
 
 test('rejects catalog plans that escape the vault or contain conflicting targets', async () => {
@@ -188,6 +237,28 @@ test('copies catalog assets into the Vault and rejects changed destinations', as
   await expect(readFile(join(paths.vaultRoot, 'Evidence/invoices/voxel51/000001/original.jpg'))).resolves.toEqual(Buffer.from([0xff, 0xd8, 0xff, 1]));
   await Bun.write(join(paths.vaultRoot, 'Evidence/invoices/voxel51/000001/original.jpg'), 'changed');
   await expect(applyCatalog(plan)).rejects.toThrow('CATALOG_ASSET_CONFLICT');
+});
+
+test('migrates generated legacy assets when the Vault has no asset manifest', async () => {
+  const paths = await fixturePaths();
+  const source = join(paths.originalRoot, 'voxel51', '000001', 'original.jpg');
+  const card = join(paths.vaultRoot, 'Evidence/invoices/voxel51/000001/invoice.md');
+  const destination = join(paths.vaultRoot, 'Evidence/invoices/voxel51/000001/original.jpg');
+  await Bun.write(source, Buffer.from([0xff, 0xd8, 0xff, 1]));
+  const plan = {
+    vaultRoot: paths.vaultRoot,
+    directories: ['Evidence/invoices', 'Evidence/invoices/voxel51', 'Evidence/invoices/voxel51/000001'],
+    files: [{ path: 'Evidence/invoices/voxel51/000001/invoice.md', content: '---\ngenerated_by: flowmate-data\nschema_version: 1\n---\n# 000001\n' }],
+    assets: [{ path: 'Evidence/invoices/voxel51/000001/original.jpg', sourcePath: source, sha256: await sha256File(source), bytes: 4 }],
+  };
+  await mkdir(dirname(card), { recursive: true });
+  await Bun.write(card, plan.files[0]!.content);
+  await Bun.write(destination, Buffer.from('legacy-copy'));
+
+  await applyCatalog(plan);
+
+  await expect(readFile(destination)).resolves.toEqual(Buffer.from([0xff, 0xd8, 0xff, 1]));
+  expect(await Bun.file(join(paths.vaultRoot, '.flowmate-assets.json')).exists()).toBe(true);
 });
 
 test('rejects a catalog asset whose source changes after planning', async () => {

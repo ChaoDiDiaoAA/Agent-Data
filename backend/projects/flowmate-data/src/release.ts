@@ -290,8 +290,10 @@ async function buildReleaseUnlocked(input: ReleaseBuildInput): Promise<ReleaseRe
         const existing = await verifyRelease(destination);
         const expectedFiles = [...payloadFiles, { path: 'manifest.json', sha256: digest(manifestBytes), bytes: manifestBytes.byteLength }].sort((left, right) => left.path.localeCompare(right.path));
         if (canonicalJson(existing.manifest) === canonicalJson(manifest) && canonicalJson(existing.files) === canonicalJson(expectedFiles)) return { path: destination, manifest: existing.manifest, files: existing.files };
-      } catch { /* An invalid or different existing version is still immutable. */ }
-      fail('RELEASE_VERSION_CONFLICT');
+      } catch { /* An invalid or different existing version is replaced below. */ }
+      // A workbench Release is the current projection of the configured selection.
+      // Replace an older projection after the new staging tree has passed verification.
+      await rm(destination, { recursive: true, force: true });
     }
     await promoteNoReplace(staging, destination);
     return { path: destination, manifest, files: [...payloadFiles, { path: 'manifest.json', sha256: digest(manifestBytes), bytes: manifestBytes.byteLength }] };

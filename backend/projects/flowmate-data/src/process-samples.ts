@@ -1,14 +1,14 @@
 import { recoverPublications } from './publication.ts';
 import { sampleDirectory, datasetTasks } from './layout.ts';
 import { readFile, rm } from 'node:fs/promises';
-import { extname, relative } from 'node:path';
+import { extname, join } from 'node:path';
 import { resolveOwnedPath } from './config.ts';
 import type { FlowmatePaths } from './contracts.ts';
-import { createFlowmateMinerURuntime, parseInvoice, type ParseDependencies, type ParseReceipt, withRunLock } from './engine-bridge.ts';
+import { canonicalJson, createFlowmateMinerURuntime, deriveParseAttemptId, flowmateParserKey, parseInvoice, type ParseDependencies, type ParseReceipt, verifyNormalizedOutput, withRunLock } from './engine-bridge.ts';
 import { sha256File } from './file-store.ts';
 import { committedSelection } from './labels/voxel51.ts';
 import { publishStructuredSnapshot } from './structured-snapshot.ts';
-import { loadSampleRecords, saveSampleRecord, transitionSample, type SampleRecord } from './task-store.ts';
+import { loadSampleRecords, transitionSample, type SampleRecord } from './task-store.ts';
 
 /** Also usable by public-file/knowledge acquisition once its record is committed. */
 export async function processSample(input: { paths: FlowmatePaths; record: SampleRecord }, dependencies: ParseDependencies = {}): Promise<ParseReceipt> {
@@ -38,12 +38,42 @@ export async function processSample(input: { paths: FlowmatePaths; record: Sampl
   });
 }
 
-export async function parseSelection(input: { paths: FlowmatePaths; selectionId: string; limit?: number }, dependencies: ParseDependencies = {}) {
+/** A successful snapshot is reusable only when its source and parser identity still match. */
+export async function isReusableParsedSample(paths: FlowmatePaths, record: SampleRecord, parserKey: string): Promise<boolean> {
+  if (record.processing_status === 'failed' || !record.derived_ref || record.derived_ref.root !== 'data'
+    || record.derived_ref.path !== sampleDirectory(record.dataset_id, record.sample_id) || record.parser_key !== parserKey
+    || typeof record.content_sha256 !== 'string' || !record.parse_attempt_id
+    || record.original_ref.root !== 'original') return false;
+  try {
+    const originalPath = resolveOwnedPath(paths.originalRoot, record.original_ref.path);
+    if (await sha256File(originalPath) !== record.original_sha256) return false;
+    const dataDir = resolveOwnedPath(paths.dataRoot, record.derived_ref.path);
+    const verified = await verifyNormalizedOutput(dataDir);
+    const parsePath = join(dataDir, 'parse.json');
+    const parseBytes = await readFile(parsePath);
+    const receipt = JSON.parse(parseBytes.toString('utf8')) as Partial<ParseReceipt>;
+    if (parseBytes.toString('utf8') !== canonicalJson(receipt)
+      || receipt.sampleId !== record.sample_id
+      || receipt.parserKey !== parserKey
+      || receipt.attemptId !== record.parse_attempt_id
+      || receipt.originalSha256 !== record.original_sha256
+      || receipt.contentHash !== record.content_sha256
+      || receipt.outputDir !== dataDir
+      || receipt.normalizedDir !== dataDir
+      || canonicalJson(receipt.files) !== canonicalJson(verified.files)
+      || deriveParseAttemptId({ parserKey: receipt.parserKey, originalSha256: receipt.originalSha256, startedAt: receipt.startedAt! }) !== receipt.attemptId) return false;
+    return verified.contentHash === record.content_sha256;
+  } catch {
+    return false;
+  }
+}
+
+export async function parseSelection(input: { paths: FlowmatePaths; selectionId: string; limit?: number; resume?: boolean }, dependencies: ParseDependencies = {}) {
   return withRunLock(resolveOwnedPath(input.paths.dataRoot, 'work/run.lock'), () => parseSelectionUnlocked(input, { ...dependencies, lockHeld: true }), { jobId: `flowmate-parse-selection-${input.selectionId}` });
 }
 
-async function parseSelectionUnlocked(input: { paths: FlowmatePaths; selectionId: string; limit?: number }, dependencies: ParseDependencies = {}) {
-  const { paths, selectionId, limit } = input;
+async function parseSelectionUnlocked(input: { paths: FlowmatePaths; selectionId: string; limit?: number; resume?: boolean }, dependencies: ParseDependencies = {}) {
+  const { paths, selectionId, limit, resume = false } = input;
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(selectionId) || (limit !== undefined && (!Number.isSafeInteger(limit) || limit <= 0))) throw new Error('PARSE_SELECTION_INVALID');
   const datasetId = 'voxel51-hq-invoice-ocr';
   await recoverPublications(paths);
@@ -53,9 +83,16 @@ async function parseSelectionUnlocked(input: { paths: FlowmatePaths; selectionId
   const images = limit === undefined ? imageRecords : imageRecords.slice(0, limit);
   if (images.length === 0) throw new Error('PARSE_SELECTION_NO_IMAGE');
   const receipts: ParseReceipt[] = [];
+  let skipped = 0;
+  const parserKey = flowmateParserKey(createFlowmateMinerURuntime(paths).mineruConfig);
   for (let index = 0; index < images.length; index += 1) {
     const record = images[index]!;
     const startedAt = Date.now();
+    if (resume && await isReusableParsedSample(paths, record, parserKey)) {
+      skipped += 1;
+      await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'skipped', elapsedMs: 0 });
+      continue;
+    }
     await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'started', elapsedMs: 0 });
     try {
       receipts.push(await processSample({ paths, record }, dependencies));
@@ -65,5 +102,5 @@ async function parseSelectionUnlocked(input: { paths: FlowmatePaths; selectionId
       throw error;
     }
   }
-  return { parsed: receipts.length, sample_ids: receipts.map(receipt => receipt.sampleId), attempts: receipts.map(receipt => receipt.attemptId) };
+  return { parsed: receipts.length, skipped, total: images.length, sample_ids: receipts.map(receipt => receipt.sampleId), attempts: receipts.map(receipt => receipt.attemptId) };
 }

@@ -18,7 +18,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path
 import { loadSharedMachineRuntime } from '../../paper-knowledge-engine/src/shared/engine-context.ts';
 import { loadMinerULocalConfig, type MinerULocalConfig } from '../../paper-knowledge-engine/src/mineru/mineru-local-config.ts';
 import { createMineruApiSession } from '../../paper-knowledge-engine/src/mineru/mineru-api-session.ts';
-import { createProcessContext, type ProcessContext } from '../../paper-knowledge-engine/src/runtime/process.ts';
+import { assertProcessSafety, createProcessContext, type ProcessContext } from '../../paper-knowledge-engine/src/runtime/process.ts';
 import { withRunLock } from '../../paper-knowledge-engine/src/runtime/run-lock.ts';
 import { redactErrorMessage } from '../../paper-knowledge-engine/src/shared/redaction.ts';
 import { normalizeLocalMinerUResult } from '../../paper-knowledge-engine/src/mineru/mineru-local-result.ts';
@@ -29,7 +29,7 @@ import type { FlowmatePaths } from './contracts.ts';
 
 export type { MinerULocalConfig, ProcessContext };
 export { realTree };
-export { withRunLock };
+export { assertProcessSafety, withRunLock };
 
 /** Publish a parsed directory while tolerating short Windows sharing violations. */
 export function moveNormalizedDirectory(source: string, destination: string, options: ReplaceFileOptions = {}): Promise<void> {
@@ -56,7 +56,7 @@ export interface ParseProgress {
   index: number;
   total: number;
   sampleId: string;
-  status: 'started' | 'completed' | 'failed';
+  status: 'started' | 'completed' | 'failed' | 'skipped';
   elapsedMs: number;
 }
 export interface ParseInput {
@@ -79,6 +79,11 @@ export interface ParseDependencies {
   onParsed?: (receipt: ParseReceipt) => Promise<void>;
 }
 const digest = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
+
+/** Stable parser identity used to decide whether a published invoice can be reused. */
+export function flowmateParserKey(config: Pick<MinerULocalConfig, 'expectedVersion' | 'expectedCommit' | 'model' | 'cliBackend' | 'pipelineMethod' | 'pipelineLanguage' | 'formulaEnabled' | 'tableEnabled'>): string {
+  return `mineru@${config.expectedVersion};sha=${config.expectedCommit.toLowerCase()};model=${config.model};backend=${config.cliBackend};method=${config.pipelineMethod};language=${config.pipelineLanguage};formula=${config.formulaEnabled};table=${config.tableEnabled}`;
+}
 
 function mineruParseFailure(execution: {
   exitCode: number;
@@ -230,7 +235,7 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
   const outputParent = resolveOwnedPath(config.outputRoot, relative(config.outputRoot, input.outputDir));
   if (outputParent === resolve(config.outputRoot)) throw new Error('PARSE_PATH_INVALID');
   if (!/^[0-9a-f]{40}$/i.test(config.expectedCommit)) throw new Error('PARSER_SOURCE_SHA_INVALID');
-  const parserKey = `mineru@${config.expectedVersion};sha=${config.expectedCommit.toLowerCase()};model=${config.model};backend=${config.cliBackend};method=${config.pipelineMethod};language=${config.pipelineLanguage};formula=${config.formulaEnabled};table=${config.tableEnabled}`;
+  const parserKey = flowmateParserKey(config);
   const operation = async () => {
     const originalSha256 = digest(await readFile(input.sourcePath));
     const startedAt = (dependencies.now ?? (() => new Date()))().toISOString();
