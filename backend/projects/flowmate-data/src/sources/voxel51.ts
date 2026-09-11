@@ -148,6 +148,7 @@ export function selectVoxel51(records: readonly Voxel51Record[], options: {
   revision: string;
   limit?: number;
   counts?: Partial<AcquireCounts>;
+  exclude_source_record_ids?: ReadonlySet<string>;
   with_publisher_annotation?: number;
   without_publisher_annotation?: number;
   withPublisherAnnotation?: number;
@@ -155,9 +156,12 @@ export function selectVoxel51(records: readonly Voxel51Record[], options: {
 }): Voxel51Selection {
   assertRevision(options.revision);
   const counts = normalizeVoxel51AcquireCounts(options);
-  const annotated = records.filter(record => record.annotation_status === 'annotated' || (record.annotation_status === undefined && record.annotated))
+  const excluded = options.exclude_source_record_ids ?? new Set<string>();
+  const annotated = records.filter(record => !excluded.has(record.source_record_id)
+    && (record.annotation_status === 'annotated' || (record.annotation_status === undefined && record.annotated)))
     .sort((a, b) => a.source_record_id < b.source_record_id ? -1 : a.source_record_id > b.source_record_id ? 1 : 0);
-  const unannotated = records.filter(record => record.annotation_status === 'unannotated' || (record.annotation_status === undefined && !record.annotated))
+  const unannotated = records.filter(record => !excluded.has(record.source_record_id)
+    && (record.annotation_status === 'unannotated' || (record.annotation_status === undefined && !record.annotated)))
     .sort((a, b) => a.source_record_id < b.source_record_id ? -1 : a.source_record_id > b.source_record_id ? 1 : 0);
   if (annotated.length < counts.with_publisher_annotation) return fail('VOXEL51_INSUFFICIENT_ANNOTATED_RECORDS');
   if (unannotated.length < counts.without_publisher_annotation) return fail('VOXEL51_INSUFFICIENT_UNANNOTATED_RECORDS');
@@ -301,15 +305,58 @@ function checkSelection(bytes: Uint8Array, config: SourceConfig, selectionId: st
   return selection;
 }
 
+/**
+ * The `current` selection is also the cursor for automatic batch acquisition.
+ * A new batch may only start after every record in the previous batch has a
+ * committed record, original file, receipt, and publisher annotation (when
+ * applicable).  Missing files mean an interrupted batch and are resumed; a
+ * hash mismatch is corruption and must fail closed.
+ */
+async function currentSelectionIsComplete(paths: FlowmatePaths, config: SourceConfig, selection: StoredSelection): Promise<boolean> {
+  const existingRecords = await loadSampleRecords(paths, config.dataset_id!);
+  const bySampleId = new Map(existingRecords.map(record => [record.sample_id, record]));
+  for (const entry of selection.records) {
+    const existing = bySampleId.get(entry.sample_id);
+    if (!existing) return false;
+    if (existing.dataset_id !== config.dataset_id || existing.dataset_revision !== selection.revision
+      || existing.source_record_id !== entry.source_record_id || existing.original_ref.root !== 'original') {
+      return fail('VOXEL51_CURRENT_BATCH_CORRUPTED');
+    }
+    const existingStatus = existing.publisher_annotation_status ?? (existing.annotation_ref || existing.annotation_sha256 ? 'annotated' : 'unannotated');
+    if (existingStatus !== entry.annotation_status) return fail('VOXEL51_CURRENT_BATCH_CORRUPTED');
+    const originalPath = resolveOwnedPath(paths.originalRoot, existing.original_ref.path);
+    const receiptPath = resolveOwnedPath(paths.dataRoot, `${sampleDirectory(config.dataset_id!, entry.sample_id)}/receipt.json`);
+    if (!(await Bun.file(originalPath).exists()) || !(await Bun.file(receiptPath).exists())) return false;
+    if (await sha256File(originalPath) !== existing.original_sha256) return fail('VOXEL51_CURRENT_BATCH_CORRUPTED');
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as Partial<DownloadReceipt>;
+    if (receipt.sha256 !== existing.original_sha256 || receipt.stable_url !== fileUrl(config, selection.revision, entry.image_path)) return fail('VOXEL51_CURRENT_BATCH_CORRUPTED');
+    if (entry.annotation_status === 'annotated') {
+      if (existing.annotation_ref?.root !== 'original' || existing.annotation_ref.path !== `${sampleDirectory(config.dataset_id!, entry.sample_id)}/annotation.json` || !existing.annotation_sha256 || existing.annotation_sha256 !== entry.annotation_sha256) return fail('VOXEL51_CURRENT_BATCH_CORRUPTED');
+      const annotationPath = resolveOwnedPath(paths.originalRoot, existing.annotation_ref.path);
+      if (!(await Bun.file(annotationPath).exists())) return false;
+      if (await compactJsonFileHash(annotationPath) !== existing.annotation_sha256) return fail('VOXEL51_CURRENT_BATCH_CORRUPTED');
+    } else if (existing.annotation_ref || existing.annotation_sha256) {
+      return fail('VOXEL51_CURRENT_BATCH_CORRUPTED');
+    }
+  }
+  return true;
+}
+
+async function archiveCurrentSelection(paths: FlowmatePaths, config: SourceConfig, selection: StoredSelection, indexBytes: Uint8Array): Promise<void> {
+  const base = resolveOwnedPath(paths.dataRoot, `${datasetTasks(config.dataset_id!)}/selections/history/${selection.selection_hash}`);
+  await immutableBytes(`${base}.json`, Buffer.from(canonicalJson(selection)));
+  await immutableBytes(`${base}.index.json`, indexBytes);
+}
+
 export async function acquireVoxel51Selection(options: {
-  paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit?: number; counts?: Partial<AcquireCounts>; transport?: SourceTransport;
+  paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit?: number; counts?: Partial<AcquireCounts>; transport?: SourceTransport; resume?: boolean;
   onProgress?: (progress: AcquireProgress) => void | Promise<void>;
 }): Promise<{ added: number; reused: number; selection_hash: string; revision: string; counts: AcquireCounts; total: number }> {
   return withRunLock(resolveOwnedPath(options.paths.dataRoot, 'work/run.lock'), () => acquireVoxel51SelectionUnlocked(options), { jobId: `flowmate-acquire-${options.selectionId}` });
 }
 
 async function acquireVoxel51SelectionUnlocked(options: {
-  paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit?: number; counts?: Partial<AcquireCounts>; transport?: SourceTransport;
+  paths: FlowmatePaths; config: SourceConfig; selectionId: string; limit?: number; counts?: Partial<AcquireCounts>; transport?: SourceTransport; resume?: boolean;
   onProgress?: (progress: AcquireProgress) => void | Promise<void>;
 }): Promise<{ added: number; reused: number; selection_hash: string; revision: string; counts: AcquireCounts; total: number }> {
   const { paths, config, selectionId } = options;
@@ -330,9 +377,36 @@ async function acquireVoxel51SelectionUnlocked(options: {
   const saved = await optionalBytes(selectionPath);
   let selection: StoredSelection | undefined;
   let records: Voxel51Record[] = [];
+  let appendCurrentBatch = false;
+  let previousSelection: StoredSelection | undefined;
+  let previousIndexBytes: Uint8Array | undefined;
   if (saved) {
     const existing = parseStoredSelection(saved, config, selectionId);
-    if (sameAcquireCounts(existing.counts, counts)) {
+    if (selectionId === 'current') {
+      let cached: Uint8Array | undefined = await optionalBytes(indexPath);
+      if (!cached) {
+        // A committed manifest is the recovery intent; never resolve main again to fill its cache.
+        const result = await transport.http.get(existing.index_url, metadataScope(config, 16 * 1024 * 1024));
+        if (digest(result.bytes) !== existing.index_sha256) return fail('VOXEL51_INDEX_HASH_MISMATCH');
+        await immutableBytes(indexPath, result.bytes);
+        cached = result.bytes;
+      }
+      if (digest(cached) !== existing.index_sha256) return fail('VOXEL51_INDEX_HASH_MISMATCH');
+      records = readVoxel51Index(cached);
+      if (!options.resume && await currentSelectionIsComplete(paths, config, existing)) {
+        // A completed `current` batch is the cursor for the next automatic
+        // batch.  Keep the prior manifest and index for audit/recovery before
+        // replacing the current pointer below.
+        appendCurrentBatch = true;
+        previousSelection = existing;
+        previousIndexBytes = cached;
+      } else {
+        // An incomplete current batch must be resumed with the exact same
+        // counts.  Changing the split mid-batch would make recovery ambiguous.
+        if (!sameAcquireCounts(existing.counts, counts)) throw selectionLimitConflict(selectionId, counts, existing.counts, selectionPath);
+        selection = existing;
+      }
+    } else if (sameAcquireCounts(existing.counts, counts)) {
       selection = existing;
       let cached: Uint8Array | undefined = await optionalBytes(indexPath);
       if (!cached) {
@@ -349,7 +423,9 @@ async function acquireVoxel51SelectionUnlocked(options: {
   if (!selection) {
     const revision = await resolveHuggingFaceRevision(config, { http: transport.http });
     const index = await readIndex(config, revision, transport);
-    const selected = selectVoxel51(index.records, { counts, revision });
+    const existingRecords = selectionId === 'current' ? await loadSampleRecords(paths, config.dataset_id) : [];
+    const excluded = selectionId === 'current' ? new Set(existingRecords.map(record => record.source_record_id)) : undefined;
+    const selected = selectVoxel51(index.records, { counts, revision, ...(excluded ? { exclude_source_record_ids: excluded } : {}) });
     const registryPath = data('ids.json');
     const registryBytes = await optionalBytes(registryPath);
     const registry: { schema_version: 1; next: number; ids: Record<string, string> } = registryBytes ? JSON.parse(registryBytes.toString('utf8')) : { schema_version: 1, next: 1, ids: {} };
@@ -362,6 +438,7 @@ async function acquireVoxel51SelectionUnlocked(options: {
     const { selection_hash: _hash, ...selectionContent } = selected;
     const content = { schema_version: 1 as const, source_id: config.source_id, dataset_id: config.dataset_id, selection_id: selectionId, index_url: index.index_url, index_sha256: index.index_sha256, ...selectionContent };
     selection = { ...content, selection_hash: hashCanonical(content) };
+    if (appendCurrentBatch && previousSelection && previousIndexBytes) await archiveCurrentSelection(paths, config, previousSelection, previousIndexBytes);
     // Recover the old cache-first ordering: without a manifest, this cache has no committed identity.
     // Remove it before committing intent so a crash cannot bind an old cache to a new revision.
     await unlink(indexPath).catch(error => { if (error.code !== 'ENOENT') throw error; });

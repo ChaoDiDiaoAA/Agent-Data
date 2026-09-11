@@ -156,8 +156,10 @@ bun run typecheck
 
 来源固定为 `voxel51-invoice-ocr`，数据集固定为 `voxel51-hq-invoice-ocr`，当前选样清单内部使用
 `current` 名称保存到 `dataRoot/tasks/voxel51/selections/current.json`。因此只需修改
-`sample.acquire`，不需要维护 `source_id`、`dataset_id` 或 `selection_id`。同一数量重跑会复用清单；
-数量变化时程序会自动刷新清单，旧的原件、record 和发票编号仍保留。Release 默认版本为
+`sample.acquire`，不需要维护 `source_id`、`dataset_id` 或 `selection_id`。`current` 是自动追加游标：
+未完成的当前批次会按原清单续跑；当前批次完整完成后，再次执行会排除所有已获取的
+`source_record_id` 并追加下一批，旧的原件、record 和发票编号仍保留。每次替换前的清单和索引会归档到
+`dataRoot/tasks/voxel51/selections/history/<selection-hash>.json`，便于审计和恢复。Release 默认版本为
 `public-invoice-p0-v1`，内容变化时会在校验通过后自动重建；不需要修改版本号。旧配置中仍存在的
 这些字段仅为兼容历史脚本而读取，新配置不要再添加。
 
@@ -190,7 +192,7 @@ bun src/cli.ts
 不要在 `D:\agent-data\backend\projects\paper-knowledge-engine` 目录执行
 `bun src/cli.ts`；那是论文知识引擎的方向库菜单，不会启动 Flowmate。
 
-菜单会从 `config/workbench.local.json` 读取两个 `sample.acquire` 数量，并显示带标注、无标注及合计。菜单的“执行当前任务”会用同一批合计数量完成获取、标签映射、MinerU 解析、Obsidian、Release、校验和备份；菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
+菜单会从 `config/workbench.local.json` 读取两个 `sample.acquire` 数量，并显示带标注、无标注及合计。菜单的“执行当前任务”会用同一批合计数量完成获取、标签映射、MinerU 解析、Obsidian、Release、校验和备份；使用默认 `current` 时，每次完整完成后再次执行会自动追加下一批，进程中断或阶段失败会继续当前批次。恢复时只有已开始的阶段会携带恢复标记；如果任务在获取前的探测阶段失败，重试获取仍会按游标追加下一批。菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
 
 “执行当前任务”会在 `D:\agent-data\data\flowmate-data\tasks\voxel51\runs\` 写入一份运行清单，并在同级使用任务锁。清单保存当前来源、选样名称、两个数量、配置哈希和九个阶段的状态；任务锁覆盖探测、获取、标签、解析、目录、Release、校验和备份的整个流程，避免两个终端同时修改同一批次。这个行为对应 `paper-knowledge-engine` 的 workflow lock、run record 和原子 manifest 设计。进程中断或某个阶段失败后，用同一条菜单命令再次选择 **2**，会自动找到相同配置下最近的未完成批次：已完成的阶段显示“恢复……跳过”，从第一个未完成阶段继续。MinerU 还会按发票检查 `record.json`、原图哈希、解析器配置和结构化解析文件；仍然有效的发票显示“跳过（已存在可复用解析结果）”，只有未完成或校验不通过的发票重新解析。修改 `sample.acquire`、`selection_id`、来源配置或 `config/mineru.local.json` 后，配置哈希变化会自动开始新批次，不需要手工改运行 ID。运行清单是机器状态，不能手工删除正在运行的批次；清空四个数据根重新开始时，运行清单也会一并清除。
 

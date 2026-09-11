@@ -154,7 +154,7 @@ function menuConfigSummary(pathsPath: string, configPath: string, workbench: Ret
     `[来源] ${source.source_id} / ${source.dataset_id ?? '未配置'}`,
     `[数据集] 总量 ${total} 条，可标注 ${annotated} 条${declaredUnannotated === undefined ? '' : `，无标注 ${declaredUnannotated} 条`}`,
     `[本次任务] 带发布方标注 ${counts.with_publisher_annotation} 条；无发布方标注 ${counts.without_publisher_annotation} 条；合计 ${totalTask} 条`,
-    `[说明] 获取与 MinerU 解析使用同一批 ${totalTask} 条发票；任务完成后继续构建 Obsidian、Release、校验和备份。`,
+    `[说明] 获取与 MinerU 解析使用同一批 ${totalTask} 条发票；current 批次完成后下次自动追加未获取数据，未完成批次自动续跑。`,
     `路径配置：${pathsPath}`,
     ...(limitWarning ? [limitWarning] : []),
   ].join('\n');
@@ -168,9 +168,13 @@ async function menuSelectionSummary(paths: ReturnType<typeof loadPaths>, workben
     const requested = sampleAcquireCounts(workbench.sample);
     if (inspection.counts.with_publisher_annotation !== requested.with_publisher_annotation
       || inspection.counts.without_publisher_annotation !== requested.without_publisher_annotation) {
-      return `[选样] ${workbench.sample.selection_id} 当前为 ${inspection.recordCount ?? 0} 条；配置已改为 ${sampleAcquireTotal(workbench.sample)} 条，执行任务时会自动刷新。`;
+      return workbench.sample.selection_id === 'current'
+        ? `[选样] current 上一批为 ${inspection.recordCount ?? 0} 条；下一批按配置追加 ${sampleAcquireTotal(workbench.sample)} 条，未完成时先恢复上一批。`
+        : `[选样] ${workbench.sample.selection_id} 当前为 ${inspection.recordCount ?? 0} 条；配置已改为 ${sampleAcquireTotal(workbench.sample)} 条，执行任务时会自动刷新。`;
     }
-    return `[选样] ${workbench.sample.selection_id} 已固定 ${inspection.recordCount ?? 0} 条，数量与当前配置一致。`;
+    return workbench.sample.selection_id === 'current'
+      ? `[选样] current 上一批已记录 ${inspection.recordCount ?? 0} 条；下次执行会自动排除已获取记录并追加 ${sampleAcquireTotal(workbench.sample)} 条。`
+      : `[选样] ${workbench.sample.selection_id} 已固定 ${inspection.recordCount ?? 0} 条，数量与当前配置一致。`;
   } catch (error) {
     return `[选样] ${menuErrorSummary(error)}`;
   }
@@ -285,8 +289,7 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
     reader ??= createInterface({ input: options.input ?? stdin, output: output as NodeJS.WritableStream });
     return reader.question(prompt);
   });
-  let resumeTask = false;
-  const invoke = async (args: string[]): Promise<{ code: number; result: unknown }> => {
+  const invoke = async (args: string[], resumeStage = false): Promise<{ code: number; result: unknown }> => {
     let result: unknown;
     const parseDependencies = args[0] === 'parse'
       ? {
@@ -303,7 +306,8 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
     const code = await execute(args, {
       transport: options.transport,
       parseDependencies,
-      ...(args[0] === 'parse' ? { resumeTask } : {}),
+      ...(args[0] === 'parse' && resumeStage ? { resumeTask: true } : {}),
+      ...(args[0] === 'acquire' && resumeStage ? { resumeTask: true } : {}),
       ...(acquireProgress ? { acquireProgress } : {}),
       print: value => { result = value; },
     });
@@ -342,7 +346,6 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
       const runSelected = async () => {
         const taskStartedAt = Date.now();
         let taskRun: TaskRun | undefined;
-        resumeTask = false;
         if (choice === '2') {
           // Match PKE's workflow admission: reject an unconfirmed MinerU
           // process before probe/acquisition can create more work.
@@ -351,10 +354,9 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
           const total = sampleAcquireTotal(workbench.sample);
           writeMenu(output, `[任务] current / ${workbench.sample.dataset_id} / ${workbench.sample.selection_id} 开始`);
           writeMenu(output, `[配置] ${configPath}；带发布方标注 ${counts.with_publisher_annotation} 条，无发布方标注 ${counts.without_publisher_annotation} 条，合计 ${total} 条`);
-          writeMenu(output, `[说明] 获取与 MinerU 解析使用同一批 ${total} 条发票；完成后构建 Obsidian、Release、校验和备份。`);
+          writeMenu(output, `[说明] 获取与 MinerU 解析使用同一批 ${total} 条发票；current 批次完成后下次自动追加未获取数据，完成后构建 Obsidian、Release、校验和备份。`);
           const resumed = await createOrResumeTaskRun(paths, await menuTaskIdentity(paths, workbench, source));
           taskRun = resumed.run;
-          resumeTask = resumed.resumed;
           if (resumed.resumed) {
             const completed = Object.values(taskRun.stages).filter(status => status === 'completed').length;
             writeMenu(output, `[恢复] 继续 run ${taskRun.run_id}，已完成 ${completed}/${taskStageKeys.length} 个阶段。`);
@@ -373,10 +375,12 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
               continue;
             }
             const stepStartedAt = Date.now();
+            const stageStatus = taskRun?.stages[stageKey];
+            const resumeStage = stageStatus === 'running' || stageStatus === 'failed';
             try {
               writeMenu(output, `${progressLabel} 开始（累计 ${menuDuration(Date.now() - taskStartedAt)}）`);
               if (taskRun) await markTaskStageRunning(taskRun, stageKey);
-              const result = await invoke(command);
+              const result = await invoke(command, resumeStage);
               if (result.code !== 0) {
                 if (taskRun) await markTaskStageFailed(taskRun, stageKey);
                 writeMenu(output, `${progressLabel} 失败：退出码 ${result.code}`);
@@ -590,7 +594,7 @@ export async function runCli(arguments_: string[], options: { transport?: Source
   }
   const config = sampleSourceConfig;
   const result = probe ? await probeVoxel51(config, { transport: sourceTransport })
-    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, ...(explicitAcquireCounts ? { counts: explicitAcquireCounts } : acquireLimit === undefined ? { counts: configuredCounts } : { limit: acquireLimit }), transport: sourceTransport, onProgress: options.acquireProgress })
+    : acquire ? await acquireVoxel51Selection({ paths, config, selectionId, ...(explicitAcquireCounts ? { counts: explicitAcquireCounts } : acquireLimit === undefined ? { counts: configuredCounts } : { limit: acquireLimit }), transport: sourceTransport, ...(options.resumeTask ? { resume: true } : {}), onProgress: options.acquireProgress })
     : await withRunLock(resolveOwnedPath(paths.dataRoot, 'work/run.lock'), async () => {
       const mapping = await mapVoxel51Selection({ paths, datasetId: workbench.sample.dataset_id, selectionId, lockHeld: true });
       const snapshots = publishSnapshot ? await Promise.all(mapping.sample_ids.map(sampleId => publishStructuredSnapshot({ paths, datasetId: workbench.sample.dataset_id, sampleId, lockHeld: true }))) : [];

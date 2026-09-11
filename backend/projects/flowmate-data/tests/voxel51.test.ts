@@ -182,6 +182,79 @@ test('acquisition stores original record objects and receipts, then reuses the p
   expect(JSON.parse(await readFile(selectionPath, 'utf8')).records).toHaveLength(3);
 });
 
+test('appends the next unseen batch when the current batch is already complete', async () => {
+  const configuredPaths = await paths();
+  const config = loadSourceConfig(sourcePath);
+  const expanded = structuredClone(fixture);
+  expanded.samples[2]!.json_annotation = '';
+  expanded.samples.push(
+    { ...structuredClone(fixture.samples[0]!), _id: { $oid: '6984bad10f763d83586fdd30' }, filepath: 'data/batch1-0500.jpg' },
+    { ...structuredClone(fixture.samples[2]!), _id: { $oid: '6984bad10f763d83586fdd31' }, filepath: 'data/batch1-0501.jpg', json_annotation: '' },
+  );
+  const expandedBytes = Buffer.from(JSON.stringify(expanded));
+  const imageByPath = new Map([
+    ['batch1-0494.jpg', Buffer.from([0xff, 0xd8, 0xff, 1])],
+    ['batch1-0489.jpg', Buffer.from([0xff, 0xd8, 0xff, 2])],
+    ['batch1-0499.jpg', Buffer.from([0xff, 0xd8, 0xff, 3])],
+    ['batch1-0500.jpg', Buffer.from([0xff, 0xd8, 0xff, 4])],
+    ['batch1-0501.jpg', Buffer.from([0xff, 0xd8, 0xff, 5])],
+  ]);
+  const transport = createSourceHttp(config, { fetch: async url => {
+    if (url === config.revision.url) return Response.json({ sha: revision });
+    if (url.endsWith(`/${revision}/samples.json`)) return new Response(expandedBytes);
+    const image = imageByPath.get(new URL(url).pathname.split('/').pop()!);
+    if (image) return new Response(image, { headers: { 'content-type': 'image/jpeg' } });
+    throw new Error(`UNEXPECTED_URL ${url}`);
+  } });
+  const counts = { with_publisher_annotation: 1, without_publisher_annotation: 1 };
+
+  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'current', counts, transport }))
+    .resolves.toMatchObject({ added: 2, reused: 0 });
+  const firstSelection = JSON.parse(await readFile(join(configuredPaths.dataRoot, 'tasks', 'voxel51', 'selections', 'current.json'), 'utf8')) as { selection_hash: string };
+  const offline = createSourceHttp(config, { fetch: async () => { throw new Error('NETWORK_FORBIDDEN_ON_RESUME'); } });
+  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'current', counts, resume: true, transport: offline }))
+    .resolves.toMatchObject({ added: 0, reused: 2 });
+  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'current', counts, transport }))
+    .resolves.toMatchObject({ added: 2, reused: 0 });
+
+  const records = JSON.parse(await readFile(join(configuredPaths.dataRoot, 'voxel51', '000001', 'record.json'), 'utf8'));
+  expect(records.source_record_id).toBe(fixture.samples[0]!._id.$oid);
+  expect((await readdir(join(configuredPaths.dataRoot, 'voxel51'), { withFileTypes: true }))
+    .filter(entry => entry.isDirectory()).map(entry => entry.name).sort()).toEqual(['000001', '000002', '000003', '000004']);
+  expect(await Bun.file(join(configuredPaths.dataRoot, 'tasks', 'voxel51', 'selections', 'history', `${firstSelection.selection_hash}.json`)).exists()).toBe(true);
+  const selection = JSON.parse(await readFile(join(configuredPaths.dataRoot, 'tasks', 'voxel51', 'selections', 'current.json'), 'utf8')) as { records: Array<{ source_record_id: string }> };
+  expect(selection.records.map(entry => entry.source_record_id)).toEqual([
+    fixture.samples[1]!._id.$oid,
+    expanded.samples[4]!._id.$oid,
+  ]);
+});
+
+test('resumes an incomplete current batch instead of advancing to a new batch', async () => {
+  const configuredPaths = await paths();
+  const config = loadSourceConfig(sourcePath);
+  let failImage = true;
+  const interrupted = createSourceHttp(config, { fetch: async url => {
+    if (url === config.revision.url) return Response.json({ sha: revision });
+    if (url.endsWith(`/${revision}/samples.json`)) return new Response(indexBytes);
+    if (url.endsWith(`/${revision}/data/batch1-0494.jpg`)) {
+      if (failImage) { failImage = false; return new Response('temporary failure', { status: 403 }); }
+      return new Response(Buffer.from([0xff, 0xd8, 0xff, 6]), { headers: { 'content-type': 'image/jpeg' } });
+    }
+    throw new Error(`UNEXPECTED_URL ${url}`);
+  } });
+  const counts = { with_publisher_annotation: 1, without_publisher_annotation: 0 };
+
+  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'current', counts, transport: interrupted }))
+    .rejects.toThrow();
+  const offlineResume = createSourceHttp(config, { fetch: async url => {
+    if (url.endsWith(`/${revision}/data/batch1-0494.jpg`)) return new Response(Buffer.from([0xff, 0xd8, 0xff, 6]), { headers: { 'content-type': 'image/jpeg' } });
+    throw new Error(`NETWORK_FORBIDDEN_ON_BATCH_RESUME ${url}`);
+  } });
+  await expect(acquireVoxel51Selection({ paths: configuredPaths, config, selectionId: 'current', counts, transport: offlineResume }))
+    .resolves.toMatchObject({ added: 1, reused: 0 });
+  expect(await Bun.file(join(configuredPaths.dataRoot, 'voxel51', '000001', 'record.json')).exists()).toBe(true);
+});
+
 test('keeps dataset metadata immutable while allowing a later source revision', async () => {
   const configuredPaths = await paths();
   const config = loadSourceConfig(sourcePath);

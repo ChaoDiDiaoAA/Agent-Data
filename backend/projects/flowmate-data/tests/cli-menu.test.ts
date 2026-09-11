@@ -245,6 +245,62 @@ describe('interactive CLI menu', () => {
     expect(resumedLines.join('')).toContain('[恢复]');
   });
 
+  test('passes resume only to workflow stages that already started', async () => {
+    const fixture = await menuFixture(2);
+    const firstAnswers = ['2', '0'];
+    await runMenu({
+      pathsPath: fixture.pathsPath,
+      configPath: fixture.configPath,
+      ask: async () => firstAnswers.shift()!,
+      output: fakeOutput([]),
+      execute: async args => {
+        if (args[0] === 'source') throw new Error('PROBE_INTERRUPTED');
+        return 0;
+      },
+    });
+
+    const resumedAnswers = ['2', '0'];
+    let acquireResume: boolean | undefined;
+    await runMenu({
+      pathsPath: fixture.pathsPath,
+      configPath: fixture.configPath,
+      ask: async () => resumedAnswers.shift()!,
+      output: fakeOutput([]),
+      execute: async (args, options) => {
+        if (args[0] === 'acquire') acquireResume = options?.resumeTask;
+        return 0;
+      },
+    });
+    expect(acquireResume).not.toBe(true);
+
+    const failedAcquireFixture = await menuFixture(2);
+    const failedAcquireAnswers = ['2', '0'];
+    await runMenu({
+      pathsPath: failedAcquireFixture.pathsPath,
+      configPath: failedAcquireFixture.configPath,
+      ask: async () => failedAcquireAnswers.shift()!,
+      output: fakeOutput([]),
+      execute: async args => {
+        if (args[0] === 'acquire') throw new Error('ACQUIRE_INTERRUPTED');
+        return 0;
+      },
+    });
+
+    const failedAcquireResumeAnswers = ['2', '0'];
+    let failedAcquireResume: boolean | undefined;
+    await runMenu({
+      pathsPath: failedAcquireFixture.pathsPath,
+      configPath: failedAcquireFixture.configPath,
+      ask: async () => failedAcquireResumeAnswers.shift()!,
+      output: fakeOutput([]),
+      execute: async (args, options) => {
+        if (args[0] === 'acquire') failedAcquireResume = options?.resumeTask;
+        return 0;
+      },
+    });
+    expect(failedAcquireResume).toBe(true);
+  });
+
   test('checks MinerU process safety before starting any task stage', async () => {
     const fixture = await menuFixture(2);
     await mkdir(join(fixture.dataRoot, 'work', 'processes'), { recursive: true });

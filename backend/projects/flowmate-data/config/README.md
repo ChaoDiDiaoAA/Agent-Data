@@ -293,8 +293,10 @@ bun src/cli.ts catalog build --paths config/paths.local.json --config config/wor
 
 来源固定为 `voxel51-invoice-ocr`，数据集固定为 `voxel51-hq-invoice-ocr`，当前选样清单内部使用
 `current` 名称保存到 `dataRoot/tasks/voxel51/selections/current.json`。因此只需修改
-`sample.acquire`，不需要维护 `source_id`、`dataset_id` 或 `selection_id`。同一数量重跑会复用清单；
-数量变化时程序会自动刷新清单，旧的原件、record 和发票编号仍保留。额外知识来源当前不启用，
+`sample.acquire`，不需要维护 `source_id`、`dataset_id` 或 `selection_id`。`current` 是自动追加游标：
+未完成的当前批次会按原清单续跑；当前批次完整完成后，再次执行会排除所有已获取的
+`source_record_id` 并追加下一批，旧的原件、record 和发票编号仍保留。每次替换前的清单和索引会归档到
+`dataRoot/tasks/voxel51/selections/history/<selection-hash>.json`。额外知识来源当前不启用，
 代码中的 `public-files` 读取器只为后续扩展保留。
 
 ### `release` 参数
@@ -455,7 +457,7 @@ origin 加入本文件并补充回归测试，不能改成通配符或自动接�
 
 ## 菜单与参数覆盖优先级
 
-菜单使用 `workbench.local.json` 的 `sample.acquire` 作为数量的唯一来源；选择采集或解析时不会要求输入数量，也不会自动添加 `--limit`。获取和 MinerU 菜单步骤都会按顺序处理每条发票，并显示 `[发票 i/总数]` 的开始、完成或失败状态；获取进度还会标明“带标注/无标注”。直接子命令仍支持命令行参数，适合调试、自动化和兼容已有脚本。
+菜单使用 `workbench.local.json` 的 `sample.acquire` 作为数量的唯一来源；选择采集或解析时不会要求输入数量，也不会自动添加 `--limit`。默认 `selection_id=current` 时，当前批次未完成会续跑，当前批次完成后下一次执行会自动排除已获取的 `source_record_id` 并追加下一批；旧批次的原始文件、record 和发票编号不会被覆盖。恢复标记按阶段记录：获取阶段已经开始或失败时续用当前清单，获取前的探测阶段失败时重试会继续追加游标。获取和 MinerU 菜单步骤都会按顺序处理每条发票，并显示 `[发票 i/总数]` 的开始、完成或失败状态；获取进度还会标明“带标注/无标注”。直接子命令仍支持命令行参数，适合调试、自动化和兼容已有脚本。
 
 构建 Obsidian 时，菜单只显示 `[Obsidian 5/8] 构建 Obsidian 目录` 阶段的开始和完成行，不逐文件打印目录内部进度；开始后暂时没有新行时，表示正在进行来源校验、目录写入或清理。
 
@@ -486,7 +488,7 @@ bun src/cli.ts acquire voxel51-invoice-ocr --limit 5 --paths config/paths.local.
 # 分别取 5 条带标注和 2 条无标注（高级模式临时覆盖）
 bun src/cli.ts acquire voxel51-invoice-ocr --with-publisher-annotation 5 --without-publisher-annotation 2 --paths config/paths.local.json --config config/workbench.local.json
 
-# 解析当前 selection 中的全部样本；数量来自 workbench.local.json，数量变化时 selection 会自动刷新
+# 解析当前 selection 中的全部样本；数量来自 workbench.local.json，current 获取完成后下次执行会自动追加下一批
 bun src/cli.ts parse --paths config/paths.local.json --config config/workbench.local.json
 
 # 仅调试时临时解析前 2 条（不会改变 selection）
