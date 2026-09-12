@@ -153,7 +153,7 @@ bun install --frozen-lockfile
 bun run typecheck
 ```
 
-`parse` 命令会通过 bridge 启动任务级 MinerU API，并在任务结束后回收；不需要先手工启动第二个 MinerU 服务。Flowmate 默认使用 `17861`，Paper Knowledge Engine 默认使用 `17860`，两个项目不要共用同一个端口。
+`parse` 命令会通过 bridge 为当前 selection 的整个批次启动一个 MinerU API，会话在批次完成或失败退出时统一回收；不需要先手工启动第二个 MinerU 服务，也不会为每张发票重复启动和清理 API。Windows 上批次开始实际解析时会申请系统执行状态，避免系统因空闲自动进入待机；批次结束或失败会释放该状态。电源键、合盖或系统强制待机仍可能中断进程。Flowmate 默认使用 `17861`，Paper Knowledge Engine 默认使用 `17860`，两个项目不要共用同一个端口。
 
 两个项目虽然使用独立配置和端口，但通常共用同一套 MinerU 安装、模型和 GPU。共享会话会在
 `source_root` 的上一级创建 `.fsd-mineru-resource.lock`，并在整个 API 会话期间持有它；因此
@@ -462,7 +462,9 @@ origin 加入本文件并补充回归测试，不能改成通配符或自动接�
 构建 Obsidian 时，菜单只显示 `[Obsidian 5/8] 构建 Obsidian 目录` 阶段的开始和完成行，不逐文件打印目录内部进度；开始后暂时没有新行时，表示正在进行来源校验、目录写入或清理。
 
 菜单选择 **2** 执行的是一个完整工作流。运行状态保存在
-`dataRoot/tasks/voxel51/runs/<run-id>/run.json`，同级任务锁覆盖整个工作流；如果进程中断或某个阶段失败，重新运行菜单并再次选择 **2** 会自动恢复相同配置下最近的未完成批次，跳过已经完成的阶段。MinerU 还会按原图 SHA-256、解析器身份、`parse.json` 和结构化文件清单验证已完成发票，只有验证通过的记录才会跳过。修改数量、`selection_id`、来源或 `mineru.local.json` 后，配置身份改变，会创建新的批次。
+`dataRoot/tasks/voxel51/runs/<run-id>/run.json`，同级任务锁覆盖整个工作流；如果进程中断或某个阶段失败，重新运行菜单并再次选择 **2** 会自动恢复相同配置下最近的未完成批次，跳过已经完成的阶段。MinerU 解析阶段为当前 selection 复用一个 API 会话，失败时在批次边界统一清理；MinerU 还会按原图 SHA-256、解析器身份、`parse.json` 和结构化文件清单验证已完成发票，只有验证通过的记录才会跳过。修改数量、`selection_id`、来源或 `mineru.local.json` 后，配置身份改变，会创建新的批次。
+
+如果某张图片的 MinerU 结果包含有效的 `content-list.json`、`pages.json`，但 Markdown 为 0 字节，Flowmate 会从归一化页文本生成确定性的 `full.md`，再继续校验和发布；这只使用 MinerU 已返回的文字，不补造字段。若页文本也为空，错误会明确写出“empty Markdown and no recoverable page text”。在解析 receipt 写入前失败的 attempt 目录会清理，重试不会累积部分结果。
 
 Obsidian 发布阶段另外使用 `vaultRoot/.flowmate-catalog.lock` 文件锁，文件中保存进程 PID 和启动身份。正常退出会清理锁；进程异常中止后，下一次目录构建会只回收已经退出进程的锁，并删除工具生成的 `.flowmate-catalog-staging-*` 孤立目录。空的旧版锁目录会自动迁移清理；没有 `.flowmate-assets.json` 的旧 Vault 只会在发票目录卡片带 `generated_by: flowmate-data` 时重建一次旧资产清单并刷新副本；非空目录、符号链接、未标记卡片和用户文件会保留并报告包含相对路径的冲突，不会自动删除。
 
@@ -501,6 +503,7 @@ bun src/cli.ts parse --limit 2 --paths config/paths.local.json --config config/w
 以下规则固定在实现中，不能通过配置扩大范围：
 
 - 单个发票下载和解析并发固定为 1；完整菜单任务另使用 `dataRoot/tasks/voxel51/task.lock`，各阶段内部使用 `dataRoot/work/run.lock` 串行化。
+- 一个解析批次只持有一个 MinerU API 会话，按 selection 顺序逐条调用；批次结束或失败时统一释放，恢复运行会跳过已验证结果。
 - Voxel51 revision API 读取上限为 2 MiB，`samples.json` 索引读取上限为 16 MiB，单张图片下载上限为 32 MiB。
 - 重定向只能去 `redirect_origins` 明确登记的 origin。
 - 不建立通用爬虫，不执行网页脚本，不把发现的新链接自动加入采集范围。

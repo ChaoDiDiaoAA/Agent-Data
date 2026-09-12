@@ -1,6 +1,6 @@
 import { sampleDirectory, datasetTasks, datasetAlias } from '../src/layout.ts';
 import { afterEach, expect, test } from 'bun:test';
-import { cp, mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as bridge from '../src/engine-bridge.ts';
@@ -119,6 +119,7 @@ for (const mode of ['missing', 'failed', 'throw', 'dispose-failed'] as const) te
   expect(disposed).toBe(1);
   expect(stagingDir).toBeDefined();
   expect(await Bun.file(join(stagingDir!, 'cleanup-probe.txt')).exists()).toBe(false);
+  if (mode === 'missing') expect(await readdir(input.outputDir)).toEqual([]);
   expect(await Bun.file(input.lockPath).exists()).toBe(false);
 });
 
@@ -150,6 +151,41 @@ test('MinerU execution failures preserve bounded redacted client diagnostics', a
     const message = error instanceof Error ? error.message : String(error);
     return message.includes('MinerU task failed') && message.includes('[redacted]') && !message.includes('secret-token') && !message.includes('example.test');
   });
+});
+
+test('MinerU timeout errors include the configured threshold and measured elapsed time', async () => {
+  const { input } = await setup();
+  const dependencies: bridge.ParseDependencies = { createSession() { return {
+    async ensureReady() { return 'fake'; },
+    async run() {
+      return { exitCode: 1, errorCode: 'ETIMEDOUT', timedOut: true, timeoutMs: 3_600_000, elapsedMs: 26_462_000 };
+    },
+    async dispose() {},
+  }; } };
+  let caught: unknown;
+  try { await bridge.parseInvoice(input, dependencies); }
+  catch (error) { caught = error; }
+  expect(caught).toSatisfy((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('timeout=3600s') && message.includes('elapsed=26462s');
+  });
+});
+
+test('recovers an empty MinerU Markdown file from its nonempty structured content list', async () => {
+  const { input } = await setup();
+  const result = await bridge.parseInvoice(input, { createSession: () => ({
+    async ensureReady() { return 'fake'; },
+    async run(job) {
+      await writeFile(join(job.outputDir, 'invoice.md'), '');
+      await writeFile(join(job.outputDir, 'invoice_content_list.json'), JSON.stringify([
+        { page_idx: 0, type: 'text', text: 'Invoice 001499 total 2624 USD.' },
+      ]));
+      return { exitCode: 0, cleanupConfirmed: true };
+    },
+    async dispose() {},
+  }) });
+  expect(await readFile(join(result.normalizedDir, 'full.md'), 'utf8')).toBe('Invoice 001499 total 2624 USD.\n');
+  expect(result.contentHash).toBe((await bridge.verifyNormalizedOutput(result.normalizedDir)).contentHash);
 });
 
 test('attempts never overwrite old output and changed parser settings produce a different key', async () => {

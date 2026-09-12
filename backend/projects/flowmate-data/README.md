@@ -115,7 +115,7 @@ bun install --frozen-lockfile
 bun run typecheck
 ```
 
-共享引擎的 `mineru-config` 只属于 Paper Knowledge Engine 自身的诊断命令，不是 Flowmate 的配置入口；Flowmate 的 `parse` 会通过 bridge 创建任务级 MinerU API，会话结束后自动回收。两个项目共用 MinerU 安装时，bridge 会通过安装目录上一级的 `.fsd-mineru-resource.lock` 串行化 GPU 模型会话；FSD 正在解析时执行 Flowmate 会得到明确的 `MINERU_RESOURCE_BUSY`，应在 FSD 完成后重试。不要手工删除运行中任务持有的锁文件，也不要从 PDF 目录或 Obsidian 目录执行下面的命令。
+共享引擎的 `mineru-config` 只属于 Paper Knowledge Engine 自身的诊断命令，不是 Flowmate 的配置入口；Flowmate 的 `parse` 会通过 bridge 为整个当前批次创建一个 MinerU API，会话在批次结束或失败退出时统一回收，不会为每张发票重复启动和清理 API。两个项目共用 MinerU 安装时，bridge 会通过安装目录上一级的 `.fsd-mineru-resource.lock` 串行化 GPU 模型会话；FSD 正在解析时执行 Flowmate 会得到明确的 `MINERU_RESOURCE_BUSY`，应在 FSD 完成后重试。不要手工删除运行中任务持有的锁文件，也不要从 PDF 目录或 Obsidian 目录执行下面的命令。
 
 ## 配置
 
@@ -199,6 +199,10 @@ bun src/cli.ts
 Obsidian 目录发布使用 `D:\obsidian\data\flowmate-data\.flowmate-catalog.lock` 作为带进程身份的文件锁。正常退出会自动删除锁；进程被中止后，下一次运行会根据 PID 和启动身份回收已经退出进程留下的锁，并清理 `.flowmate-catalog-staging-*` 孤立目录。旧版本遗留的空锁目录也会在确认后迁移清理；没有 `.flowmate-assets.json` 的旧 Vault 会只对同一发票目录中带 `generated_by: flowmate-data` 卡片旁的旧资产建立一次迁移清单，再安全刷新 `record.json`、解析结果等副本。非空锁目录、符号链接、未标记卡片或用户文件仍会阻止发布；冲突信息会包含 Vault 内相对路径，便于定位。
 
 获取阶段和 MinerU 阶段都会按顺序显示 `[发票 1/100]`、`[发票 2/100]` 等逐条进度。获取阶段会标明“带标注/无标注”，并显示开始、完成或失败；某条发票的“开始”与“完成”之间暂时没有新行时，表示该条仍在等待网络下载或 MinerU 返回。
+
+MinerU 的 `ETIMEDOUT` 表示当前发票的 MinerU 客户端在 `config/mineru.local.json` 的 `task_timeout_seconds` 内没有返回；它不是“Request concurrency limited to 1”这条 API 启动日志导致的，也不代表前面的发票丢失。批次会在失败点停止，运行清单保留已完成阶段和已成功解析的发票；再次选择 **2** 会复用已有结果，只重试未完成发票。批次级会话复用避免了旧实现中每张发票重复启动、加载模型、清理 API 造成的累计超时和清理竞态；Windows 批次解析期间还会申请系统执行状态，使显示器可以关闭但系统不会因空闲自动进入待机，并在批次结束或失败时释放；用户主动按电源键、合盖或系统策略强制待机仍可能中断任务。若同一张发票在配置的单任务超时内仍失败，应根据错误诊断单独检查该原图和 MinerU 日志。
+
+少数图片型记录可能让 MinerU 生成非空的 `content-list.json` 和 `pages.json`，但生成一个 0 字节的 Markdown 文件。Flowmate 会使用已经过资源引用改写的页文本生成确定性的 `content.md`/`full.md`，并重新计算内容哈希；这不会伪造业务字段，只保留 MinerU 已识别的文字。若结构化结果也没有可恢复页文本，任务才会失败，并在错误中列出缺失的文件。解析和校验完成、`receipt.json` 写入前产生的临时 attempt 会自动删除；因此失败重试不会留下可被误判为成功的半成品目录。
 
 Obsidian 阶段只显示外层阶段的开始和完成：`[Obsidian 5/8] 构建 Obsidian 目录 开始` 与对应的完成行。目录内部不会逐文件打印；开始后暂时没有新行时，表示正在读取、校验或写入当前目录。
 

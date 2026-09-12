@@ -16,8 +16,9 @@ import { readFileSync } from 'node:fs';
 import { cp, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { loadSharedMachineRuntime } from '../../paper-knowledge-engine/src/shared/engine-context.ts';
+import type { WindowsKeepAwakeLease } from '../../paper-knowledge-engine/src/platform/windows-native.ts';
 import { loadMinerULocalConfig, type MinerULocalConfig } from '../../paper-knowledge-engine/src/mineru/mineru-local-config.ts';
-import { createMineruApiSession } from '../../paper-knowledge-engine/src/mineru/mineru-api-session.ts';
+import { createMineruApiSession, type MineruApiSession } from '../../paper-knowledge-engine/src/mineru/mineru-api-session.ts';
 import { assertProcessSafety, createProcessContext, type ProcessContext } from '../../paper-knowledge-engine/src/runtime/process.ts';
 import { withRunLock } from '../../paper-knowledge-engine/src/runtime/run-lock.ts';
 import { redactErrorMessage } from '../../paper-knowledge-engine/src/shared/redaction.ts';
@@ -70,6 +71,10 @@ export interface ParseInput {
 }
 export interface ParseDependencies {
   createSession?: typeof createMineruApiSession;
+  /** Optional caller-owned session. Batch callers keep one API session alive across all samples. */
+  session?: MineruApiSession;
+  /** Optional caller-owned Windows execution-state lease for long MinerU batches. */
+  acquireKeepAwake?: () => WindowsKeepAwakeLease | undefined;
   now?: () => Date;
   /** Optional progress notifications for sequential selection parsing. */
   onProgress?: (progress: ParseProgress) => void | Promise<void>;
@@ -89,6 +94,7 @@ function mineruParseFailure(execution: {
   exitCode: number;
   errorCode?: string | null;
   timedOut?: boolean;
+  timeoutMs?: number;
   cleanupConfirmed?: boolean;
   elapsedMs?: number;
   pid?: number | null;
@@ -98,9 +104,16 @@ function mineruParseFailure(execution: {
   apiStderrSummary?: string;
 }) {
   const failureCode = execution.errorCode ?? (execution.timedOut ? 'ETIMEDOUT' : execution.exitCode || 1);
+  const timeoutMs = execution.timeoutMs;
+  const elapsedMs = execution.elapsedMs;
+  const timeoutSeconds = typeof timeoutMs === 'number' && Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? Math.ceil(timeoutMs / 1000) : undefined;
+  const elapsedSeconds = typeof elapsedMs === 'number' && Number.isSafeInteger(elapsedMs) && elapsedMs >= 0 ? Math.ceil(elapsedMs / 1000) : undefined;
+  const timeoutDetail = execution.timedOut && timeoutSeconds !== undefined
+    ? ` [timeout=${timeoutSeconds}s${elapsedSeconds === undefined ? '' : `, elapsed=${elapsedSeconds}s`}]`
+    : '';
   const diagnostics = redactErrorMessage(execution.stderrSummary
     || [execution.clientStderrSummary, execution.apiStderrSummary].filter(Boolean).join('\n')).trim().slice(-4_000);
-  const message = `MINERU_PARSE_FAILED: ${failureCode}${diagnostics ? `\n${diagnostics}` : ''}`;
+  const message = `MINERU_PARSE_FAILED: ${failureCode}${timeoutDetail}${diagnostics ? `\n${diagnostics}` : ''}`;
   return Object.assign(new Error(message), {
     code: 'MINERU_PARSE_FAILED',
     mineruErrorCode: execution.errorCode ?? null,
@@ -108,6 +121,7 @@ function mineruParseFailure(execution: {
     timedOut: execution.timedOut ?? false,
     cleanupConfirmed: execution.cleanupConfirmed,
     elapsedMs: execution.elapsedMs,
+    timeoutMs: execution.timeoutMs,
     pid: execution.pid ?? null,
     activePids: execution.activePids ?? [],
     stderrSummary: diagnostics,
@@ -210,9 +224,9 @@ export async function verifyNormalizedOutput(normalizedDir: string): Promise<{ c
     const body = await readFile(path);
     files.push({ path: name, sha256: digest(body), bytes: body.byteLength });
   }
-  for (const required of compact ? ['content.md', 'content.json', 'pages.json'] : ['full.md', 'content-list.json', 'pages.json', 'page-marked.txt']) {
-    if (!files.some(file => file.path === required && file.bytes > 0)) throw new Error('NORMALIZED_ARTIFACT_MISSING');
-  }
+  const required = compact ? ['content.md', 'content.json', 'pages.json'] : ['full.md', 'content-list.json', 'pages.json', 'page-marked.txt'];
+  const missing = required.filter(name => !files.some(file => file.path === name && file.bytes > 0));
+  if (missing.length > 0) throw new Error(`NORMALIZED_ARTIFACT_MISSING: ${missing.join(', ')}`);
   const markdown = await readFile(join(normalizedDir, compact ? 'content.md' : 'full.md'), 'utf8');
   const content: unknown = JSON.parse(await readFile(join(normalizedDir, compact ? 'content.json' : 'content-list.json'), 'utf8'));
   const pages: unknown = JSON.parse(await readFile(join(normalizedDir, 'pages.json'), 'utf8'));
@@ -223,6 +237,39 @@ export async function verifyNormalizedOutput(normalizedDir: string): Promise<{ c
     if (!(await lstat(path)).isFile()) throw new Error('NORMALIZED_ASSET_MISSING');
   }
   return { contentHash: createHash('sha256').update(markdown).update(JSON.stringify(content)).digest('hex'), files: files.sort((a, b) => a.path.localeCompare(b.path)) };
+}
+
+/**
+ * A few image-only public records make MinerU emit a useful content list and
+ * page text while leaving its Markdown file empty. The structured page text is
+ * already the normalized, reference-rewritten representation, so it is a safe
+ * deterministic fallback for Flowmate's Markdown contract while preserving all
+ * recognized text.
+ */
+async function recoverEmptyMineruMarkdown<T extends {
+  normalizedDir: string;
+  markdownPath: string;
+  contentListPath: string;
+  contentHash: string;
+}>(normalized: T): Promise<T> {
+  const markdown = await readFile(normalized.markdownPath, 'utf8');
+  if (markdown.trim()) return normalized;
+  let content: unknown;
+  let pages: unknown;
+  try {
+    content = JSON.parse(await readFile(normalized.contentListPath, 'utf8'));
+    pages = JSON.parse(await readFile(join(normalized.normalizedDir, 'pages.json'), 'utf8'));
+  } catch (error) {
+    throw new Error('NORMALIZED_ARTIFACT_MISSING: empty Markdown and unreadable structured page artifacts', { cause: error });
+  }
+  const fallback = Array.isArray(pages)
+    ? pages.map(page => page && typeof page === 'object' && typeof Reflect.get(page, 'text') === 'string' ? Reflect.get(page, 'text') as string : '')
+      .map(text => text.trim()).filter(Boolean).join('\n\n')
+    : '';
+  if (!fallback) throw new Error('NORMALIZED_ARTIFACT_MISSING: empty Markdown and no recoverable page text');
+  const recovered = `${fallback}\n`;
+  await writeFile(normalized.markdownPath, recovered, 'utf8');
+  return { ...normalized, contentHash: createHash('sha256').update(recovered).update(JSON.stringify(content)).digest('hex') };
 }
 
 export async function parseInvoice(input: ParseInput, dependencies: ParseDependencies = {}): Promise<ParseReceipt> {
@@ -256,16 +303,18 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
     const mineruOutputDir = resolveOwnedPath(config.tempRoot, `m/${crypto.randomUUID().slice(0, 8)}`);
     await mkdir(dirname(mineruOutputDir), { recursive: true });
     await mkdir(mineruOutputDir, { recursive: false });
-    let session: ReturnType<typeof createMineruApiSession> | undefined;
+    let session: MineruApiSession | undefined;
+    const ownsSession = dependencies.session === undefined;
     let receipt: ParseReceipt;
     try {
-      session = (dependencies.createSession ?? createMineruApiSession)({ config, processContext });
+      session = dependencies.session ?? (dependencies.createSession ?? createMineruApiSession)({ config, processContext });
       const execution = await session.run({ model: config.model, fileSource: input.sourcePath, outputDir: mineruOutputDir,
         method: config.pipelineMethod, language: config.pipelineLanguage, formula: config.formulaEnabled, table: config.tableEnabled, timeoutMs: config.taskTimeoutMs });
       if (execution.exitCode !== 0 || execution.timedOut || execution.cleanupConfirmed === false || execution.errorCode) throw mineruParseFailure(execution);
       // A newly created attempt cannot contain stale artifacts. ZIP extraction
       // may retain timestamps older than this attempt, so do not filter by mtime.
-      const normalized = await normalizeLocalMinerUResult({ model: config.model, cliBackend: config.cliBackend, outputDir: mineruOutputDir });
+      let normalized = await normalizeLocalMinerUResult({ model: config.model, cliBackend: config.cliBackend, outputDir: mineruOutputDir });
+      normalized = await recoverEmptyMineruMarkdown(normalized);
       // The shared archive normalizer uses attempt-relative assets. Make the
       // standalone normalized directory self-contained without changing its text.
       const assets = join(mineruOutputDir, 'assets');
@@ -280,8 +329,14 @@ export async function parseInvoice(input: ParseInput, dependencies: ParseDepende
       const verified = await verifyNormalizedOutput(normalizedDir);
       if (verified.contentHash !== normalized.contentHash || digest(await readFile(input.sourcePath)) !== originalSha256) throw new Error('PARSE_HASH_MISMATCH');
       receipt = { sampleId: input.sampleId, parserKey, attemptId, originalSha256, startedAt, outputDir, normalizedDir, ...verified };
+    } catch (error) {
+      // No receipt exists until normalization and verification complete. Keep
+      // failed attempts out of the persistent work tree so a resumed run does
+      // not accumulate misleading partial directories.
+      await rm(outputDir, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
     } finally {
-      try { await session?.dispose(); }
+      try { if (ownsSession) await session?.dispose(); }
       finally {
         // The final attempt keeps only normalized artifacts and its receipt. A
         // failed API extraction may leave partial files in the short staging

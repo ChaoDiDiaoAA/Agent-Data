@@ -119,7 +119,7 @@ export interface LocalParseJob extends Partial<MinerUCliJob> {
 export interface MinerUExecution {
   exitCode: number; elapsedMs?: number; stderrSummary?: string; stdoutSummary?: string;
   clientStderrSummary?: string; apiStderrSummary?: string;
-  errorCode?: string | null; cleanupConfirmed?: boolean; timedOut?: boolean;
+  errorCode?: string | null; cleanupConfirmed?: boolean; timedOut?: boolean; timeoutMs?: number;
 }
 export interface NormalizedArtifact extends ParseArtifacts {
   model?: string; cliBackend?: string; contentHash?: string; pages?: import('./papers.ts').PdfPage[];

@@ -2,6 +2,8 @@ import { recoverPublications } from './publication.ts';
 import { sampleDirectory, datasetTasks } from './layout.ts';
 import { readFile, rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import { createMineruApiSession } from '../../paper-knowledge-engine/src/mineru/mineru-api-session.ts';
+import { acquireWindowsKeepAwake } from '../../paper-knowledge-engine/src/platform/windows-native.ts';
 import { resolveOwnedPath } from './config.ts';
 import type { FlowmatePaths } from './contracts.ts';
 import { canonicalJson, createFlowmateMinerURuntime, deriveParseAttemptId, flowmateParserKey, parseInvoice, type ParseDependencies, type ParseReceipt, verifyNormalizedOutput, withRunLock } from './engine-bridge.ts';
@@ -84,23 +86,44 @@ async function parseSelectionUnlocked(input: { paths: FlowmatePaths; selectionId
   if (images.length === 0) throw new Error('PARSE_SELECTION_NO_IMAGE');
   const receipts: ParseReceipt[] = [];
   let skipped = 0;
-  const parserKey = flowmateParserKey(createFlowmateMinerURuntime(paths).mineruConfig);
-  for (let index = 0; index < images.length; index += 1) {
-    const record = images[index]!;
-    const startedAt = Date.now();
-    if (resume && await isReusableParsedSample(paths, record, parserKey)) {
-      skipped += 1;
-      await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'skipped', elapsedMs: 0 });
-      continue;
+  const runtime = createFlowmateMinerURuntime(paths);
+  const parserKey = flowmateParserKey(runtime.mineruConfig);
+  let session = dependencies.session;
+  let ownsSession = false;
+  let keepAwake: ReturnType<typeof acquireWindowsKeepAwake> | undefined;
+  let keepAwakeAttempted = false;
+  try {
+    for (let index = 0; index < images.length; index += 1) {
+      const record = images[index]!;
+      const startedAt = Date.now();
+      if (resume && await isReusableParsedSample(paths, record, parserKey)) {
+        skipped += 1;
+        await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'skipped', elapsedMs: 0 });
+        continue;
+      }
+      if (!keepAwakeAttempted) {
+        keepAwakeAttempted = true;
+        keepAwake = dependencies.acquireKeepAwake?.() ?? acquireWindowsKeepAwake();
+      }
+      if (!session) {
+        session = (dependencies.createSession ?? createMineruApiSession)({
+          config: runtime.mineruConfig,
+          processContext: runtime.processContext,
+        });
+        ownsSession = true;
+      }
+      await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'started', elapsedMs: 0 });
+      try {
+        receipts.push(await processSample({ paths, record }, { ...dependencies, session }));
+        await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'completed', elapsedMs: Date.now() - startedAt });
+      } catch (error) {
+        await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'failed', elapsedMs: Date.now() - startedAt });
+        throw error;
+      }
     }
-    await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'started', elapsedMs: 0 });
-    try {
-      receipts.push(await processSample({ paths, record }, dependencies));
-      await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'completed', elapsedMs: Date.now() - startedAt });
-    } catch (error) {
-      await dependencies.onProgress?.({ index: index + 1, total: images.length, sampleId: record.sample_id, status: 'failed', elapsedMs: Date.now() - startedAt });
-      throw error;
-    }
+  } finally {
+    try { if (ownsSession) await session?.dispose(); }
+    finally { keepAwake?.release(); }
   }
   return { parsed: receipts.length, skipped, total: images.length, sample_ids: receipts.map(receipt => receipt.sampleId), attempts: receipts.map(receipt => receipt.attemptId) };
 }

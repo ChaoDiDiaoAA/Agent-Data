@@ -106,6 +106,67 @@ test('resumed selection skips verified parsed invoices and continues with the fi
   expect(resumed).toHaveLength(1);
 });
 
+test('parsing a selection reuses one MinerU session for the whole batch', async () => {
+  const { paths } = await setup();
+  await acquireVoxel51Selection({ paths, config, selectionId: 'session-reuse', limit: 2, transport: transport() });
+  let created = 0;
+  let runs = 0;
+  let disposed = 0;
+  await parseSelection({ paths, selectionId: 'session-reuse', limit: 2 }, {
+    ...parser('2026-01-01'),
+    createSession: () => {
+      created += 1;
+      return {
+        async ensureReady() { return 'fake'; },
+        async run(job) {
+          runs += 1;
+          await cp(join(import.meta.dir, 'fixtures/mineru-output'), job.outputDir, { recursive: true });
+          return { exitCode: 0 };
+        },
+        async dispose() { disposed += 1; },
+      };
+    },
+  });
+  expect({ created, runs, disposed }).toEqual({ created: 1, runs: 2, disposed: 1 });
+});
+
+test('keeps the machine awake for the active MinerU batch and releases it after completion', async () => {
+  const { paths } = await setup();
+  await acquireVoxel51Selection({ paths, config, selectionId: 'keep-awake', limit: 2, transport: transport() });
+  let acquired = 0;
+  let released = 0;
+  const dependencies = {
+    ...parser('2026-01-01'),
+    acquireKeepAwake: () => {
+      acquired += 1;
+      return { release: () => { released += 1; } };
+    },
+  } as ParseDependencies & { acquireKeepAwake: () => { release: () => void } | undefined };
+  await parseSelection({ paths, selectionId: 'keep-awake' }, dependencies);
+  expect({ acquired, released }).toEqual({ acquired: 1, released: 1 });
+});
+
+test('releases the keep-awake lease when a MinerU batch fails', async () => {
+  const { paths } = await setup();
+  await acquireVoxel51Selection({ paths, config, selectionId: 'keep-awake-failure', limit: 1, transport: transport() });
+  let acquired = 0;
+  let released = 0;
+  const dependencies = {
+    ...parser('2026-01-01'),
+    createSession: () => ({
+      async ensureReady() { return 'fake'; },
+      async run() { throw new Error('parse failed'); },
+      async dispose() {},
+    }),
+    acquireKeepAwake: () => {
+      acquired += 1;
+      return { release: () => { released += 1; } };
+    },
+  } as ParseDependencies & { acquireKeepAwake: () => { release: () => void } | undefined };
+  await expect(parseSelection({ paths, selectionId: 'keep-awake-failure' }, dependencies)).rejects.toThrow('parse failed');
+  expect({ acquired, released }).toEqual({ acquired: 1, released: 1 });
+});
+
 test('persisted IDs survive revised ordering, new source IDs and changed source bytes', async () => {
   const { paths } = await setup();
   await acquireVoxel51Selection({ paths, config, selectionId: 'first', limit: 1, transport: transport() });

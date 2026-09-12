@@ -10,6 +10,9 @@ const JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3;
 const JOB_OBJECT_QUERY = 0x0004;
 const JOB_OBJECT_TERMINATE = 0x0008;
 const ERROR_FILE_NOT_FOUND = 2;
+const ES_SYSTEM_REQUIRED = 0x00000001;
+const ES_CONTINUOUS = 0x80000000;
+const ES_AWAYMODE_REQUIRED = 0x00000040;
 
 type Kernel32 = ReturnType<typeof dlopen<typeof kernelSymbols>>['symbols'];
 const kernelSymbols = {
@@ -23,6 +26,7 @@ const kernelSymbols = {
   AssignProcessToJobObject: { args: [FFIType.uint64_t, FFIType.uint64_t], returns: FFIType.int32_t },
   QueryInformationJobObject: { args: [FFIType.uint64_t, FFIType.int32_t, FFIType.ptr, FFIType.uint32_t, FFIType.ptr], returns: FFIType.int32_t },
   TerminateJobObject: { args: [FFIType.uint64_t, FFIType.uint32_t], returns: FFIType.int32_t },
+  SetThreadExecutionState: { args: [FFIType.uint32_t], returns: FFIType.uint32_t },
   CreateToolhelp32Snapshot: { args: [FFIType.uint32_t, FFIType.uint32_t], returns: FFIType.uint64_t },
   Process32FirstW: { args: [FFIType.uint64_t, FFIType.ptr], returns: FFIType.int32_t },
   Process32NextW: { args: [FFIType.uint64_t, FFIType.ptr], returns: FFIType.int32_t },
@@ -71,6 +75,31 @@ export function windowsProcessStartIso(pid: number): string | null | undefined {
   if (ticks === undefined || ticks === null) return ticks;
   const unixMilliseconds = (ticks - 116444736000000000n) / 10000n;
   return new Date(Number(unixMilliseconds)).toISOString();
+}
+
+export interface WindowsKeepAwakeLease {
+  release(): void;
+}
+
+/**
+ * Keep a long-running local parse alive while the process is active.  Away
+ * mode lets the display turn off without putting the machine into standby;
+ * the system-required fallback covers Windows versions that reject away mode.
+ */
+export function acquireWindowsKeepAwake(): WindowsKeepAwakeLease | undefined {
+  const api = loadKernel32();
+  if (!api) return undefined;
+  const requested = ES_CONTINUOUS + ES_SYSTEM_REQUIRED + ES_AWAYMODE_REQUIRED;
+  const applied = api.SetThreadExecutionState(requested) || api.SetThreadExecutionState(ES_CONTINUOUS + ES_SYSTEM_REQUIRED);
+  if (!applied) return undefined;
+  let released = false;
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      api.SetThreadExecutionState(ES_CONTINUOUS);
+    },
+  };
 }
 
 export interface WindowsProcessJob {
