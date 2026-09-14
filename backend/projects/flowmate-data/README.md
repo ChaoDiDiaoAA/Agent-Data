@@ -163,6 +163,11 @@ bun run typecheck
 `public-invoice-p0-v1`，内容变化时会在校验通过后自动重建；不需要修改版本号。旧配置中仍存在的
 这些字段仅为兼容历史脚本而读取，新配置不要再添加。
 
+每次配置的两个数量都是“本次追加”的数量，不是数据集总量。`current` 会排除已经保存过的
+`source_record_id`；因此来源索引中的实际剩余数量可能小于来源登记文件声明的数量。获取前会按固定
+revision 重新统计，若请求超过剩余容量，会在下载前失败并显示 `requested`、`available`、
+`already_acquired` 和 `source_total`（对应类别的来源总量），此时只需把对应的 `sample.acquire` 字段调小后重试。
+
 命令行的 `--selection`、`--limit`、`--publish-snapshot`、`--include-originals`、`--verify` 和 `--restore-smoke` 会覆盖或开启对应默认值；没有显式 `--config` 时读取本机的 `config/workbench.local.json`。
 
 下载并发、重试策略、来源跳转白名单、图片 32 MiB 大小上限和索引 16 MiB 大小上限属于安全实现约束，不放进业务配置，避免一次配置误把全库或不受信任的跳转放开。
@@ -204,7 +209,7 @@ MinerU 的 `ETIMEDOUT` 表示当前发票的 MinerU 客户端在 `config/mineru.
 
 少数图片型记录可能让 MinerU 生成非空的 `content-list.json` 和 `pages.json`，但生成一个 0 字节的 Markdown 文件。Flowmate 会使用已经过资源引用改写的页文本生成确定性的 `content.md`/`full.md`，并重新计算内容哈希；这不会伪造业务字段，只保留 MinerU 已识别的文字。若结构化结果也没有可恢复页文本，任务才会失败，并在错误中列出缺失的文件。解析和校验完成、`receipt.json` 写入前产生的临时 attempt 会自动删除；因此失败重试不会留下可被误判为成功的半成品目录。
 
-Obsidian 阶段只显示外层阶段的开始和完成：`[Obsidian 5/8] 构建 Obsidian 目录 开始` 与对应的完成行。目录内部不会逐文件打印；开始后暂时没有新行时，表示正在读取、校验或写入当前目录。
+Obsidian 阶段显示外层阶段的开始和完成，并按**当前任务选择集**中的发票样本输出简短的开始/完成行，例如 `[Obsidian] 000911 开始`、`[Obsidian] 000911 完成（耗时 00:02）`；复制到 Vault 前后还会显示 `[Obsidian] 写入目录 开始/完成`。完成摘要中的“当前任务样本”只统计本次选择集数量；目录计划仍会纳入本地已保存的历史样本，以保持 Obsidian 累计目录完整。不会逐个打印样本内部的 `invoice.md`、`record.json` 或图片文件。目录计划校验使用排序扫描，避免样本较多时在最后阶段长时间无输出。
 
 任务开始前会先执行 PKE 的 MinerU 进程安全检查；`dataRoot/work/processes/active.json` 存在且无法确认清理完成时，任务会在探测前停止，避免先下载一批数据再在解析阶段失败。按 PKE 手册先检查并安全解决该记录，再重新选择 **2**：
 

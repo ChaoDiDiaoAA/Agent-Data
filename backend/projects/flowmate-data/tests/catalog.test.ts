@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { FlowmatePaths } from '../src/contracts.ts';
-import { applyCatalog, buildCatalog, type CatalogPlan, type CatalogProgress } from '../src/catalog.ts';
+import { applyCatalog, buildCatalog, validateCatalogPlan, type CatalogAsset, type CatalogPlan, type CatalogProgress } from '../src/catalog.ts';
 import { sha256File } from '../src/file-store.ts';
 import { runCli } from '../src/cli.ts';
 import { saveSampleRecord, type SampleRecord } from '../src/task-store.ts';
@@ -140,9 +140,28 @@ test('reports catalog planning progress for invoice assets and the final plan', 
 
   const plan = await buildCatalog(paths, { onProgress: event => { progress.push(event); } });
 
+  const sampleProgress = progress.filter(event => event.phase === 'sample-assets');
+  expect(sampleProgress.map(event => `${event.status}:${event.item}`)).toEqual([
+    'started:sample-a', 'completed:sample-a',
+    'started:sample-b', 'completed:sample-b',
+  ]);
   expect(progress.some(event => event.phase === 'sample-assets' && event.status === 'completed' && event.current === 1 && event.total === 2 && event.item === 'sample-a')).toBe(true);
   expect(progress.some(event => event.phase === 'sample-assets' && event.status === 'completed' && event.current === 2 && event.total === 2)).toBe(true);
   expect(progress.at(-1)).toMatchObject({ phase: 'plan', status: 'completed', current: 1, total: 1, detail: `文件 ${plan.files.length} 个，资产 ${plan.assets.length} 个` });
+});
+
+test('scopes sample progress to the current task while retaining all local samples in the plan', async () => {
+  const paths = await fixturePaths();
+  await seed(paths);
+  const progress: CatalogProgress[] = [];
+
+  const plan = await buildCatalog(paths, { progressSampleIds: new Set(['sample-b']), onProgress: event => { progress.push(event); } });
+
+  expect(progress.filter(event => event.phase === 'sample-assets').map(event => `${event.status}:${event.item}`)).toEqual([
+    'started:sample-b', 'completed:sample-b',
+  ]);
+  expect(progress.filter(event => event.phase === 'sample-assets').every(event => event.current === 1 && event.total === 1)).toBe(true);
+  expect(plan.files.filter(file => file.path.endsWith('/invoice.md'))).toHaveLength(2);
 });
 
 test('reports publish progress while writing the Obsidian catalog', async () => {
@@ -166,6 +185,44 @@ test('rejects catalog plans that escape the vault or contain conflicting targets
   await expect(applyCatalog(absolute)).rejects.toThrow(/CATALOG_PATH_(ABSOLUTE|TRAVERSAL)/);
   const conflict: CatalogPlan = { vaultRoot: paths.vaultRoot, directories: ['01_Index'], files: [{ path: '01_Index', content: '---\ngenerated_by: flowmate-data\n---\n' }], assets: [] };
   await expect(applyCatalog(conflict)).rejects.toThrow('CATALOG_DUPLICATE_TARGET');
+  const ancestorConflict: CatalogPlan = {
+    vaultRoot: paths.vaultRoot,
+    directories: [],
+    files: [
+      { path: 'Evidence/invoices', content: '---\ngenerated_by: flowmate-data\n---\n' },
+      { path: 'Evidence/invoices/sample/invoice.md', content: '---\ngenerated_by: flowmate-data\n---\n' },
+    ],
+    assets: [],
+  };
+  expect(() => validateCatalogPlan(ancestorConflict)).toThrow('CATALOG_TARGET_CONFLICT');
+});
+
+test('validates a large catalog plan without quadratic target scanning', async () => {
+  const paths = await fixturePaths();
+  const files = Array.from({ length: 2_000 }, (_, index) => ({
+    path: `Evidence/invoices/voxel51/${String(index).padStart(6, '0')}/invoice.md`,
+    content: '---\ngenerated_by: flowmate-data\n---\n',
+  }));
+  expect(validateCatalogPlan({ vaultRoot: paths.vaultRoot, directories: ['Evidence', 'Evidence/invoices', 'Evidence/invoices/voxel51'], files, assets: [] })).toHaveLength(files.length + 3);
+});
+
+test('publishes many assets without quadratic target lookup', async () => {
+  const paths = await fixturePaths();
+  const sourcePath = join(paths.originalRoot, 'source.bin');
+  await Bun.write(sourcePath, Buffer.from([1]));
+  const sourceSha256 = await sha256File(sourcePath);
+  const count = 256;
+  let pathReads = 0;
+  const assets: CatalogAsset[] = Array.from({ length: count }, (_, index) => {
+    const path = `Evidence/assets/${String(index).padStart(4, '0')}.bin`;
+    const asset = { path, sourcePath, sha256: sourceSha256, bytes: 1 } as CatalogAsset;
+    Object.defineProperty(asset, 'path', { enumerable: true, get: () => { pathReads += 1; return path; } });
+    return asset;
+  });
+
+  await applyCatalog({ vaultRoot: paths.vaultRoot, directories: ['Evidence', 'Evidence/assets'], files: [], assets });
+
+  expect(pathReads).toBeLessThan(count * 20);
 });
 
 test('catalog bytes are stable when source insertion order changes', async () => {
@@ -372,6 +429,6 @@ test('runs catalog build through the CLI with the configured paths', async () =>
   await writeFile(config, JSON.stringify(paths));
   const output: unknown[] = [];
   expect(await runCli(['catalog', 'build', '--paths', config, '--config', workbenchPath], { print: value => output.push(value) })).toBe(0);
-  expect(output).toEqual([{ files: expect.any(Number) }]);
+  expect(output).toEqual([{ files: expect.any(Number), samples: 2 }]);
   expect(await Bun.file(join(paths.vaultRoot, 'Evidence/indexes/overview.md')).exists()).toBe(true);
 });

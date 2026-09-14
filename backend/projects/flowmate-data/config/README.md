@@ -299,6 +299,11 @@ bun src/cli.ts catalog build --paths config/paths.local.json --config config/wor
 `dataRoot/tasks/voxel51/selections/history/<selection-hash>.json`。额外知识来源当前不启用，
 代码中的 `public-files` 读取器只为后续扩展保留。
 
+两个数量表示当前批次要追加的数量。`current` 会排除数据根中已经获取的 `source_record_id`，所以
+实际可用容量可能小于来源登记文件中的声明值。程序会在下载前按固定 revision 检查剩余容量；如果
+请求过大，会报出 `requested`、`available`、`already_acquired`、`source_total` 以及应调整的配置字段，
+其中 `source_total` 是对应类别的来源总量，不会开始下载半个批次。
+
 ### `release` 参数
 
 | 参数 | 作用 |
@@ -459,7 +464,7 @@ origin 加入本文件并补充回归测试，不能改成通配符或自动接�
 
 菜单使用 `workbench.local.json` 的 `sample.acquire` 作为数量的唯一来源；选择采集或解析时不会要求输入数量，也不会自动添加 `--limit`。默认 `selection_id=current` 时，当前批次未完成会续跑，当前批次完成后下一次执行会自动排除已获取的 `source_record_id` 并追加下一批；旧批次的原始文件、record 和发票编号不会被覆盖。恢复标记按阶段记录：获取阶段已经开始或失败时续用当前清单，获取前的探测阶段失败时重试会继续追加游标。获取和 MinerU 菜单步骤都会按顺序处理每条发票，并显示 `[发票 i/总数]` 的开始、完成或失败状态；获取进度还会标明“带标注/无标注”。直接子命令仍支持命令行参数，适合调试、自动化和兼容已有脚本。
 
-构建 Obsidian 时，菜单只显示 `[Obsidian 5/8] 构建 Obsidian 目录` 阶段的开始和完成行，不逐文件打印目录内部进度；开始后暂时没有新行时，表示正在进行来源校验、目录写入或清理。
+构建 Obsidian 时，菜单显示 `[Obsidian 5/8] 构建 Obsidian 目录` 阶段的开始和完成行，并按当前选择集中的发票样本显示简短的开始/完成行，例如 `[Obsidian] 000911 开始`、`[Obsidian] 000911 完成（耗时 00:02）`；复制到 Vault 前后还会显示 `[Obsidian] 写入目录 开始/完成`。完成摘要中的“当前任务样本”只统计本次选择集数量；目录仍会纳入本地已保存的历史样本，以保持累计目录完整。不会逐个打印样本内部的 `invoice.md`、`record.json` 或图片文件。目录计划校验使用排序扫描，避免样本较多时在最后阶段长时间无输出。
 
 菜单选择 **2** 执行的是一个完整工作流。运行状态保存在
 `dataRoot/tasks/voxel51/runs/<run-id>/run.json`，同级任务锁覆盖整个工作流；如果进程中断或某个阶段失败，重新运行菜单并再次选择 **2** 会自动恢复相同配置下最近的未完成批次，跳过已经完成的阶段。MinerU 解析阶段为当前 selection 复用一个 API 会话，失败时在批次边界统一清理；MinerU 还会按原图 SHA-256、解析器身份、`parse.json` 和结构化文件清单验证已完成发票，只有验证通过的记录才会跳过。修改数量、`selection_id`、来源或 `mineru.local.json` 后，配置身份改变，会创建新的批次。

@@ -163,7 +163,7 @@ describe('interactive CLI menu', () => {
     expect(output).toContain('[发票 2/2] invoice-b 开始（获取，无标注）');
   });
 
-  test('prints only Obsidian stage boundaries while the catalog is building', async () => {
+  test('prints concise start and completion lines for each Obsidian invoice', async () => {
     const { pathsPath, configPath } = await menuFixture(2);
     const answers = ['2', '0'];
     const lines: string[] = [];
@@ -172,13 +172,29 @@ describe('interactive CLI menu', () => {
       configPath,
       ask: async () => answers.shift()!,
       output: fakeOutput(lines),
-      execute: async () => 0,
+      execute: async (args, executeOptions) => {
+        if (args[0] === 'catalog') {
+          await executeOptions?.catalogProgress?.({ phase: 'sample-assets', status: 'started', current: 1, total: 2, item: '000001', elapsedMs: 0 });
+          await executeOptions?.catalogProgress?.({ phase: 'sample-assets', status: 'completed', current: 1, total: 2, item: '000001', elapsedMs: 1_234 });
+          await executeOptions?.catalogProgress?.({ phase: 'sample-assets', status: 'started', current: 2, total: 2, item: '000002', elapsedMs: 0 });
+          await executeOptions?.catalogProgress?.({ phase: 'sample-assets', status: 'completed', current: 2, total: 2, item: '000002', elapsedMs: 2_345 });
+          await executeOptions?.catalogProgress?.({ phase: 'publish', status: 'started', current: 0, total: 10, elapsedMs: 0 });
+          await executeOptions?.catalogProgress?.({ phase: 'publish', status: 'completed', current: 10, total: 10, elapsedMs: 3_456 });
+          executeOptions?.print?.({ files: 6, samples: 2, current_task_samples: 2 });
+        }
+        return 0;
+      },
     });
     const output = lines.join('');
     expect(output).toContain('[Obsidian 5/8] 构建 Obsidian 目录 开始');
-    expect(output).toContain('[Obsidian 5/8] 构建 Obsidian 目录 完成');
+    expect(output).toContain('[Obsidian] 000001 开始');
+    expect(output).toContain('[Obsidian] 000001 完成（耗时 00:01）');
+    expect(output).toContain('[Obsidian] 000002 开始');
+    expect(output).toContain('[Obsidian] 000002 完成（耗时 00:02）');
+    expect(output).toContain('[Obsidian] 写入目录 开始');
+    expect(output).toContain('[Obsidian] 写入目录 完成');
+    expect(output).toContain('[Obsidian 5/8] 构建 Obsidian 目录 完成：当前任务样本 2 条，写入 6 个文件');
     expect(output).not.toContain('[Obsidian] 目录资产');
-    expect(output).not.toContain('[Obsidian] 写入');
   });
 
   test('maps verify and backup entries to the correct commands', async () => {

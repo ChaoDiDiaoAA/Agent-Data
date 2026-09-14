@@ -7,7 +7,7 @@ import { stdin, stdout } from 'node:process';
 import { loadPaths, loadSourceConfig, loadWorkbenchConfig, resolveOwnedPath, sampleAcquireCounts, sampleAcquireTotal } from './config.ts';
 import type { SourceTransport } from './sources/dataset-records.ts';
 import { createSourceHttp } from './sources/dataset-records.ts';
-import { acquireVoxel51Selection, inspectVoxel51Selection, probeVoxel51, type AcquireProgress } from './sources/voxel51.ts';
+import { acquireVoxel51Selection, inspectVoxel51Selection, loadVoxel51SelectionSampleIds, probeVoxel51, type AcquireProgress } from './sources/voxel51.ts';
 import { mapVoxel51Selection } from './labels/voxel51.ts';
 import { publishStructuredSnapshot } from './structured-snapshot.ts';
 import { parseSelection } from './process-samples.ts';
@@ -37,6 +37,7 @@ export interface MenuOptions {
   execute?: typeof runCli;
   transport?: SourceTransport;
   parseDependencies?: ParseDependencies;
+  catalogProgress?: (progress: CatalogProgress) => void | Promise<void>;
 }
 
 function sourceConfigPath(sourceId: string): string {
@@ -130,7 +131,14 @@ function menuResultSummary(args: string[], value: unknown): string {
     return `映射 ${String(result.mapped ?? 0)} 条，跳过无标注 ${String(result.skipped_unannotated ?? 0)} 条，提供 ${String(result.provided ?? 0)}，缺失 ${String(result.missing ?? 0)}，歧义 ${String(result.ambiguous ?? 0)}，镜像 ${String(result.snapshots ?? 0)}`;
   }
   if (args[0] === 'parse') return `解析 ${String(result.parsed ?? 0)} 条，跳过 ${String(result.skipped ?? 0)} 条（共 ${String(result.total ?? result.parsed ?? 0)} 条）`;
-  if (args[0] === 'catalog') return `写入 ${String(result.files ?? 0)} 个文件`;
+  if (args[0] === 'catalog') {
+    const currentTaskSamples = result.current_task_samples;
+    if (currentTaskSamples !== undefined) return `当前任务样本 ${String(currentTaskSamples)} 条，写入 ${String(result.files ?? 0)} 个文件`;
+    const samples = result.samples;
+    return samples === undefined
+      ? `写入 ${String(result.files ?? 0)} 个文件`
+      : `目录样本 ${String(samples)} 条，写入 ${String(result.files ?? 0)} 个文件`;
+  }
   if (args[0] === 'release' && args[1] === 'build') return `version=${menuText(result.version, args[2] ?? 'unknown')}，条目 ${String(result.entries ?? 0)}，省略原件 ${String(result.omitted_originals ?? 0)}`;
   if (args[0] === 'release' && args[1] === 'verify') return `version=${menuText(result.version, args[2] ?? 'unknown')}，文件 ${String(result.files ?? 0)} 个`;
   if (args[0] === 'verify') return `记录 ${String(result.records ?? 0)} 条，Release 文件 ${String(result.release_files ?? 0)}，卡片 ${String(result.cards ?? 0)}，projection_valid=${String(result.projection_valid ?? false)}`;
@@ -211,6 +219,20 @@ function menuAcquireProgress(output: MenuOutput, progress: AcquireProgress): voi
   }
   const status = progress.status === 'completed' ? '完成' : '失败';
   writeMenu(output, `${label} ${status}（获取，${annotation}，耗时 ${menuDuration(progress.elapsedMs)}）`);
+}
+
+function menuCatalogProgress(output: MenuOutput, progress: CatalogProgress): void {
+  if (progress.phase === 'publish') {
+    if (progress.status === 'started') writeMenu(output, '[Obsidian] 写入目录 开始');
+    if (progress.status === 'completed') writeMenu(output, '[Obsidian] 写入目录 完成');
+    return;
+  }
+  if (progress.phase !== 'sample-assets' || !progress.item) return;
+  if (progress.status === 'started') {
+    writeMenu(output, `[Obsidian] ${progress.item} 开始`);
+    return;
+  }
+  if (progress.status === 'completed') writeMenu(output, `[Obsidian] ${progress.item} 完成（耗时 ${menuDuration(progress.elapsedMs)}）`);
 }
 
 function menuLabel(workbench: ReturnType<typeof loadWorkbenchConfig>): string {
@@ -303,12 +325,19 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
     const acquireProgress = args[0] === 'acquire'
       ? async (progress: AcquireProgress) => { menuAcquireProgress(output, progress); }
       : undefined;
+    const catalogProgress = args[0] === 'catalog'
+      ? async (progress: CatalogProgress) => {
+          menuCatalogProgress(output, progress);
+          await options.catalogProgress?.(progress);
+        }
+      : undefined;
     const code = await execute(args, {
       transport: options.transport,
       parseDependencies,
       ...(args[0] === 'parse' && resumeStage ? { resumeTask: true } : {}),
       ...(args[0] === 'acquire' && resumeStage ? { resumeTask: true } : {}),
       ...(acquireProgress ? { acquireProgress } : {}),
+      ...(catalogProgress ? { catalogProgress } : {}),
       print: value => { result = value; },
     });
     return { code, result };
@@ -503,8 +532,14 @@ export async function runCli(arguments_: string[], options: { transport?: Source
   const backupVerify = backupVerifyFlag || workbench.backup.verify;
   const restoreSmoke = restoreSmokeFlag || workbench.backup.restore_smoke;
   if (catalogBuild) {
-    const plan = await rebuildCatalog(paths, { onProgress: options.catalogProgress });
-    (options.print ?? (value => console.log(JSON.stringify(value, null, 2))))({ files: plan.files.length });
+    const selectedSampleIds = await loadVoxel51SelectionSampleIds({ paths, config: sampleSourceConfig, selectionId });
+    const progressSampleIds = selectedSampleIds.size > 0 ? selectedSampleIds : undefined;
+    const plan = await rebuildCatalog(paths, { onProgress: options.catalogProgress, progressSampleIds });
+    const samples = progressSampleIds?.size ?? plan.files.filter(file => file.path.endsWith('/invoice.md')).length;
+    const result = progressSampleIds
+      ? { files: plan.files.length, samples, current_task_samples: samples }
+      : { files: plan.files.length, samples };
+    (options.print ?? (value => console.log(JSON.stringify(value, null, 2))))(result);
     return 0;
   }
   if (releaseBuild) {

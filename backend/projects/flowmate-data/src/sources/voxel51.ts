@@ -54,6 +54,12 @@ interface StoredSelection extends Voxel51Selection {
 }
 
 function fail(code: string): never { throw new Error(code); }
+function insufficientSelection(kind: 'ANNOTATED' | 'UNANNOTATED', requested: number, available: number, sourceTotal: number, alreadyAcquired: number): never {
+  const code = `VOXEL51_INSUFFICIENT_${kind}_RECORDS`;
+  const configKey = kind === 'ANNOTATED' ? 'sample.acquire.with_publisher_annotation' : 'sample.acquire.without_publisher_annotation';
+  const error = new Error(`${code}: requested=${requested}, available=${available}, already_acquired=${alreadyAcquired}, source_total=${sourceTotal}; 请将 ${configKey} 调整为不超过 ${available}`);
+  throw Object.assign(error, { code, requested, available, already_acquired: alreadyAcquired, source_total: sourceTotal });
+}
 function object(value: unknown): JsonObject {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail('VOXEL51_INVALID_INDEX');
   return value as JsonObject;
@@ -157,14 +163,20 @@ export function selectVoxel51(records: readonly Voxel51Record[], options: {
   assertRevision(options.revision);
   const counts = normalizeVoxel51AcquireCounts(options);
   const excluded = options.exclude_source_record_ids ?? new Set<string>();
-  const annotated = records.filter(record => !excluded.has(record.source_record_id)
-    && (record.annotation_status === 'annotated' || (record.annotation_status === undefined && record.annotated)))
+  const annotatedSource = records.filter(record => record.annotation_status === 'annotated'
+    || (record.annotation_status === undefined && record.annotated));
+  const unannotatedSource = records.filter(record => record.annotation_status === 'unannotated'
+    || (record.annotation_status === undefined && !record.annotated));
+  const annotated = annotatedSource.filter(record => !excluded.has(record.source_record_id))
     .sort((a, b) => a.source_record_id < b.source_record_id ? -1 : a.source_record_id > b.source_record_id ? 1 : 0);
-  const unannotated = records.filter(record => !excluded.has(record.source_record_id)
-    && (record.annotation_status === 'unannotated' || (record.annotation_status === undefined && !record.annotated)))
+  const unannotated = unannotatedSource.filter(record => !excluded.has(record.source_record_id))
     .sort((a, b) => a.source_record_id < b.source_record_id ? -1 : a.source_record_id > b.source_record_id ? 1 : 0);
-  if (annotated.length < counts.with_publisher_annotation) return fail('VOXEL51_INSUFFICIENT_ANNOTATED_RECORDS');
-  if (unannotated.length < counts.without_publisher_annotation) return fail('VOXEL51_INSUFFICIENT_UNANNOTATED_RECORDS');
+  if (annotated.length < counts.with_publisher_annotation) {
+    return insufficientSelection('ANNOTATED', counts.with_publisher_annotation, annotated.length, annotatedSource.length, annotatedSource.length - annotated.length);
+  }
+  if (unannotated.length < counts.without_publisher_annotation) {
+    return insufficientSelection('UNANNOTATED', counts.without_publisher_annotation, unannotated.length, unannotatedSource.length, unannotatedSource.length - unannotated.length);
+  }
   const selected = [
     ...annotated.slice(0, counts.with_publisher_annotation).map(record => ({ record, annotation_status: 'annotated' as const })),
     ...unannotated.slice(0, counts.without_publisher_annotation).map(record => ({ record, annotation_status: 'unannotated' as const })),
@@ -297,6 +309,20 @@ export async function inspectVoxel51Selection(options: { paths: FlowmatePaths; c
   if (!saved) return { selectionId, path, exists: false };
   const selection = parseStoredSelection(saved, config, selectionId);
   return { selectionId, path, exists: true, counts: selection.counts, recordCount: selection.records.length, revision: selection.revision, selectionHash: selection.selection_hash };
+}
+
+/**
+ * Load the sample ids from a persisted selection for progress reporting.
+ * Missing selections are represented by an empty set; acquisition will create
+ * the selection before the catalog stage runs in a complete task.
+ */
+export async function loadVoxel51SelectionSampleIds(options: { paths: FlowmatePaths; config: SourceConfig; selectionId: string }): Promise<ReadonlySet<string>> {
+  const { paths, config, selectionId } = options;
+  if (config.source_id !== 'voxel51-invoice-ocr' || config.dataset_id !== 'voxel51-hq-invoice-ocr') return fail('VOXEL51_SOURCE_IDENTITY_MISMATCH');
+  const saved = await optionalBytes(selectionPath(paths, config, selectionId));
+  if (!saved) return new Set<string>();
+  const selection = parseStoredSelection(saved, config, selectionId);
+  return new Set(selection.records.map(record => record.sample_id));
 }
 
 function checkSelection(bytes: Uint8Array, config: SourceConfig, selectionId: string, expectedCounts: AcquireCounts, selectionFile?: string): StoredSelection {

@@ -9,7 +9,7 @@ import fixture from './fixtures/voxel51-samples.json';
 import { loadSourceConfig } from '../src/config.ts';
 import type { FlowmatePaths } from '../src/contracts.ts';
 import { createSourceHttp, resolveHuggingFaceRevision } from '../src/sources/dataset-records.ts';
-import { assertVoxel51AcquireLimit, readVoxel51Index, selectVoxel51, acquireVoxel51Selection, probeVoxel51 } from '../src/sources/voxel51.ts';
+import { assertVoxel51AcquireLimit, readVoxel51Index, selectVoxel51, acquireVoxel51Selection, loadVoxel51SelectionSampleIds, probeVoxel51 } from '../src/sources/voxel51.ts';
 import { runCli } from '../src/cli.ts';
 
 const revision = 'd21f03cfeea2b330e15a229883c66d7ebece8e69';
@@ -44,6 +44,16 @@ test('selects annotated and unannotated groups independently and records their c
   expect(selection.counts).toEqual({ with_publisher_annotation: 1, without_publisher_annotation: 1 });
   expect(selection.records.map(record => record.annotation_status)).toEqual(['annotated', 'unannotated']);
   expect(selection.records[1]!.annotation_sha256).toBeUndefined();
+});
+
+test('explains remaining capacity when prior acquisitions exhaust a requested group', () => {
+  const records = readVoxel51Index(indexBytes);
+  const excluded = new Set([records[1]!.source_record_id]);
+  expect(() => selectVoxel51(records, {
+    counts: { with_publisher_annotation: 3, without_publisher_annotation: 0 },
+    revision,
+    exclude_source_record_ids: excluded,
+  })).toThrow('VOXEL51_INSUFFICIENT_ANNOTATED_RECORDS: requested=3, available=2, already_acquired=1, source_total=3');
 });
 
 test('enforces the configured total and annotated Voxel51 counts before acquisition', () => {
@@ -138,6 +148,7 @@ test('acquisition stores original record objects and receipts, then reuses the p
   const selectionPath = join(configuredPaths.dataRoot, 'tasks', 'voxel51', 'selections', 'initial-20.json');
   const selectionBytes = await readFile(selectionPath);
   const selection = JSON.parse(selectionBytes.toString());
+  expect([...await loadVoxel51SelectionSampleIds({ paths: configuredPaths, config, selectionId: 'initial-20' })]).toEqual(['000001', '000002']);
   expect(selection.revision).toBe(revision);
   expect(selection.index_sha256).toBe(sha(indexBytes));
   expect(selection.index_url).toContain(`/${revision}/samples.json`);

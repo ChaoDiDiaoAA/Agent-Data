@@ -38,6 +38,12 @@ export interface CatalogProgress {
 
 interface CatalogBuildOptions {
   onProgress?: (progress: CatalogProgress) => void | Promise<void>;
+  /**
+   * Sample ids belonging to the current task.  The catalog still includes
+   * every locally acquired sample, but progress output can stay scoped to the
+   * task the user started instead of repeating the whole local catalog.
+   */
+  progressSampleIds?: ReadonlySet<string>;
 }
 
 interface CatalogPublishOptions {
@@ -114,7 +120,7 @@ async function assertNewVaultPathBound(vaultRoot: string, candidate: string): Pr
 
 interface CatalogTarget { relativePath: string; absolutePath: string; kind: 'directory' | 'file' | 'asset' }
 
-function validatePlan(plan: CatalogPlan): CatalogTarget[] {
+export function validateCatalogPlan(plan: CatalogPlan): CatalogTarget[] {
   if (!plan || typeof plan.vaultRoot !== 'string' || (!isAbsolute(plan.vaultRoot) && !win32.isAbsolute(plan.vaultRoot)) || !Array.isArray(plan.directories) || !Array.isArray(plan.files) || !Array.isArray(plan.assets)) fail('CATALOG_PLAN_INVALID');
   const targets: CatalogTarget[] = [];
   for (const value of plan.directories) {
@@ -138,13 +144,19 @@ function validatePlan(plan: CatalogPlan): CatalogTarget[] {
     if (seen.has(key)) fail('CATALOG_DUPLICATE_TARGET');
     seen.set(key, target);
   }
-  const files = targets.filter(target => target.kind !== 'directory');
-  for (const file of files) {
-    for (const other of targets) {
-      if (file === other) continue;
-      const child = relative(file.absolutePath, other.absolutePath);
-      if (child && child !== '..' && !child.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(child)) fail('CATALOG_TARGET_CONFLICT');
-    }
+  // Targets are validated before publishing.  The previous implementation
+  // compared every file with every target, which made a catalog with a few
+  // thousand invoices effectively hang after asset collection completed.
+  // Sorting normalized absolute paths makes descendants contiguous, so each
+  // file/asset only needs to inspect its immediate successor.
+  const ordered = targets
+    .map(target => ({ target, key: pathKey(target.absolutePath).replaceAll('\\', '/') }))
+    .sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+  for (let index = 0; index < ordered.length; index += 1) {
+    const current = ordered[index]!;
+    if (current.target.kind === 'directory') continue;
+    const next = ordered[index + 1];
+    if (next && next.key.startsWith(`${current.key}/`)) fail('CATALOG_TARGET_CONFLICT');
   }
   return targets;
 }
@@ -308,6 +320,67 @@ async function buildSampleAssets(paths: FlowmatePaths, record: SampleRecord): Pr
   return [...assets.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/**
+ * Build invoice assets with one start/completion pair per visible task sample.
+ * The selected samples stay sequential for readable logs; historical samples
+ * may be refreshed concurrently because they are outside the current task.
+ */
+async function buildSampleAssetsWithProgress(
+  paths: FlowmatePaths,
+  samples: SampleRecord[],
+  onProgress: NonNullable<CatalogBuildOptions['onProgress']>,
+  progressSampleIds?: ReadonlySet<string>,
+): Promise<CatalogAsset[][]> {
+  const progressTotal = progressSampleIds?.size ?? samples.length;
+  let progressCurrent = 0;
+
+  // A task selection is a suffix of the accumulated local samples in the
+  // normal `current` workflow. Build the older samples concurrently in the
+  // background so the first visible line is from the current task and the
+  // last visible line is not followed by another long silent rebuild.
+  if (progressSampleIds && progressSampleIds.size > 0) {
+    const selected = samples.filter(record => progressSampleIds.has(record.sample_id));
+    const historical = samples.filter(record => !progressSampleIds.has(record.sample_id));
+    const assetsByRecord = new Map<string, CatalogAsset[]>();
+    const recordKey = (record: SampleRecord) => `${record.dataset_id}/${record.sample_id}`;
+    const historicalBuild = Promise.all(historical.map(async record => {
+      assetsByRecord.set(recordKey(record), await buildSampleAssets(paths, record));
+    }));
+    try {
+      for (const record of selected) {
+        const sampleStartedAt = Date.now();
+        progressCurrent += 1;
+        await onProgress({ phase: 'sample-assets', status: 'started', current: progressCurrent, total: progressTotal, item: record.sample_id, detail: '构建', elapsedMs: 0 });
+        const assets = await buildSampleAssets(paths, record);
+        assetsByRecord.set(recordKey(record), assets);
+        await onProgress({ phase: 'sample-assets', status: 'completed', current: progressCurrent, total: progressTotal, item: record.sample_id, detail: `资产 ${assets.length} 个`, elapsedMs: Date.now() - sampleStartedAt });
+      }
+    } finally {
+      // Always observe the background promise so a historical asset failure
+      // cannot become an unhandled rejection when a selected sample fails.
+      await historicalBuild;
+    }
+    return samples.map(record => assetsByRecord.get(recordKey(record)) ?? []);
+  }
+
+  const result: CatalogAsset[][] = [];
+  for (let index = 0; index < samples.length; index += 1) {
+    const record = samples[index]!;
+    const reportProgress = !progressSampleIds || progressSampleIds.has(record.sample_id);
+    const sampleStartedAt = Date.now();
+    if (reportProgress) {
+      progressCurrent += 1;
+      await onProgress({ phase: 'sample-assets', status: 'started', current: progressCurrent, total: progressTotal, item: record.sample_id, detail: '构建', elapsedMs: 0 });
+    }
+    const assets = await buildSampleAssets(paths, record);
+    if (reportProgress) {
+      await onProgress({ phase: 'sample-assets', status: 'completed', current: progressCurrent, total: progressTotal, item: record.sample_id, detail: `资产 ${assets.length} 个`, elapsedMs: Date.now() - sampleStartedAt });
+    }
+    result.push(assets);
+  }
+  return result;
+}
+
 async function buildKnowledgeAssets(paths: FlowmatePaths, record: KnowledgeRecord): Promise<CatalogAsset[]> {
   const base = knowledgeAssetBase(record);
   const assets = new Map<string, CatalogAsset>();
@@ -328,15 +401,9 @@ export async function buildCatalog(paths: FlowmatePaths, options: CatalogBuildOp
   const knowledge = await knowledgeRecords(paths);
   const withdrawals = await loadWithdrawalList(withdrawalListPath(paths.dataRoot));
   const releaseRecords = await releases(paths);
-  const sampleAssets = await Promise.all(samples.map(async (record, index) => {
-    const sampleStartedAt = Date.now();
-    const assets = await buildSampleAssets(paths, record);
-    // `current` is the stable position in the sorted record list. Asset
-    // collection remains concurrent, so the output can report a finished
-    // record immediately without making catalog generation sequential.
-    await options.onProgress?.({ phase: 'sample-assets', status: 'completed', current: index + 1, total: samples.length, item: record.sample_id, detail: `资产 ${assets.length} 个`, elapsedMs: Date.now() - sampleStartedAt });
-    return assets;
-  }));
+  const sampleAssets = options.onProgress
+    ? await buildSampleAssetsWithProgress(paths, samples, options.onProgress, options.progressSampleIds)
+    : await Promise.all(samples.map(record => buildSampleAssets(paths, record)));
   const knowledgeAssets = await Promise.all(knowledge.map(async (record, index) => {
     const knowledgeStartedAt = Date.now();
     const assets = await buildKnowledgeAssets(paths, record);
@@ -377,16 +444,16 @@ export async function buildCatalog(paths: FlowmatePaths, options: CatalogBuildOp
     files: files.sort((left, right) => left.path.localeCompare(right.path)),
     assets: assets.sort((left, right) => left.path.localeCompare(right.path)),
   };
-  validatePlan(plan);
+  validateCatalogPlan(plan);
   await options.onProgress?.({ phase: 'plan', status: 'completed', current: 1, total: 1, detail: `文件 ${plan.files.length} 个，资产 ${plan.assets.length} 个`, elapsedMs: Date.now() - startedAt });
   return plan;
 }
 
 /** Build and publish the Vault projection while the machine data roots are quiescent. */
-export async function rebuildCatalog(paths: FlowmatePaths, options: { lockHeld?: boolean; onProgress?: (progress: CatalogProgress) => void | Promise<void> } = {}): Promise<CatalogPlan> {
+export async function rebuildCatalog(paths: FlowmatePaths, options: { lockHeld?: boolean; onProgress?: (progress: CatalogProgress) => void | Promise<void>; progressSampleIds?: ReadonlySet<string> } = {}): Promise<CatalogPlan> {
   const operation = async () => {
     await recoverPublications(paths);
-    const plan = await buildCatalog(paths, { onProgress: options.onProgress });
+    const plan = await buildCatalog(paths, { onProgress: options.onProgress, progressSampleIds: options.progressSampleIds });
     await applyCatalog(plan, { onProgress: options.onProgress });
     return plan;
   };
@@ -514,7 +581,7 @@ async function withCatalogLock<T>(vaultRoot: string, operation: () => Promise<T>
 }
 
 export async function applyCatalog(plan: CatalogPlan, options: CatalogPublishOptions = {}): Promise<void> {
-  const targets = validatePlan(plan);
+  const targets = validateCatalogPlan(plan);
   await mkdir(plan.vaultRoot, { recursive: true });
   await assertDirectory(plan.vaultRoot, true);
   await withCatalogLock(plan.vaultRoot, async () => {
@@ -523,6 +590,11 @@ export async function applyCatalog(plan: CatalogPlan, options: CatalogPublishOpt
     await options.onProgress?.({ phase: 'publish', status: 'started', current: 0, total: publishTargets.length, detail: `目录 ${plan.directories.length} 个，文件 ${plan.files.length} 个，资产 ${plan.assets.length} 个`, elapsedMs: 0 });
     const previousAssets = await loadAssetManifest(plan.vaultRoot) ?? await inferLegacyAssetManifest(plan);
     const previousByPath = new Map(previousAssets?.assets.map(asset => [pathKey(asset.path), asset]) ?? []);
+    // Resolve each publish target once.  Scanning the full plan with find()
+    // for every target made large catalogs quadratic and left the CLI silent
+    // in the publish phase for many minutes.
+    const filesByPath = new Map(plan.files.map(file => [pathKey(catalogPath(plan.vaultRoot, file.path)), file]));
+    const assetsByPath = new Map(plan.assets.map(asset => [pathKey(catalogPath(plan.vaultRoot, asset.path)), asset]));
     const stagingRoot = join(plan.vaultRoot, `${catalogStagingPrefix}${crypto.randomUUID()}`);
     let published = 0;
     const reportPublished = async (target: CatalogTarget): Promise<void> => {
@@ -536,13 +608,13 @@ export async function applyCatalog(plan: CatalogPlan, options: CatalogPublishOpt
       for (const target of targets.filter(target => target.kind === 'file')) await assertFileOwnership(target.absolutePath);
       for (const asset of plan.assets) await verifyAssetSource(asset);
       for (const target of targets.filter(target => target.kind === 'file')) {
-        const file = plan.files.find(candidate => catalogPath(plan.vaultRoot, candidate.path) === target.absolutePath);
+        const file = filesByPath.get(pathKey(target.absolutePath));
         if (!file) fail('CATALOG_PLAN_INVALID');
         await atomicWriteOwned(plan.vaultRoot, target.relativePath, file.content, stagingRoot);
         await reportPublished(target);
       }
       for (const target of targets.filter(target => target.kind === 'asset')) {
-        const asset = plan.assets.find(candidate => catalogPath(plan.vaultRoot, candidate.path) === target.absolutePath);
+        const asset = assetsByPath.get(pathKey(target.absolutePath));
         if (!asset) fail('CATALOG_PLAN_INVALID');
         await atomicCopyAsset(plan.vaultRoot, asset, stagingRoot, previousByPath.get(pathKey(asset.path)));
         await reportPublished(target);
