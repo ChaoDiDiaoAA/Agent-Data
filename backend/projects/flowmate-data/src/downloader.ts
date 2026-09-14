@@ -80,7 +80,8 @@ function retryable(error: unknown): boolean {
   if (!error || typeof error !== 'object' || !('code' in error)) return false;
   const code = Reflect.get(error, 'code');
   const status = Reflect.get(error, 'status');
-  return code === 'RESEARCH_TRANSPORT_FAILED' || (code === 'RESEARCH_HTTP_STATUS' && (status === 408 || status === 429 || (typeof status === 'number' && status >= 500 && status <= 599)));
+  return code === 'RESEARCH_TRANSPORT_FAILED' || code === 'RESEARCH_TIMEOUT'
+    || (code === 'RESEARCH_HTTP_STATUS' && (status === 408 || status === 429 || (typeof status === 'number' && status >= 500 && status <= 599)));
 }
 
 async function removePart(path: string): Promise<void> {

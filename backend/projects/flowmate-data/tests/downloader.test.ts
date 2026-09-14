@@ -124,6 +124,26 @@ test('retries connection interruptions', async () => {
   expect(waits).toEqual([250]);
 });
 
+test('retries request timeouts at the injected backoff intervals', async () => {
+  const directory = await temporaryDirectory();
+  const bytes = Buffer.from('%PDF-1.7\ntimeout-retry');
+  let attempts = 0;
+  const client: ResearchHttpClient = {
+    get: async () => {
+      attempts += 1;
+      if (attempts < 3) throw Object.assign(new Error('request timed out'), { code: 'RESEARCH_TIMEOUT' });
+      return { url: 'https://source.example/invoice.pdf', status: 200, headers: new Headers({ 'content-type': 'application/pdf' }), bytes };
+    },
+  };
+  const waits: number[] = [];
+
+  await createDownloader({ http: client, sleep: async milliseconds => { waits.push(milliseconds); } }).downloadToTemp(request(directory));
+
+  expect(attempts).toBe(3);
+  expect(waits).toEqual([250, 1000]);
+  expect(await readFile(join(directory, 'original.pdf'))).toEqual(bytes);
+});
+
 test('serializes concurrent downloads from the same downloader', async () => {
   const directory = await temporaryDirectory();
   const bytes = Buffer.from('%PDF-1.7\nserialized');
