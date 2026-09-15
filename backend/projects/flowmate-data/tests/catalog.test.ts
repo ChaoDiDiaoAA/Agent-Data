@@ -415,6 +415,40 @@ test('builds a self-contained Vault sample with annotation and Release assets', 
   expect(markdown).not.toContain(paths.dataRoot);
 });
 
+test('regenerates the Vault invoice snapshot from the exact retained asset bytes', async () => {
+  const paths = await fixturePaths();
+  await seedSelfContainedSample(paths, 'sample-a', true);
+  const originalDir = join(paths.originalRoot, 'voxel51/sample-a');
+  const dataDir = join(paths.dataRoot, 'voxel51/sample-a');
+  for (const name of ['fields.json', 'record.json', 'receipt.json', 'parse.json']) {
+    const value = JSON.parse(await readFile(join(dataDir, name), 'utf8'));
+    await writeFile(join(originalDir, name), JSON.stringify(value, null, 2) + '\n');
+  }
+  await mkdir(join(originalDir, 'assets'), { recursive: true });
+  await writeFile(join(originalDir, 'assets/logo.png'), await readFile(join(dataDir, 'assets/logo.png')));
+  const retained = ['annotation.json', 'assets/logo.png', 'content.json', 'content.md', 'fields.json', 'original.jpg', 'pages.json', 'parse.json', 'receipt.json', 'record.json'];
+  const sourceFiles = await Promise.all(retained.map(async path => {
+    const sourcePath = join(originalDir, path);
+    const bytes = await readFile(sourcePath);
+    return { path, sha256: await sha256File(sourcePath), bytes: bytes.byteLength };
+  }));
+  const oldSnapshot = JSON.stringify({ schema_version: 1, json_format: 'pretty-2', record_sha256: await sha256File(join(dataDir, 'record.json')), files: sourceFiles }, null, 2) + '\n';
+  await writeFile(join(originalDir, 'snapshot.json'), oldSnapshot);
+
+  await applyCatalog(await buildCatalog(paths));
+
+  const vaultDir = join(paths.vaultRoot, 'Evidence/invoices/voxel51/sample-a');
+  const snapshotBytes = await readFile(join(vaultDir, 'snapshot.json'), 'utf8');
+  const snapshot = JSON.parse(snapshotBytes) as { files: Array<{ path: string; sha256: string; bytes: number }> };
+  expect(snapshotBytes).not.toBe(oldSnapshot);
+  expect(snapshot.files.map(file => file.path)).toEqual(retained);
+  for (const file of snapshot.files) {
+    const body = await readFile(join(vaultDir, file.path));
+    expect(file.bytes).toBe(body.byteLength);
+    expect(file.sha256).toBe(await sha256File(join(vaultDir, file.path)));
+  }
+});
+
 test('rejects conflicting extra assets instead of silently choosing a source', async () => {
   const paths = await fixturePaths();
   await seedSelfContainedSample(paths, 'sample-a', true);

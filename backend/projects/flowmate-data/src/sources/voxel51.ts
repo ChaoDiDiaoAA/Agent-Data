@@ -8,7 +8,7 @@ import { dirname, extname } from 'node:path';
 import { resolveOwnedPath } from '../config.ts';
 import type { AcquireCounts, FlowmatePaths, SourceConfig } from '../contracts.ts';
 import { canonicalJson, hashCanonical, withRunLock } from '../engine-bridge.ts';
-import { createDownloader, type DownloadReceipt } from '../downloader.ts';
+import { createDownloader, isRetryableDownloadError, type DownloadReceipt } from '../downloader.ts';
 import { loadSampleRecords, saveSampleRecord } from '../task-store.ts';
 import { assertRevision, createSourceHttp, metadataScope, resolveHuggingFaceRevision, type SourceTransport } from './dataset-records.ts';
 
@@ -51,6 +51,11 @@ interface StoredSelection extends Voxel51Selection {
   selection_id: string;
   index_url: string;
   index_sha256: string;
+}
+interface DeferredAcquireFailure {
+  sample_id: string;
+  annotation_status: 'annotated' | 'unannotated';
+  code: string;
 }
 
 function fail(code: string): never { throw new Error(code); }
@@ -260,6 +265,18 @@ function selectionPath(paths: FlowmatePaths, config: SourceConfig, selectionId: 
 
 function selectionCountText(counts: AcquireCounts): string {
   return `带发布方标注 ${counts.with_publisher_annotation} 条、无发布方标注 ${counts.without_publisher_annotation} 条（共 ${counts.with_publisher_annotation + counts.without_publisher_annotation} 条）`;
+}
+
+function errorCode(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error && typeof Reflect.get(error, 'code') === 'string') return Reflect.get(error, 'code') as string;
+  return error instanceof Error && error.name ? error.name : 'UNKNOWN_ERROR';
+}
+
+function partialAcquireError(failures: readonly DeferredAcquireFailure[]): never {
+  const preview = failures.slice(0, 3).map(failure => `${failure.sample_id}(${failure.code})`).join('、');
+  const remaining = failures.length > 3 ? ` 等 ${failures.length} 条` : '';
+  const error = new Error(`VOXEL51_ACQUIRE_PARTIAL: ${failures.length} 条瞬时网络下载失败；首个失败 ${preview}${remaining}；已完成记录已保留，请重新执行任务`);
+  throw Object.assign(error, { code: 'VOXEL51_ACQUIRE_PARTIAL', failures });
 }
 
 function sameAcquireCounts(left: AcquireCounts, right: AcquireCounts): boolean {
@@ -503,11 +520,18 @@ async function acquireVoxel51SelectionUnlocked(options: {
   let added = 0;
   let reused = 0;
   const total = selectedRecords.length;
-  for (const [index, { entry, record }] of selectedRecords.entries()) {
-    const annotationStatus = entry.annotation_status ?? (entry.annotation_sha256 ? 'annotated' : 'unannotated');
-    const startedAt = Date.now();
-    await options.onProgress?.({ index: index + 1, total, sampleId: entry.sample_id, annotationStatus, status: 'started', elapsedMs: 0 });
-    try {
+  type AcquireItem = { index: number; entry: SelectedVoxel51Record; record: Voxel51Record };
+  const pending: AcquireItem[] = selectedRecords.map((item, index) => ({ ...item, index }));
+  const failures: DeferredAcquireFailure[] = [];
+  // The downloader has already exhausted its configured backoff for a
+  // transient failure. Preserve completed records, continue the remaining
+  // selection once, and report every item that still failed.
+  for (const { index, entry, record } of pending) {
+      const annotationStatus = entry.annotation_status ?? (entry.annotation_sha256 ? 'annotated' : 'unannotated');
+      const startedAt = Date.now();
+      await options.onProgress?.({ index: index + 1, total, sampleId: entry.sample_id, annotationStatus, status: 'started', elapsedMs: 0 });
+      let transaction: Awaited<ReturnType<typeof publicationPaths>> | undefined;
+      try {
       const sampleBase = sampleDirectory(config.dataset_id, entry.sample_id);
       const imageName = `original${extname(entry.image_path).toLowerCase()}`;
       const originalPath = originals(`${sampleBase}/${imageName}`);
@@ -532,7 +556,7 @@ async function acquireVoxel51SelectionUnlocked(options: {
         reused += 1;
       } else {
         if (existing && existing.source_record_id !== entry.source_record_id) fail('VOXEL51_RECORD_CONFLICT');
-        const transaction = await publicationPaths(paths, config.dataset_id, entry.sample_id);
+        transaction = await publicationPaths(paths, config.dataset_id, entry.sample_id);
         await rm(transaction.dataWork, { recursive: true, force: true });
         await rm(transaction.originalWork, { recursive: true, force: true });
         const stagedData = transaction.swaps[0]!.stage;
@@ -578,9 +602,18 @@ async function acquireVoxel51SelectionUnlocked(options: {
       }
       await options.onProgress?.({ index: index + 1, total, sampleId: entry.sample_id, annotationStatus, status: 'completed', elapsedMs: Date.now() - startedAt });
     } catch (error) {
+      if (transaction) {
+        await rm(transaction.dataWork, { recursive: true, force: true });
+        await rm(transaction.originalWork, { recursive: true, force: true });
+      }
       await options.onProgress?.({ index: index + 1, total, sampleId: entry.sample_id, annotationStatus, status: 'failed', elapsedMs: Date.now() - startedAt });
+      if (isRetryableDownloadError(error)) {
+        failures.push({ sample_id: entry.sample_id, annotation_status: annotationStatus, code: errorCode(error) });
+        continue;
+      }
       throw error;
     }
   }
+  if (failures.length > 0) partialAcquireError(failures);
   return { added, reused, selection_hash: selection.selection_hash, revision: selection.revision, counts: selection.counts, total: selection.records.length };
 }

@@ -84,6 +84,11 @@ function retryable(error: unknown): boolean {
     || (code === 'RESEARCH_HTTP_STATUS' && (status === 408 || status === 429 || (typeof status === 'number' && status >= 500 && status <= 599)));
 }
 
+/** Whether an exhausted download may be deferred and retried on a later run. */
+export function isRetryableDownloadError(error: unknown): boolean {
+  return retryable(error);
+}
+
 async function removePart(path: string): Promise<void> {
   await unlink(path).catch(error => {
     if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;

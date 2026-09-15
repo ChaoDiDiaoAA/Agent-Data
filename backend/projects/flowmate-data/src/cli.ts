@@ -246,7 +246,7 @@ function menuLabel(workbench: ReturnType<typeof loadWorkbenchConfig>): string {
     '1. 查看来源和任务配置',
     `2. 执行当前任务（获取并解析 ${total} 条）`,
     '3. 校验当前任务',
-    `4. 创建备份（verify=${workbench.backup.verify}, restore_smoke=${workbench.backup.restore_smoke}）`,
+    `4. 手动创建备份（verify=${workbench.backup.verify}, restore_smoke=${workbench.backup.restore_smoke}）`,
     '0. 退出',
   ].join('\n');
 }
@@ -271,8 +271,16 @@ function menuTaskSteps(pathsPath: string, configPath: string, workbench: ReturnT
     { phase: 'Obsidian', label: '构建 Obsidian 目录', commands: [common(['catalog', 'build'])], stageKeys: ['catalog'] },
     { phase: 'Release', label: `构建 Release（${workbench.release.version}）`, commands: [common(['release', 'build', workbench.release.version])], stageKeys: ['release'] },
     { phase: '校验', label: '校验 Release 和当前任务', commands: [common(['release', 'verify', workbench.release.version]), common(['verify'])], stageKeys: ['release_verify', 'verify'] },
-    { phase: '备份', label: '创建备份', commands: [common(['backup', 'create'])], stageKeys: ['backup'] },
   ];
+}
+
+function menuBackupStep(pathsPath: string, configPath: string): MenuStep {
+  return {
+    phase: '备份',
+    label: '手动创建备份',
+    commands: [menuCommand(['backup', 'create'], pathsPath, configPath)],
+    stageKeys: [],
+  };
 }
 
 async function menuTaskIdentity(paths: ReturnType<typeof loadPaths>, workbench: ReturnType<typeof loadWorkbenchConfig>, source: ReturnType<typeof loadSourceConfig>) {
@@ -283,6 +291,7 @@ async function menuTaskIdentity(paths: ReturnType<typeof loadPaths>, workbench: 
     if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
   }
   const counts = sampleAcquireCounts(workbench.sample);
+  const { backup: _backup, ...taskWorkbench } = workbench;
   return {
     source_id: workbench.sample.source_id,
     dataset_id: workbench.sample.dataset_id,
@@ -291,7 +300,9 @@ async function menuTaskIdentity(paths: ReturnType<typeof loadPaths>, workbench: 
     // The same data root can be pointed at a different original/Vault root.
     // Include all resolved roots so a resume can never bind records to a
     // different filesystem layout by accident.
-    config_sha256: hashCanonical({ paths, workbench, source, mineru }),
+    // Backup is an independent manual operation and must not change the
+    // identity of the resumable acquisition/processing task.
+    config_sha256: hashCanonical({ paths, workbench: taskWorkbench, source, mineru }),
   };
 }
 
@@ -362,7 +373,7 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
       const stepsByChoice: Record<string, MenuStep[]> = {
         '2': steps,
         '3': [steps[6]!],
-        '4': [steps[7]!],
+        '4': [menuBackupStep(pathsPath, configPath)],
       };
       if (choice === '2') {
         try {
@@ -383,7 +394,7 @@ export async function runMenu(options: MenuOptions = {}): Promise<number> {
           const total = sampleAcquireTotal(workbench.sample);
           writeMenu(output, `[任务] current / ${workbench.sample.dataset_id} / ${workbench.sample.selection_id} 开始`);
           writeMenu(output, `[配置] ${configPath}；带发布方标注 ${counts.with_publisher_annotation} 条，无发布方标注 ${counts.without_publisher_annotation} 条，合计 ${total} 条`);
-          writeMenu(output, `[说明] 获取与 MinerU 解析使用同一批 ${total} 条发票；current 批次完成后下次自动追加未获取数据，完成后构建 Obsidian、Release、校验和备份。`);
+          writeMenu(output, `[说明] 获取与 MinerU 解析使用同一批 ${total} 条发票；current 批次完成后下次自动追加未获取数据，完成后构建 Obsidian、Release 和校验。`);
           const resumed = await createOrResumeTaskRun(paths, await menuTaskIdentity(paths, workbench, source));
           taskRun = resumed.run;
           if (resumed.resumed) {

@@ -19,12 +19,14 @@ import type { KnowledgeRecord } from './sources/public-files.ts';
 import { loadWithdrawalList, withdrawalListPath } from './backup.ts';
 import { canonicalJson, replaceFileWithRetry, withRunLock } from './engine-bridge.ts';
 import { sha256File } from './file-store.ts';
+import { prettyJson } from './readable-json.ts';
+import { createHash } from 'node:crypto';
 
 const generatedBy = 'flowmate-data';
 const schemaVersion = 1;
 
 export interface CatalogFile { path: string; content: string }
-export interface CatalogAsset { path: string; sourcePath: string; sha256: string; bytes: number }
+export interface CatalogAsset { path: string; sourcePath?: string; content?: Uint8Array; sha256: string; bytes: number }
 export interface CatalogPlan { vaultRoot: string; directories: string[]; files: CatalogFile[]; assets: CatalogAsset[] }
 export interface CatalogProgress {
   phase: 'plan' | 'sample-assets' | 'knowledge-assets' | 'publish';
@@ -132,10 +134,12 @@ export function validateCatalogPlan(plan: CatalogPlan): CatalogTarget[] {
     targets.push({ relativePath: file.path, absolutePath: catalogPath(plan.vaultRoot, file.path), kind: 'file' });
   }
   for (const asset of plan.assets) {
-    if (!asset || typeof asset.path !== 'string' || typeof asset.sourcePath !== 'string'
-      || (!isAbsolute(asset.sourcePath) && !win32.isAbsolute(asset.sourcePath))
+    const hasSource = typeof asset?.sourcePath === 'string' && (isAbsolute(asset.sourcePath) || win32.isAbsolute(asset.sourcePath));
+    const hasContent = asset?.content instanceof Uint8Array;
+    if (!asset || typeof asset.path !== 'string' || hasSource === hasContent
       || !/^[0-9a-f]{64}$/.test(asset.sha256)
-      || !Number.isSafeInteger(asset.bytes) || asset.bytes <= 0) fail('CATALOG_PLAN_INVALID');
+      || !Number.isSafeInteger(asset.bytes) || asset.bytes <= 0
+      || (hasContent && asset.content!.byteLength !== asset.bytes)) fail('CATALOG_PLAN_INVALID');
     targets.push({ relativePath: asset.path, absolutePath: catalogPath(plan.vaultRoot, asset.path), kind: 'asset' });
   }
   const seen = new Map<string, CatalogTarget>();
@@ -255,6 +259,24 @@ async function addCatalogAsset(assets: Map<string, CatalogAsset>, destination: s
   return existing ?? candidate;
 }
 
+async function addRebuiltSnapshotAsset(assets: Map<string, CatalogAsset>, destinationRoot: string, sourcePath: string): Promise<void> {
+  const info = await optionalLstat(sourcePath);
+  if (!info) return;
+  if (info.isSymbolicLink()) fail('CATALOG_ASSET_SOURCE_SYMLINK');
+  if (!info.isFile()) fail('CATALOG_ASSET_SOURCE_INVALID');
+  let source: unknown;
+  try { source = JSON.parse(await readFile(sourcePath, 'utf8')); } catch { fail('CATALOG_SNAPSHOT_INVALID'); }
+  if (!source || typeof source !== 'object' || Array.isArray(source) || !Array.isArray((source as { files?: unknown }).files)) fail('CATALOG_SNAPSHOT_INVALID');
+  const prefix = `${destinationRoot}/`;
+  const files = [...assets.values()]
+    .filter(asset => asset.path.startsWith(prefix))
+    .map(asset => ({ path: asset.path.slice(prefix.length), sha256: asset.sha256, bytes: asset.bytes }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const content = Buffer.from(prettyJson({ ...(source as Record<string, unknown>), files }));
+  const path = `${destinationRoot}/snapshot.json`;
+  assets.set(path, { path, content, sha256: createHash('sha256').update(content).digest('hex'), bytes: content.byteLength });
+}
+
 async function collectAssetTree(root: string, destinationRoot: string, assets: Map<string, CatalogAsset>, options: AssetCollectionOptions = {}): Promise<void> {
   const rootInfo = await optionalLstat(root);
   if (!rootInfo) return;
@@ -307,7 +329,6 @@ async function buildSampleAssets(paths: FlowmatePaths, record: SampleRecord): Pr
   if (annotated && record.label_ref) await addCatalogAsset(assets, `${base}/fields.json`, ref(paths, record.label_ref), true);
   await addCatalogAsset(assets, `${base}/record.json`, resolveOwnedPath(paths.dataRoot, `${datasetBase}/record.json`), true);
   await addCatalogAsset(assets, `${base}/receipt.json`, resolveOwnedPath(paths.dataRoot, `${datasetBase}/receipt.json`));
-  await addCatalogAsset(assets, `${base}/snapshot.json`, resolveOwnedPath(paths.originalRoot, `${datasetBase}/snapshot.json`));
   const canonicalNames = new Set(['record.json', 'receipt.json', 'snapshot.json', 'content.md', 'content.json', 'pages.json', 'parse.json', 'annotation.json', 'fields.json', originalName]);
   await collectAssetTree(join(paths.originalRoot, datasetBase), base, assets, { skipNames: canonicalNames });
   await collectAssetTree(join(paths.dataRoot, datasetBase), base, assets, { skipNames: canonicalNames });
@@ -317,6 +338,7 @@ async function buildSampleAssets(paths: FlowmatePaths, record: SampleRecord): Pr
     const normalized = [...assets.keys()].filter(path => path === `${base}/content.md` || path === `${base}/content.json` || path === `${base}/pages.json` || path === `${base}/parse.json` || path.startsWith(`${base}/assets/`));
     if (normalized.length === 0) await collectNormalizedTree(join(paths.originalRoot, datasetBase), base, assets);
   }
+  await addRebuiltSnapshotAsset(assets, base, resolveOwnedPath(paths.originalRoot, `${datasetBase}/snapshot.json`));
   return [...assets.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
@@ -848,6 +870,11 @@ async function atomicWriteOwned(vaultRoot: string, relativePath: string, content
 }
 
 async function verifyAssetSource(asset: CatalogAsset): Promise<void> {
+  if (asset.content) {
+    if (asset.content.byteLength !== asset.bytes || createHash('sha256').update(asset.content).digest('hex') !== asset.sha256) fail('CATALOG_ASSET_SOURCE_HASH_MISMATCH');
+    return;
+  }
+  if (!asset.sourcePath) fail('CATALOG_PLAN_INVALID');
   const info = await optionalLstat(asset.sourcePath);
   if (!info) fail('CATALOG_ASSET_SOURCE_MISSING');
   if (info.isSymbolicLink()) fail('CATALOG_ASSET_SOURCE_SYMLINK');
@@ -873,7 +900,11 @@ async function atomicCopyAsset(vaultRoot: string, asset: CatalogAsset, stagingRo
 
   await assertVaultBound(vaultRoot, stagingRoot);
   const temporary = join(stagingRoot, `.${basename(asset.path)}.${crypto.randomUUID()}.tmp`);
-  await copyFile(asset.sourcePath, temporary);
+  if (asset.content) await writeFile(temporary, asset.content, { flag: 'wx' });
+  else {
+    if (!asset.sourcePath) fail('CATALOG_PLAN_INVALID');
+    await copyFile(asset.sourcePath, temporary);
+  }
   try {
     const staged = await optionalLstat(temporary);
     if (!staged || staged.isSymbolicLink() || !staged.isFile() || Number(staged.size) !== asset.bytes || await sha256File(temporary) !== asset.sha256) {

@@ -9,7 +9,7 @@
 - `D:\paper\Invoice`：公开来源原件、发布方原始标注，以及一份只从 `dataRoot` 发布的结构化镜像。
 - `D:\agent-data\data\flowmate-data`：机器主记录、标签、MinerU 解析结果、任务选样清单、Release、`policies/withdrawals.json` 撤回清单和运行状态；`work` 保存临时文件、进程记录及未完成事务，运行中不可删除。
 - `D:\obsidian\data\flowmate-data`：Vault 自包含副本。自动发布器只拥有 `Evidence/`，其中按 FSD 风格保存 `invoices/`、`indexes/`、`knowledge/`、`releases/` 和英文命名的 Markdown；每张发票的原图、发布方标注、统一字段、record、receipt、snapshot、MinerU 解析文件和 assets 都物理复制到对应实体目录。带 `generated_by: flowmate-data` 的 Markdown 与 `.flowmate-assets.json` 由目录生成器管理，用户笔记不会被覆盖。
-- `D:\agent-data\backups\flowmate-data`：带 SHA-256 manifest 的静止备份。
+- `D:\agent-data\backups\flowmate-data`：带 SHA-256 manifest 的静止备份。文件数超过传统 ZIP 的 65,535 条目上限时，程序会自动写入 ZIP64 目录，仍使用同一个 `data.zip` 文件。
 
 目录发布前应关闭 Obsidian 及其同步/写入插件，并让所有 Flowmate 命令通过同一个 `dataRoot/work/run.lock` 串行运行。发布会在写入前后检查 Vault 路径边界；检测到外部并发改变时立即失败，保留可恢复的事务条目，不按不可信路径删除文件。处理这类失败前先停止外部写入，再重新执行目录构建。
 
@@ -47,7 +47,7 @@ D:\obsidian\data\flowmate-data\
 
 运行后 Vault 的业务生成物只有 `Evidence/` 和用于记录二进制副本 hash 的 `.flowmate-assets.json`；真正的索引从 `Evidence/indexes/overview.md` 打开。`Evidence/` 之外不生成 Flowmate 业务文件。
 
-每个数据集另有 `dataset.json`。发票目录还保留 `receipt.json`（下载凭据）、`parse.json`（解析来源及文件校验信息）和 `snapshot.json`（当前副本清单），用于校验与恢复，不能手工删除。最终发票目录不再包含 `datasets/samples/structured/parsed/attempt-长哈希/normalized` 层级。
+每个数据集另有 `dataset.json`。发票目录还保留 `receipt.json`（下载凭据）、`parse.json`（解析来源及文件校验信息）和 `snapshot.json`（当前副本清单），用于校验与恢复，不能手工删除。Vault 中的发票 `snapshot.json.files` 列出该目录的所有可校验资产，排除快照自身和生成的 `invoice.md`；对同时存在这两个文件的目录，条目数应等于“实际文件数 - 2”，每个条目的字节数和 SHA-256 都对应 Vault 中的物理副本。最终发票目录不再包含 `datasets/samples/structured/parsed/attempt-长哈希/normalized` 层级。
 
 ### 权威文件与 Obsidian 副本
 
@@ -59,7 +59,7 @@ D:\obsidian\data\flowmate-data\
 | `D:\agent-data\data\flowmate-data` | 机器处理权威根 | `record.json`、`fields.json`、`receipt.json`、MinerU 结果、任务和 Release |
 | `D:\obsidian\data\flowmate-data` | 展示与离线阅读副本 | 上述选定文件的物理复制，加上可重建的 Markdown 卡片 |
 
-Obsidian 中的同名文件是复制品，修改它不会回写两个权威根。运行 `catalog build` 会按 record 和 snapshot 的 hash 重新补齐缺失副本；已有且 hash 相同的副本直接复用，手工改过的副本会报冲突并停止，避免静默覆盖。首次使用或清空 Vault 后直接重建即可：
+Obsidian 中的同名文件是复制品，修改它不会回写两个权威根。运行 `catalog build` 会按 record 重新补齐缺失副本，并根据本次实际保留在 Vault 的文件重新计算字节数和 SHA-256，生成新的 `snapshot.json`；不会沿用权威根中描述另一种 JSON 物理格式的旧快照。已有且 hash 相同的副本直接复用，手工改过的副本会报冲突并停止，避免静默覆盖。首次使用或清空 Vault 后直接重建即可：
 
 ```powershell
 Set-Location 'D:\agent-data\backend\projects\flowmate-data'
@@ -152,7 +152,7 @@ bun run typecheck
 | `sample.acquire`                              | 两个数量之和就是本次获取与解析总数                       | `20`                           |
 | `sample.publish_snapshot`                     | 标签映射后是否同步发布`D:\paper\Invoice` 结构化镜像    | `true`                         |
 | `release.include_originals`                   | 是否在 Release 复制允许再分发的原件                      | `false`                        |
-| `backup.verify` / `backup.restore_smoke`    | 备份命令默认是否校验、独立恢复演练                       | `true` / `true`              |
+| `backup.verify` / `backup.restore_smoke`    | 手动备份命令默认是否校验、独立恢复演练                   | `true` / `true`              |
 
 来源固定为 `voxel51-invoice-ocr`，数据集固定为 `voxel51-hq-invoice-ocr`，当前选样清单内部使用
 `current` 名称保存到 `dataRoot/tasks/voxel51/selections/current.json`。因此只需修改
@@ -197,9 +197,9 @@ bun src/cli.ts
 不要在 `D:\agent-data\backend\projects\paper-knowledge-engine` 目录执行
 `bun src/cli.ts`；那是论文知识引擎的方向库菜单，不会启动 Flowmate。
 
-菜单会从 `config/workbench.local.json` 读取两个 `sample.acquire` 数量，并显示带标注、无标注及合计。菜单的“执行当前任务”会用同一批合计数量完成获取、标签映射、MinerU 解析、Obsidian、Release、校验和备份；使用默认 `current` 时，每次完整完成后再次执行会自动追加下一批，进程中断或阶段失败会继续当前批次。恢复时只有已开始的阶段会携带恢复标记；如果任务在获取前的探测阶段失败，重试获取仍会按游标追加下一批。菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
+菜单会从 `config/workbench.local.json` 读取两个 `sample.acquire` 数量，并显示带标注、无标注及合计。菜单的“执行当前任务”会用同一批合计数量完成获取、标签映射、MinerU 解析、Obsidian、Release 和校验；备份通过菜单的“手动创建备份”或独立 `backup create` 命令执行，不会阻塞任务主流程。使用默认 `current` 时，每次完整完成后再次执行会自动追加下一批，进程中断或阶段失败会继续当前批次。恢复时只有已开始的阶段会携带恢复标记；如果任务在获取前的探测阶段失败，重试获取仍会按游标追加下一批。菜单不会要求手工输入数量，也不会为菜单命令追加 `--limit`。修改配置后重新运行命令即可生效。
 
-“执行当前任务”会在 `D:\agent-data\data\flowmate-data\tasks\voxel51\runs\` 写入一份运行清单，并在同级使用任务锁。清单保存当前来源、选样名称、两个数量、配置哈希和九个阶段的状态；任务锁覆盖探测、获取、标签、解析、目录、Release、校验和备份的整个流程，避免两个终端同时修改同一批次。这个行为对应 `paper-knowledge-engine` 的 workflow lock、run record 和原子 manifest 设计。进程中断或某个阶段失败后，用同一条菜单命令再次选择 **2**，会自动找到相同配置下最近的未完成批次：已完成的阶段显示“恢复……跳过”，从第一个未完成阶段继续。MinerU 还会按发票检查 `record.json`、原图哈希、解析器配置和结构化解析文件；仍然有效的发票显示“跳过（已存在可复用解析结果）”，只有未完成或校验不通过的发票重新解析。修改 `sample.acquire`、`selection_id`、来源配置或 `config/mineru.local.json` 后，配置哈希变化会自动开始新批次，不需要手工改运行 ID。运行清单是机器状态，不能手工删除正在运行的批次；清空四个数据根重新开始时，运行清单也会一并清除。
+“执行当前任务”会在 `D:\agent-data\data\flowmate-data\tasks\voxel51\runs\` 写入一份运行清单，并在同级使用任务锁。清单保存当前来源、选样名称、两个数量、配置哈希和八个工作流阶段的状态；任务锁覆盖探测、获取、标签、解析、目录、Release 和校验，避免两个终端同时修改同一批次。备份是独立的手动操作，不写入工作流阶段，也不会因为备份失败阻止主任务完成。这个行为对应 `paper-knowledge-engine` 的 workflow lock、run record 和原子 manifest 设计。进程中断或某个阶段失败后，用同一条菜单命令再次选择 **2**，会自动找到相同配置下最近的未完成批次：已完成的阶段显示“恢复……跳过”，从第一个未完成阶段继续。旧版本含 `backup` 阶段的运行清单会在恢复时自动忽略该阶段并规范化为八阶段清单。MinerU 还会按发票检查 `record.json`、原图哈希、解析器配置和结构化解析文件；仍然有效的发票显示“跳过（已存在可复用解析结果）”，只有未完成或校验不通过的发票重新解析。修改 `sample.acquire`、`selection_id`、来源配置或 `config/mineru.local.json` 后，配置哈希变化会自动开始新批次，不需要手工改运行 ID。运行清单是机器状态，不能手工删除正在运行的批次；清空四个数据根重新开始时，运行清单也会一并清除。
 
 Obsidian 目录发布使用 `D:\obsidian\data\flowmate-data\.flowmate-catalog.lock` 作为带进程身份的文件锁。正常退出会自动删除锁；进程被中止后，下一次运行会根据 PID 和启动身份回收已经退出进程留下的锁，并清理 `.flowmate-catalog-staging-*` 孤立目录。旧版本遗留的空锁目录也会在确认后迁移清理；没有 `.flowmate-assets.json` 的旧 Vault 会只对同一发票目录中带 `generated_by: flowmate-data` 卡片旁的旧资产建立一次迁移清单，再安全刷新 `record.json`、解析结果等副本。非空锁目录、符号链接、未标记卡片或用户文件仍会阻止发布；冲突信息会包含 Vault 内相对路径，便于定位。
 

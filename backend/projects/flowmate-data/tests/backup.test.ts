@@ -7,7 +7,7 @@ import { basename, join } from 'node:path';
 import { canonicalJson } from '../src/engine-bridge.ts';
 import { publicationPaths } from '../src/publication.ts';
 import type { FlowmatePaths } from '../src/contracts.ts';
-import { createBackup, restoreBackup, saveWithdrawalList, verifyBackup, verifyRestoredBackup } from '../src/backup.ts';
+import { createBackup, restoreBackup, saveWithdrawalList, verifyBackup, verifyRestoredBackup, zipPayload } from '../src/backup.ts';
 
 const roots: string[] = [];
 async function fixturePaths(): Promise<FlowmatePaths> {
@@ -15,6 +15,16 @@ async function fixturePaths(): Promise<FlowmatePaths> {
   return { projectRoot: root, paperEngineRoot: root, originalRoot: join(root, 'original'), dataRoot: join(root, 'data'), vaultRoot: join(root, 'vault'), backupRoot: join(root, 'backup') };
 }
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+
+test('writes a ZIP64 footer when a backup has more than 65535 files', () => {
+  const payload: Record<string, Uint8Array> = Object.create(null);
+  const count = 65_536 + 17;
+  for (let index = 0; index < count; index += 1) payload[`payload/data/files/${index.toString().padStart(5, '0')}.json`] = Buffer.from(`{"id":${index}}`);
+  const archive = zipPayload(payload);
+  const extracted = unzipSync(archive);
+  expect(Object.keys(extracted)).toHaveLength(count);
+  expect(Buffer.from(extracted['payload/data/files/65552.json']!).toString()).toBe('{"id":65552}');
+});
 
 test('creates, verifies, and restores a frozen backup without generated cards', async () => {
   const paths = await fixturePaths();

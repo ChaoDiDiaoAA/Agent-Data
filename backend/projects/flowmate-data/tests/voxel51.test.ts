@@ -266,6 +266,32 @@ test('resumes an incomplete current batch instead of advancing to a new batch', 
   expect(await Bun.file(join(configuredPaths.dataRoot, 'voxel51', '000001', 'record.json')).exists()).toBe(true);
 });
 
+test('continues the batch after an exhausted transient image download and reports the partial batch', async () => {
+  const configuredPaths = await paths();
+  const config = loadSourceConfig(sourcePath);
+  const firstImage = fixture.samples[0]!.filepath;
+  let firstAttempts = 0;
+  const transport = createSourceHttp(config, { fetch: async url => {
+    if (url === config.revision.url) return Response.json({ sha: revision });
+    if (url.endsWith(`/${revision}/samples.json`)) return new Response(indexBytes);
+    if (url.endsWith(`/${revision}/${firstImage}`)) {
+      firstAttempts += 1;
+      throw new Error('connection reset');
+    }
+    return new Response(Buffer.from([0xff, 0xd8, 0xff, 8]), { headers: { 'content-type': 'image/jpeg' } });
+  } });
+
+  await expect(acquireVoxel51Selection({
+    paths: configuredPaths, config, selectionId: 'current', counts: { with_publisher_annotation: 2, without_publisher_annotation: 0 }, transport,
+  })).rejects.toThrow('VOXEL51_ACQUIRE_PARTIAL');
+
+  expect(firstAttempts).toBe(4);
+  expect(await Bun.file(join(configuredPaths.dataRoot, 'voxel51/000001/record.json')).exists()).toBe(false);
+  expect(await Bun.file(join(configuredPaths.dataRoot, 'voxel51/000002/record.json')).exists()).toBe(true);
+  expect(await Bun.file(join(configuredPaths.dataRoot, 'work/t/voxel51-000001')).exists()).toBe(false);
+  expect(await Bun.file(join(configuredPaths.originalRoot, 'work/t/voxel51-000001')).exists()).toBe(false);
+});
+
 test('keeps dataset metadata immutable while allowing a later source revision', async () => {
   const configuredPaths = await paths();
   const config = loadSourceConfig(sourcePath);

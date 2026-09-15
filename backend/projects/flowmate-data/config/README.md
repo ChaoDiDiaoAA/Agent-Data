@@ -278,7 +278,7 @@ bun src/cli.ts catalog build --paths config/paths.local.json --config config/wor
 | `schema_version` | `1` | 工作台配置格式版本；当前只能是 `1` |
 | `sample` | object | 样本数据集采集和解析默认值 |
 | `release` | object | Release 是否复制原件 |
-| `backup` | object | 备份命令默认校验和恢复演练开关 |
+| `backup` | object | 手动备份命令默认校验和恢复演练开关；不属于“执行当前任务”的工作流 |
 
 ### `sample` 参数
 
@@ -316,6 +316,9 @@ Release 输出版本固定为 `public-invoice-p0-v1`。内容变化时会在校�
 因此修改 `sample.acquire` 后不需要同步修改版本号；如果需要保留旧版本，请先复制 Release 目录或创建备份。
 
 ### `backup` 参数
+
+备份不再作为“执行当前任务”的自动步骤。需要备份时选择菜单的“手动创建备份”，或直接运行
+`backup create`；下面两个字段只影响该手动命令的默认行为。
 
 | 参数 | 作用 |
 |---|---|

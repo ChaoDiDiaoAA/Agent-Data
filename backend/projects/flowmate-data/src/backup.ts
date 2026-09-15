@@ -12,6 +12,11 @@ const backupSchema = 'flowmate-public-backup/1' as const;
 const withdrawalSchema = 'flowmate-withdrawals/1' as const;
 export const withdrawalListRelativePath = 'policies/withdrawals.json' as const;
 
+const zipEntryLimit = 0xffff;
+const zip64EndOfCentralDirectorySignature = 0x06064b50;
+const zip64EndOfCentralDirectoryLocatorSignature = 0x07064b50;
+const endOfCentralDirectorySignature = 0x06054b50;
+
 export interface BackupFile { path: string; sha256: string; bytes: number }
 export interface BackupManifest { schema: typeof backupSchema; backup_id: string; created_at: string; content_hash: string; archive: BackupFile; files: BackupFile[] }
 export interface BackupResult { path: string; manifest: BackupManifest; files: BackupFile[] }
@@ -24,6 +29,66 @@ export function withdrawalListPath(dataRoot: string): string { return resolveOwn
 
 function fail(code: string): never { throw new Error(code); }
 function digest(bytes: Uint8Array): string { return createHash('sha256').update(bytes).digest('hex'); }
+
+/**
+ * fflate writes a classic ZIP footer, whose entry count is only 16 bits. A
+ * Flowmate backup can contain more than 65,535 files once enough invoice
+ * samples and Vault assets have accumulated. Keep the existing ZIP payload
+ * and add a standards-compliant ZIP64 end-of-central-directory pair so
+ * readers can recover the full entry count. Local and central file headers
+ * remain unchanged because current backups stay below the 4 GiB offset/size
+ * limits. Archives whose central directory or offsets exceed those classic
+ * 32-bit fields are rejected explicitly below.
+ */
+export function zipPayload(payload: Record<string, Uint8Array>): Uint8Array {
+  const archive = zipSync(payload, { level: 6 });
+  const entryCount = Object.keys(payload).length;
+  if (entryCount <= zipEntryLimit) return archive;
+  if (entryCount > 0xffffffff) fail('BACKUP_ARCHIVE_TOO_MANY_FILES');
+
+  // zipSync always emits an empty-comment EOCD as its final 22 bytes.
+  const end = archive.length - 22;
+  if (end < 0) fail('BACKUP_ARCHIVE_INVALID');
+  const sourceView = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  if (sourceView.getUint32(end, true) !== endOfCentralDirectorySignature) fail('BACKUP_ARCHIVE_INVALID');
+  const centralSize = sourceView.getUint32(end + 12, true);
+  const centralOffset = sourceView.getUint32(end + 16, true);
+  if (archive.byteLength > 0xffffffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) fail('BACKUP_ARCHIVE_TOO_LARGE');
+  const zip64Offset = end;
+  const locatorOffset = zip64Offset + 56;
+  const output = new Uint8Array(archive.length + 76);
+  output.set(archive.subarray(0, end), 0);
+  const view = new DataView(output.buffer, output.byteOffset, output.byteLength);
+
+  // ZIP64 end of central directory record (fixed 56 bytes).
+  view.setUint32(zip64Offset, zip64EndOfCentralDirectorySignature, true);
+  view.setBigUint64(zip64Offset + 4, 44n, true);
+  view.setUint16(zip64Offset + 12, 45, true); // version made by
+  view.setUint16(zip64Offset + 14, 45, true); // version needed
+  view.setUint32(zip64Offset + 16, 0, true); // number of this disk
+  view.setUint32(zip64Offset + 20, 0, true); // disk with central directory
+  view.setBigUint64(zip64Offset + 24, BigInt(entryCount), true);
+  view.setBigUint64(zip64Offset + 32, BigInt(entryCount), true);
+  view.setBigUint64(zip64Offset + 40, BigInt(centralSize), true);
+  view.setBigUint64(zip64Offset + 48, BigInt(centralOffset), true);
+
+  // ZIP64 locator (fixed 20 bytes).
+  view.setUint32(locatorOffset, zip64EndOfCentralDirectoryLocatorSignature, true);
+  view.setUint32(locatorOffset + 4, 0, true);
+  view.setBigUint64(locatorOffset + 8, BigInt(zip64Offset), true);
+  view.setUint32(locatorOffset + 16, 1, true);
+
+  // Preserve the original EOCD while replacing all classic fields that can
+  // no longer represent the archive. ZIP readers use the ZIP64 record above.
+  output.set(archive.subarray(end), end + 76);
+  const outputEnd = end + 76;
+  view.setUint16(outputEnd + 8, zipEntryLimit, true);
+  view.setUint16(outputEnd + 10, zipEntryLimit, true);
+  view.setUint32(outputEnd + 12, 0xffffffff, true);
+  view.setUint32(outputEnd + 16, 0xffffffff, true);
+  view.setUint16(outputEnd + 20, 0, true);
+  return output;
+}
 function safeId(value: string): void { if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) fail('BACKUP_INVALID_ID'); }
 function safeRelative(value: string): string {
   if (typeof value !== 'string' || !value || /[\\:\u0000-\u001f\u007f]/u.test(value) || posix.isAbsolute(value) || value.split('/').some(part => !part || part === '.' || part === '..' || /[. ]$/.test(part) || /[<>"|?*]/.test(part) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) fail('BACKUP_PATH_INVALID');
@@ -166,7 +231,7 @@ async function createBackupUnlocked(paths: FlowmatePaths, backupId: string): Pro
       files.push({ path: source.relative, sha256: digest(bytes), bytes: bytes.byteLength });
     }
     const contentHash = digest(Buffer.from(canonicalJson({ backup_id: backupId, files })));
-    const archiveBytes = zipSync(payload, { level: 6 });
+    const archiveBytes = zipPayload(payload);
     const manifest: BackupManifest = { schema: backupSchema, backup_id: backupId, created_at: new Date().toISOString(), content_hash: contentHash, archive: { path: 'data.zip', sha256: digest(archiveBytes), bytes: archiveBytes.byteLength }, files };
     await writeFile(join(staging, 'data.zip'), archiveBytes, { flag: 'wx' });
     await writeFile(join(staging, 'manifest.json'), canonicalJson(manifest), { flag: 'wx' });

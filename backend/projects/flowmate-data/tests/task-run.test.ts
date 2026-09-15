@@ -1,12 +1,13 @@
 import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createOrResumeTaskRun,
   markTaskStageCompleted,
   markTaskStageRunning,
+  taskStageKeys,
   withTaskRunLock,
   type TaskRunIdentity,
 } from '../src/task-run.ts';
@@ -61,6 +62,29 @@ test('starts a new task when the configuration identity changes', async () => {
   expect(next.resumed).toBe(false);
   expect(next.run.run_id).not.toBe(first.run.run_id);
   expect(next.run.stages.acquire).toBe('pending');
+});
+
+test('normalizes a legacy run that stopped at the removed backup stage', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'flowmate-task-legacy-backup-'));
+  temporaryDirectories.push(root);
+  const paths = { dataRoot: root } as any;
+
+  const first = await createOrResumeTaskRun(paths, identity());
+  for (const stage of taskStageKeys) await markTaskStageCompleted(first.run, stage);
+  const legacy = JSON.parse(await readFile(first.run.manifest_path, 'utf8')) as Record<string, any>;
+  legacy.status = 'failed';
+  legacy.failed_stage = 'backup';
+  legacy.stages = { ...legacy.stages, backup: 'failed' };
+  await writeFile(first.run.manifest_path, canonicalJson(legacy));
+
+  const resumed = await createOrResumeTaskRun(paths, identity());
+  expect(resumed.resumed).toBe(true);
+  expect(resumed.run.status).toBe('completed');
+  expect(Object.keys(resumed.run.stages).sort()).toEqual([...taskStageKeys].sort());
+  const normalized = JSON.parse(await readFile(first.run.manifest_path, 'utf8')) as Record<string, any>;
+  expect(normalized.status).toBe('completed');
+  expect(normalized.stages).not.toHaveProperty('backup');
+  expect(normalized).not.toHaveProperty('failed_stage');
 });
 
 test('fails closed when an existing run manifest is malformed', async () => {

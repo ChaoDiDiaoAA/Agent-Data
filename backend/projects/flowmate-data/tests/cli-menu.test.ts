@@ -92,7 +92,7 @@ describe('interactive CLI menu', () => {
   test('runs the complete current task with the configured quantity and no manual limit', async () => {
     const result = await runChoice('2', 7);
 
-    expect(result.commands).toHaveLength(9);
+    expect(result.commands).toHaveLength(8);
     expect(result.commands[0]).toEqual(expect.arrayContaining(['source', 'probe', 'voxel51-invoice-ocr']));
     expect(result.commands[1]).toEqual(expect.arrayContaining(['acquire', 'voxel51-invoice-ocr']));
     expect(result.commands[2]).toEqual(expect.arrayContaining(['labels', 'map', 'voxel51-hq-invoice-ocr']));
@@ -101,13 +101,12 @@ describe('interactive CLI menu', () => {
     expect(result.commands[5]).toEqual(expect.arrayContaining(['release', 'build', 'public-invoice-p0-v1']));
     expect(result.commands[6]).toEqual(expect.arrayContaining(['release', 'verify', 'public-invoice-p0-v1']));
     expect(result.commands[7]).toEqual(expect.arrayContaining(['verify']));
-    expect(result.commands[8]).toEqual(expect.arrayContaining(['backup', 'create']));
     expect(result.commands.every(command => !command.includes('--limit'))).toBe(true);
     expect(result.output).toContain('[任务] current / voxel51-hq-invoice-ocr / initial-20 开始');
     expect(result.output).toContain('[配置]');
     expect(result.output).toContain('[说明] 获取与 MinerU 解析使用同一批 7 条发票');
-    expect(result.output).toContain('[探测 1/8] 探测公开来源 开始');
-    expect(result.output).toContain('[备份 8/8] 创建备份 完成');
+    expect(result.output).toContain('[探测 1/7] 探测公开来源 开始');
+    expect(result.output).not.toContain('[备份');
     expect(result.output).toContain('[任务] 完成');
     expect(result.output).not.toContain('"source_id"');
     expect(result.output).not.toContain('"selection_hash"');
@@ -186,14 +185,14 @@ describe('interactive CLI menu', () => {
       },
     });
     const output = lines.join('');
-    expect(output).toContain('[Obsidian 5/8] 构建 Obsidian 目录 开始');
+    expect(output).toContain('[Obsidian 5/7] 构建 Obsidian 目录 开始');
     expect(output).toContain('[Obsidian] 000001 开始');
     expect(output).toContain('[Obsidian] 000001 完成（耗时 00:01）');
     expect(output).toContain('[Obsidian] 000002 开始');
     expect(output).toContain('[Obsidian] 000002 完成（耗时 00:02）');
     expect(output).toContain('[Obsidian] 写入目录 开始');
     expect(output).toContain('[Obsidian] 写入目录 完成');
-    expect(output).toContain('[Obsidian 5/8] 构建 Obsidian 目录 完成：当前任务样本 2 条，写入 6 个文件');
+    expect(output).toContain('[Obsidian 5/7] 构建 Obsidian 目录 完成：当前任务样本 2 条，写入 6 个文件');
     expect(output).not.toContain('[Obsidian] 目录资产');
   });
 
@@ -223,7 +222,7 @@ describe('interactive CLI menu', () => {
       },
     });
     const output = lines.join('');
-    expect(output).toContain('MinerU 4/8');
+    expect(output).toContain('MinerU 4/7');
     expect(output).toContain('MINERU_RESOURCE_BUSY: MinerU GPU resource is busy; wait for the other MinerU task to finish；诊断：worker failed api_key=[redacted]');
     expect(output).not.toContain('secret-token');
     expect(output).not.toContain('"source_id"');
@@ -257,7 +256,7 @@ describe('interactive CLI menu', () => {
       output: fakeOutput(resumedLines),
       execute: async args => { resumedCommands.push(args); return 0; },
     });
-    expect(resumedCommands.map(command => command[0])).toEqual(['parse', 'catalog', 'release', 'release', 'verify', 'backup']);
+    expect(resumedCommands.map(command => command[0])).toEqual(['parse', 'catalog', 'release', 'release', 'verify']);
     expect(resumedLines.join('')).toContain('[恢复]');
   });
 
@@ -362,9 +361,9 @@ describe('interactive CLI menu', () => {
       execute: async args => { commands.push(args); return 0; },
     });
     const output = lines.join('');
-    expect(commands).toHaveLength(9);
+    expect(commands).toHaveLength(8);
     expect(commands[1]).toContain('acquire');
-    expect(output).toContain('[探测 1/8]');
+    expect(output).toContain('[探测 1/7]');
     expect(output).not.toContain('SELECTION_LIMIT_CONFLICT');
   });
 });

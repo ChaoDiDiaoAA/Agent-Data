@@ -7,8 +7,9 @@ import { datasetTasks } from './layout.ts';
 import { writeCanonicalJson } from './file-store.ts';
 
 export const taskStageKeys = [
-  'probe', 'acquire', 'labels', 'parse', 'catalog', 'release', 'release_verify', 'verify', 'backup',
+  'probe', 'acquire', 'labels', 'parse', 'catalog', 'release', 'release_verify', 'verify',
 ] as const;
+const legacyTaskStageKeys = [...taskStageKeys, 'backup'] as const;
 export type TaskStage = typeof taskStageKeys[number];
 export type TaskStageStatus = 'pending' | 'running' | 'completed' | 'failed';
 
@@ -92,26 +93,44 @@ function parseRun(value: unknown, manifestPath: string): TaskRun {
     || Date.parse(candidate.updated_at) < Date.parse(candidate.created_at)) return invalidTaskRun();
   const stages = {} as Record<TaskStage, TaskStageStatus>;
   const stageObject = candidate.stages as Record<string, unknown>;
-  if (Object.keys(stageObject).sort().join(',') !== [...taskStageKeys].sort().join(',')) return invalidTaskRun();
+  const stageNames = Object.keys(stageObject).sort().join(',');
+  const currentStageNames = [...taskStageKeys].sort().join(',');
+  const legacyStageNames = [...legacyTaskStageKeys].sort().join(',');
+  const legacyBackupManifest = stageNames === legacyStageNames;
+  if (stageNames !== currentStageNames && !legacyBackupManifest) return invalidTaskRun();
   for (const stage of taskStageKeys) {
     const status = stageObject[stage];
     if (!['pending', 'running', 'completed', 'failed'].includes(status as string)) return invalidTaskRun();
     stages[stage] = status as TaskStageStatus;
   }
-  if (candidate.status === 'completed' && !taskStageKeys.every(stage => stages[stage] === 'completed')) return invalidTaskRun();
-  if (candidate.status !== 'completed' && taskStageKeys.every(stage => stages[stage] === 'completed')) return invalidTaskRun();
-  if (candidate.status === 'failed'
-    && (candidate.failed_stage === undefined || !validStage(candidate.failed_stage) || stages[candidate.failed_stage] !== 'failed')) return invalidTaskRun();
-  if (candidate.status !== 'failed' && candidate.failed_stage !== undefined) return invalidTaskRun();
+  const allCurrentStagesCompleted = taskStageKeys.every(stage => stages[stage] === 'completed');
+  const legacyBackupIncomplete = legacyBackupManifest && stageObject.backup !== 'completed';
+  const legacyBackupFailure = legacyBackupIncomplete && (candidate as Record<string, unknown>).failed_stage === 'backup';
+  let status = candidate.status as TaskRun['status'];
+  let failedStage = candidate.failed_stage;
+  if (legacyBackupFailure) {
+    // Backup is no longer part of the workflow. Ignore a legacy backup
+    // failure and let createOrResumeTaskRun finalize the eight-stage run.
+    status = 'running';
+    failedStage = undefined;
+  } else if (legacyBackupIncomplete && status === 'completed' && allCurrentStagesCompleted) {
+    // Reopen once so the normalized eight-stage manifest is persisted.
+    status = 'running';
+  }
+  if (status === 'completed' && !allCurrentStagesCompleted) return invalidTaskRun();
+  if (status !== 'completed' && allCurrentStagesCompleted && !legacyBackupIncomplete) return invalidTaskRun();
+  if (status === 'failed'
+    && (failedStage === undefined || !validStage(failedStage) || stages[failedStage] !== 'failed')) return invalidTaskRun();
+  if (status !== 'failed' && failedStage !== undefined) return invalidTaskRun();
   return {
     schema_version: 1,
     run_id: candidate.run_id,
     identity: candidate.identity as TaskRunIdentity,
-    status: candidate.status as TaskRun['status'],
+    status,
     stages,
     created_at: candidate.created_at,
     updated_at: candidate.updated_at,
-    ...(candidate.failed_stage ? { failed_stage: candidate.failed_stage } : {}),
+    ...(failedStage ? { failed_stage: failedStage } : {}),
     manifest_path: manifestPath,
     state_lock_path: join(dirname(dirname(manifestPath)), '.state.lock'),
   };
@@ -166,7 +185,7 @@ async function createOrResumeTaskRunUnlocked(paths: { dataRoot: string }, identi
   candidates.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
   const existing = candidates[0];
   if (existing) {
-    existing.status = 'running';
+    existing.status = taskStageKeys.every(stage => existing.stages[stage] === 'completed') ? 'completed' : 'running';
     delete existing.failed_stage;
     await saveRun(existing);
     return { run: existing, resumed: true };
