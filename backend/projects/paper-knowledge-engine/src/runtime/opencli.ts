@@ -138,7 +138,14 @@ async function hashFiles(root: string, names: string[]): Promise<string> {
   return hash.digest('hex');
 }
 export async function openCliSourceHashes(input: OpenCliInput) {
-  const sourceHash = await hashFiles(input.projectRoot, ['opencli/arxiv/harvest.ts', 'opencli/arxiv/retry.ts', 'scripts/build-opencli-adapter.ts']);
+  const sourceHash = await hashFiles(input.projectRoot, [
+    'opencli/arxiv/harvest.ts',
+    'opencli/arxiv/retry.ts',
+    'src/discovery/arxiv-rate-limiter.ts',
+    'src/runtime/run-lock.ts',
+    'src/platform/windows-native.ts',
+    'scripts/build-opencli-adapter.ts',
+  ]);
   const lockHash = await hashFiles(input.projectRoot, ['bun.lock']);
   const installationHash = createHash('sha256').update(JSON.stringify([sourceHash, process.versions.bun, openCliVersion, lockHash])).digest('hex');
   return { sourceHash, installationHash };

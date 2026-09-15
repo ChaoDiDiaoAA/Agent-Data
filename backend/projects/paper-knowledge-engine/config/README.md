@@ -30,7 +30,7 @@ FSD 当前启用 8 个检索方向，各包含 submitted、updated 两种日期�
 
 `engine.yaml` 的 `engine_name` 固定为 `paper-knowledge-engine`。
 
-- `arxiv`：分页、请求间隔、超时、重试和容量冷却。当前请求间隔 6 秒；HTTP 429 保存分片检查点并进入持久冷却，`capacity_cooldown_seconds` 为 900。
+- `arxiv`：分页、请求间隔、超时、重试和容量冷却。生产请求间隔为 10 秒；四个 paper 方向库的正式发现任务共享机器级 arXiv 请求锁（位于 `data_libraries_root/.arxiv/`），串行发送 API 请求。`capacity_cooldown_seconds: 900` 是基础冷却值：连续 HTTP 429 按 1、2、4 倍退避（15、30、60 分钟），更长的 `Retry-After` 秒数优先；成功的 HTTP 请求清零计数，网络失败保留计数。冷却期间直接返回原截止时间，不发请求、不静默等待、不因重复启动延长时间。任务保存分片检查点，到期后须手动重新执行同一任务，不能保证上游已恢复。独立网络探针和外部程序不在此门控范围内。
 - `runtime`：进程清理、诊断超时和输出大小上限。
 - `mineru`：后端、请求并发、处理窗口、推理批量、API 和本地导入边界。
 - `evidence`：固定 v3 发布契约。

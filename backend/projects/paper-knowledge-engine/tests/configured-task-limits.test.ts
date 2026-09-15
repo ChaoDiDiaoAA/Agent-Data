@@ -27,7 +27,8 @@ async function createPdf(path: string, title: string) {
 test('Agent Engineering uses the shared paper harvest and checkpoint seam', async () => {
   let observedShards = 0;
   let observedCheckpoint = false;
-  const expectedNetwork = loadEngineContext({ root: process.cwd(), libraryId: 'agent-engineering' }).machine.network;
+  const expectedContext = loadEngineContext({ root: process.cwd(), libraryId: 'agent-engineering' });
+  const expectedNetwork = expectedContext.machine.network;
   const result = await runConfiguredTask(['--mode', 'current', '--limit', '0'], process.cwd(), {
     libraryId: 'agent-engineering' as never,
     openStateStore: () => openStateStore(':memory:'),
@@ -36,6 +37,7 @@ test('Agent Engineering uses the shared paper harvest and checkpoint seam', asyn
       observedShards = shards.length;
       observedCheckpoint = typeof options.checkpoint.start === 'function';
       assert.deepEqual(options.network, expectedNetwork);
+      assert.equal(options.rateLimitPath, join(expectedContext.machine.roots.dataLibrariesRoot, '.arxiv', 'request-rate.lock'));
       return [];
     },
     executeTask: async (options, dependencies) => {

@@ -19,6 +19,8 @@ type CheckpointShard = Shard & { key: string };
 interface HarvestOptions extends Partial<ArxivConfig> {
   network?: MachineConfig['network'];
   arxiv?: Partial<ArxivConfig>; projectRoot?: string; processContext?: ProcessContext; signal?: AbortSignal;
+  /** Machine-level lock shared by every paper library's arXiv requests. */
+  rateLimitPath?: string;
   /** Required for an injected managed process; otherwise defaults to the project's configured work root. */
   tempRoot?: string;
   sleep?: (ms: number) => Promise<unknown>; clock?: () => number; onProgress?: ProgressReporter;
@@ -165,10 +167,11 @@ function readHarvestPaper(input: unknown): PaperMetadata {
   return p;
 }
 
-function buildArgs(shard: Shard, window: RunWindow, arxiv: Partial<ArxivConfig>, apiBase?: string) {
+function buildArgs(shard: Shard, window: RunWindow, arxiv: Partial<ArxivConfig> & { rateLimitPath?: string }, apiBase?: string) {
   return [
     'arxiv', 'harvest',
     ...(apiBase === undefined ? [] : ['--api-base', apiBase]),
+    ...(arxiv.rateLimitPath === undefined ? [] : ['--rate-limit-path', arxiv.rateLimitPath]),
     '--from', String(window.from).slice(0, 10),
     '--to', String(window.to).slice(0, 10),
     '--date-mode', shard.dateMode,
@@ -222,7 +225,7 @@ export async function runHarvestShards(shards: Shard[], window: RunWindow, optio
     }
     options.checkpoint?.start({ ...shard, key: shard.key ?? '' }, index);
     onProgress({ type: 'discovery-shard-start', ...progressBase, totalElapsedMs: shardStartedAt - startedAt });
-    const args = buildArgs(shard, window, { ...arxiv, requestIntervalMs }, selectedApiBase);
+    const args = buildArgs(shard, window, { ...arxiv, requestIntervalMs, rateLimitPath: options.rateLimitPath }, selectedApiBase);
     const retryProgress = createRetryProgressChannel(onProgress, progressBase);
     let papers;
     let deferredPromotionAllowed = false;

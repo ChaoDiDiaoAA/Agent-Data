@@ -164,7 +164,17 @@ export async function runConfiguredTask(input: TaskInput, root: string, context:
               totalShards: plan.shards.length,
             });
           }
-          const papers = await (context.harvest ?? runHarvestShards)(plan.shards, window, { arxiv: config.arxiv, network: config.network, onProgress, checkpoint, projectRoot: root, tempRoot: config.tempRoot, processContext: getProcessContext(), signal: context.signal });
+          const papers = await (context.harvest ?? runHarvestShards)(plan.shards, window, {
+            arxiv: config.arxiv,
+            network: config.network,
+            rateLimitPath: join(layered.machine.roots.dataLibrariesRoot, '.arxiv', 'request-rate.lock'),
+            onProgress,
+            checkpoint,
+            projectRoot: root,
+            tempRoot: config.tempRoot,
+            processContext: getProcessContext(),
+            signal: context.signal,
+          });
           return papers.map(paper => ({ ...paper, baseId: requireString(paper.baseId, 'harvest paper baseId') }));
         },
       },

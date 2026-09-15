@@ -2,7 +2,7 @@ engine_name: paper-knowledge-engine
 
 arxiv:
   page_size: 100
-  request_interval_seconds: 6
+  request_interval_seconds: 10
   max_attempts: 6
   max_backoff_seconds: 180
   request_timeout_seconds: 60

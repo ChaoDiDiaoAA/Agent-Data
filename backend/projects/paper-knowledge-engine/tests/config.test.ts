@@ -147,7 +147,7 @@ test('loads fixed stage-one paths and normalized production schedule', () => {
   assert.equal(config.overlapHours, 48);
   assert.deepEqual(config.arxiv, {
     pageSize: 100,
-    requestIntervalMs: 6000,
+    requestIntervalMs: 10000,
     maxAttempts: 6,
     maxBackoffMs: 180000,
     requestTimeoutMs: 60000,

@@ -128,6 +128,7 @@ test('real OpenCLI discovers arXiv papers through the explicit HTTP proxy', asyn
       { track: 'A', dateMode: 'submitted', query: 'all:a', categories: ['cs.SE'], maxResults: 100 },
     ], { from: '2026-01-01', to: '2026-08-31' }, {
       arxiv, tempRoot, processContext, signal: AbortSignal.timeout(15000),
+      rateLimitPath: join(tempRoot, 'real-arxiv-rate-limit.lock'),
       network: { httpProxy: `http://127.0.0.1:${proxy.port}` },
       managedProcess: (spec, options) => runManagedProcess({ ...spec,
         env: { ...spec.env, FSD_ARXIV_API_BASE: 'http://arxiv.invalid/query' },
@@ -258,6 +259,24 @@ test('runner passes the shard budget', async () => {
   assert.equal(command[command.indexOf('--request-timeout-ms') + 1], '60000');
   assert.equal(command[command.indexOf('--retry-jitter-ms') + 1], '1000');
   assert.equal(command[command.indexOf('--capacity-cooldown-ms') + 1], '900000');
+});
+
+test('runner passes the shared arXiv rate-limit path to OpenCLI', async () => {
+  const rateLimitPath = join(tempRoot, 'shared-arxiv-rate-limit.lock');
+  let command: string[] = [];
+  const options = Object.assign({
+    arxiv,
+    execFile: async (_file: string, args: string[]) => {
+      command = args;
+      return { stdout: JSON.stringify({ schemaVersion: 1, dateMode: 'submitted', papers: [] }) };
+    },
+  }, { rateLimitPath }) as NonNullable<Parameters<typeof runHarvestShards>[2]>;
+
+  await runHarvestShards([
+    { track: 'A', dateMode: 'submitted', query: 'all:a', categories: ['cs.SE'], maxResults: 1 },
+  ], { from: '2026-08-01', to: '2026-08-02' }, options);
+
+  assert.equal(command[command.indexOf('--rate-limit-path') + 1], rateLimitPath);
 });
 
 test('streams and formats retry progress across the child-process stderr boundary', async () => {

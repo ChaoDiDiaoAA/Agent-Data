@@ -1,6 +1,6 @@
 # Paper Knowledge Engine
 
-论文知识引擎是基于 Bun 1.4 / TypeScript 的确定性资料库工具，当前包含四个互不共享状态的 paper 方向库：**FSD（fsd）**、**Agent Engineering（agent-engineering）**、**Multi-Agent Engineering（multi-agent-engineering）** 和 **LLM Post-Training（大模型后训练知识库，llm-post-training）**。
+论文知识引擎是基于 Bun 1.4 / TypeScript 的确定性资料库工具，当前包含四个业务数据与任务状态隔离的 paper 方向库：**FSD（fsd）**、**Agent Engineering（agent-engineering）**、**Multi-Agent Engineering（multi-agent-engineering）** 和 **LLM Post-Training（大模型后训练知识库，llm-post-training）**。它们复用引擎，并共享机器级 arXiv 请求节流与 MinerU 资源锁。
 
 ```text
 FSD：OpenCLI / arXiv → 规则筛选 → PDF 下载 → 本地 MinerU → Archive v2 → Evidence v3
@@ -146,6 +146,12 @@ D:\agent-data\backend\projects\paper-knowledge-engine\config\
 | `config/llm-post-training/` | LLM Post-Training 的 18 Track 检索、筛选和 PDF 分类；稳定标识为 `llm-post-training`，不读取其他方向的状态 |
 
 新增方向时，在 `config/<libraryId>/` 下提供与 `library_kind` 对应的配置文件，并将 `library.yaml` 中的 `library_id` 与目录名保持一致，再通过 `--library <libraryId>` 选择。引擎代码无需复制；数据、PDF 和 Vault 路径按所选方向分别派生。旧配置仅保留在 `tests/fixtures/legacy-config/`，不参与正常运行。
+
+生产 arXiv 请求间隔为 10 秒。FSD、Agent Engineering、Multi-Agent Engineering 等 paper 方向共享 `data_libraries_root/.arxiv/` 下的机器级请求锁：请求串行、429 冷却共享；各方向的数据库、PDF、Archive、Evidence 和 Vault 仍完全隔离。OpenCLI 适配器源码变更后运行 `bun run opencli:prepare` 重建。
+
+连续 HTTP 429 的共享冷却按基础值的 1、2、4 倍递增并封顶：当前配置为 15、30、60 分钟；若响应的 `Retry-After` 秒数更长，则遵守更长的等待时间。成功的 HTTP 请求清零连续限流记录，网络失败不清零。冷却期间其他论文任务立即返回恢复时间，不再静默等待或发送请求；重复启动不会延长已有截止时间。旧版冷却时间戳继续有效，状态损坏会阻止请求而不是忽略冷却。
+
+冷却截止时间是**最早可尝试时间，不是上游恢复承诺**。当前没有后台自动恢复：到期后重新运行同一方向库、同一模式的任务，并保持配置与限额不变，继续使用检查点。不要删除冷却状态、反复切换方向库或高频运行网络探针来重试。初次全量任务成功后，日常更新优先使用已有的 `weekly` 增量入口，避免反复从年初扫描。共享门控目前覆盖正式论文任务的发现请求，不覆盖独立网络探针或其他外部程序。
 
 ### FSD 当前检索范围
 

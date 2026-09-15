@@ -16,10 +16,16 @@ async function fixture() {
   await symlink(await realpath('node_modules/@jackwener/opencli'), dependency, 'junction');
   await symlink(await realpath('node_modules/fast-xml-parser'), join(fx.projectRoot, 'node_modules/fast-xml-parser'), 'junction');
   await mkdir(join(fx.projectRoot, 'opencli', 'arxiv'), { recursive: true });
+  await mkdir(join(fx.projectRoot, 'src', 'discovery'), { recursive: true });
+  await mkdir(join(fx.projectRoot, 'src', 'runtime'), { recursive: true });
+  await mkdir(join(fx.projectRoot, 'src', 'platform'), { recursive: true });
   await mkdir(join(fx.projectRoot, 'scripts'), { recursive: true });
   for (const name of ['harvest', 'retry']) {
     await cp(join('opencli', 'arxiv', `${name}.ts`), join(fx.projectRoot, 'opencli', 'arxiv', `${name}.ts`));
   }
+  await cp('src/discovery/arxiv-rate-limiter.ts', join(fx.projectRoot, 'src', 'discovery', 'arxiv-rate-limiter.ts'));
+  await cp('src/runtime/run-lock.ts', join(fx.projectRoot, 'src', 'runtime', 'run-lock.ts'));
+  await cp('src/platform/windows-native.ts', join(fx.projectRoot, 'src', 'platform', 'windows-native.ts'));
   await cp('scripts/build-opencli-adapter.ts', join(fx.projectRoot, 'scripts', 'build-opencli-adapter.ts'));
   await writeFile(join(fx.projectRoot, 'package.json'), JSON.stringify({ private: true, type: 'module', dependencies: { '@jackwener/opencli': '1.8.6' } }));
   await cp('bun.lock', join(fx.projectRoot, 'bun.lock'));
@@ -166,6 +172,9 @@ test('shared temp root keeps verified OpenCLI installations for distinct project
   try {
     await mkdir(join(projectRoot, 'node_modules', '@jackwener'), { recursive: true });
     await mkdir(join(projectRoot, 'opencli', 'arxiv'), { recursive: true });
+    await mkdir(join(projectRoot, 'src', 'discovery'), { recursive: true });
+    await mkdir(join(projectRoot, 'src', 'runtime'), { recursive: true });
+    await mkdir(join(projectRoot, 'src', 'platform'), { recursive: true });
     await mkdir(join(projectRoot, 'scripts'), { recursive: true });
     await cp(join(first.input.projectRoot, 'config'), join(projectRoot, 'config'), { recursive: true });
     await symlink(await realpath('node_modules/@jackwener/opencli'), dependency, 'junction');
@@ -173,6 +182,9 @@ test('shared temp root keeps verified OpenCLI installations for distinct project
     for (const name of ['harvest', 'retry']) {
       await cp(join('opencli', 'arxiv', `${name}.ts`), join(projectRoot, 'opencli', 'arxiv', `${name}.ts`));
     }
+    await cp('src/discovery/arxiv-rate-limiter.ts', join(projectRoot, 'src', 'discovery', 'arxiv-rate-limiter.ts'));
+    await cp('src/runtime/run-lock.ts', join(projectRoot, 'src', 'runtime', 'run-lock.ts'));
+    await cp('src/platform/windows-native.ts', join(projectRoot, 'src', 'platform', 'windows-native.ts'));
     await cp('scripts/build-opencli-adapter.ts', join(projectRoot, 'scripts', 'build-opencli-adapter.ts'));
     await writeFile(join(projectRoot, 'package.json'), JSON.stringify({ private: true, type: 'module', dependencies: { '@jackwener/opencli': '1.8.6' } }));
     await cp('bun.lock', join(projectRoot, 'bun.lock'));
@@ -493,14 +505,16 @@ for (const scenario of ['paging', 'retry', 'capacity', 'budget', 'invalid'] as c
       const { withOpenCliRuntime } = await import('../src/runtime/opencli.ts');
       const installation = await buildOpenCliAdapter(fx.input);
       const context = createProcessContext(fx.projectRoot);
-      const result = await withOpenCliRuntime(fx.input, runtime => {
+      const invoke = () => withOpenCliRuntime(fx.input, runtime => {
         const spec: ManagedProcessSpec = {
         ...context, executable: runtime.executable, cwd: runtime.cwd, timeoutMs: null,
         env: { ...runtime.env, FSD_ARXIV_API_BASE: `http://127.0.0.1:${server.port}/query`, FSD_PROCESS_MAX_OUTPUT_BYTES: String(context.policy.maxOutputBytes) },
         args: [...runtime.prefixArgs, 'arxiv', 'harvest', '--from', '2026-01-01', '--to', '2026-08-31', '--date-mode', scenario === 'budget' ? 'updated' : 'submitted', '--track', 'fixture', '--query', 'all:test', '--categories', 'cs.SE', '--page-size', scenario === 'retry' ? '2' : '1', '--max-results', scenario === 'budget' ? '1' : '2', '--request-interval-ms', '3000', '--max-attempts', '2', '--max-backoff-ms', '3000', '--request-timeout-ms', '5000', '--retry-jitter-ms', '0', '--capacity-cooldown-ms', '900000', '--output', '-', '-f', 'json'],
         };
+        if (scenario === 'capacity') spec.args.push('--rate-limit-path', join(fx.root, 'shared-arxiv.lock'));
         return boundary.run(spec, checkedSpec => runManagedProcess(checkedSpec, { signal: controller.signal }));
       });
+      const result = await invoke();
       assert.equal(result.cleanupConfirmed, true, JSON.stringify(result));
       assert.deepEqual(result.activePids, []);
       assert.equal(refusedPrepare, true);
@@ -520,9 +534,19 @@ for (const scenario of ['paging', 'retry', 'capacity', 'budget', 'invalid'] as c
         assert.match(result.stderr, /"retryNotBefore":"[^"]+"/);
         assert.match(result.stderr, /body=Rate exceeded\./);
         assert.match(result.stderr, /server=fixture/);
+        const resumed = await invoke();
+        assert.equal(resumed.cleanupConfirmed, true);
+        assert.deepEqual(resumed.activePids, []);
+        assert.notEqual(resumed.exitCode, 0);
+        assert.equal(requests.length, 1, 'a new OpenCLI process must respect the first process cooldown');
+        assert.equal(resumed.stderr.match(/"retryNotBefore":"([^"]+)"/)?.[1], result.stderr.match(/"retryNotBefore":"([^"]+)"/)?.[1]);
+      } else if (scenario === 'budget') {
+        assert.equal(result.exitCode, 0, result.stderr);
+        assert.match(result.stderr, /__ARXIV_PROGRESS__=.*"type":"discovery-scan-truncated"/);
+        assert.equal(requests.length, 1);
       } else {
         assert.notEqual(result.exitCode, 0);
-        assert.match(result.stderr + result.stdout, scenario === 'budget' ? /budget exhausted/i : /invalid.*Atom/i);
+        assert.match(result.stderr + result.stdout, /invalid.*Atom/i);
         assert.equal(requests.length, 1);
       }
       assert.equal(await realpath(join(installation.homeRoot, '.opencli/node_modules/@jackwener/opencli')), await realpath('node_modules/@jackwener/opencli'));

@@ -5,6 +5,7 @@ import { ArgumentError, CommandExecutionError } from '@jackwener/opencli/errors'
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { arxivProgressPrefix, parseRetryAfterMs, serializeArxivProgress, withArxivRetry } from './retry.ts';
+import { withArxivRequestSlot } from '../../src/discovery/arxiv-rate-limiter.ts';
 const defaultArxivApiBase = 'https://export.arxiv.org/api/query';
 const knownArxivApiBases = new Set([
   'https://arxiv.org/api/query',
@@ -17,11 +18,11 @@ function resolveArxivApiBase(value: string): string {
   }
   return value;
 }
-export interface HarvestOptions { from: string; to: string; dateMode: string; query: string; categories: string[]; pageSize?: number; maxResults: number; requestIntervalMs: number; maxAttempts?: number; maxBackoffMs?: number; requestTimeoutMs?: number; retryJitterMs?: number; capacityCooldownMs?: number; start?: number; track?: string; output?: string; apiBase?: string }
+export interface HarvestOptions { from: string; to: string; dateMode: string; query: string; categories: string[]; pageSize?: number; maxResults: number; requestIntervalMs: number; maxAttempts?: number; maxBackoffMs?: number; requestTimeoutMs?: number; retryJitterMs?: number; capacityCooldownMs?: number; start?: number; track?: string; output?: string; apiBase?: string; rateLimitPath?: string }
 export interface Paper { arxivId: string; baseId: string; version: number; title: string; summary: string; authors: string[]; published: string; updated: string; categories: string[]; pdfUrl: string }
 interface FetchResponse { ok: boolean; status: number; headers?: { get(name: string): string | null }; body?: ReadableStream<Uint8Array> | null; text?(): Promise<string> }
 export interface HarvestDependencies { fetchImpl?: (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<FetchResponse>; sleep?: (ms: number) => Promise<unknown>; random?: () => number; clock?: () => number; onRetry?: (event: RetryEvent) => unknown; onDeferred?: (event: RetryEvent) => unknown; onFailure?: (event: RetryEvent) => unknown; onTruncated?: (event: { type: 'discovery-scan-truncated'; track?: string; dateMode: string; from: string; scannedEntries: number }) => unknown; apiBase?: string }
-type RequestPolicy = HarvestDependencies & RetryPolicy & { requestTimeoutMs: number };
+type RequestPolicy = HarvestDependencies & RetryPolicy & { requestTimeoutMs: number; rateLimitPath?: string };
 const columns = ['arxivId', 'baseId', 'version', 'title', 'summary', 'authors', 'published', 'updated', 'categories', 'pdfUrl'];
 const atomStructureParser = new XMLParser({ preserveOrder: true, ignoreAttributes: true, parseTagValue: false, trimValues: false });
 const diagnosticHeaderNames = ['retry-after', 'server', 'via', 'x-cache', 'x-served-by'] as const;
@@ -137,34 +138,42 @@ export function buildArxivQuery({ from, to, dateMode = 'submitted', query, categ
 
 async function fetchXml(url: string, policy: RequestPolicy) {
   const { fetchImpl = fetch, requestTimeoutMs } = policy;
-  const controller = new AbortController();
-  const timeoutError: ArxivFailure = new Error(`arXiv request timed out after ${requestTimeoutMs}ms`);
-  timeoutError.code = 'ETIMEDOUT';
-  const timeout = setTimeout(() => controller.abort(timeoutError), requestTimeoutMs);
-  try {
-    const response = await fetchImpl(url, {
-      headers: { 'User-Agent': 'agent-data-fsd-code2doc-opencli/1.0', Accept: 'application/atom+xml' },
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      const bodyDiagnostic = await readResponseBodyDiagnostic(response, controller.signal);
-      const headers = diagnosticHeaderNames.flatMap((name) => {
-        const value = sanitizeDiagnostic(response.headers?.get?.(name) ?? '', 128);
-        return value ? [`${name}=${value}`] : [];
+  return await withArxivRequestSlot({
+    lockPath: policy.rateLimitPath,
+    intervalMs: policy.requestIntervalMs,
+    capacityCooldownMs: policy.capacityCooldownMs,
+    sleep: policy.sleep,
+    clock: policy.clock,
+  }, async () => {
+    const controller = new AbortController();
+    const timeoutError: ArxivFailure = new Error(`arXiv request timed out after ${requestTimeoutMs}ms`);
+    timeoutError.code = 'ETIMEDOUT';
+    const timeout = setTimeout(() => controller.abort(timeoutError), requestTimeoutMs);
+    try {
+      const response = await fetchImpl(url, {
+        headers: { 'User-Agent': 'agent-data-fsd-code2doc-opencli/1.0', Accept: 'application/atom+xml' },
+        signal: controller.signal,
       });
-      const diagnostic = [bodyDiagnostic.snippet ? `body=${bodyDiagnostic.snippet}` : '', ...headers].filter(Boolean).join('; ');
-      const error: ArxivFailure = new CommandExecutionError(`arXiv API HTTP ${response.status}`, 'Check the query or retry later');
-      error.httpStatus = response.status;
-      error.retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after'));
-      error.diagnostic = diagnostic || undefined;
-      if (response.status === 429 && bodyDiagnostic.rateExceeded) error.rateLimitKind = 'system-capacity';
-      throw error;
+      if (!response.ok) {
+        const bodyDiagnostic = await readResponseBodyDiagnostic(response, controller.signal);
+        const headers = diagnosticHeaderNames.flatMap((name) => {
+          const value = sanitizeDiagnostic(response.headers?.get?.(name) ?? '', 128);
+          return value ? [`${name}=${value}`] : [];
+        });
+        const diagnostic = [bodyDiagnostic.snippet ? `body=${bodyDiagnostic.snippet}` : '', ...headers].filter(Boolean).join('; ');
+        const error: ArxivFailure = new CommandExecutionError(`arXiv API HTTP ${response.status}`, 'Check the query or retry later');
+        error.httpStatus = response.status;
+        error.retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after'));
+        error.diagnostic = diagnostic || undefined;
+        if (response.status === 429 && bodyDiagnostic.rateExceeded) error.rateLimitKind = 'system-capacity';
+        throw error;
+      }
+      if (!response.text) throw new Error('Missing arXiv response body');
+      return await waitForResponse(response.text(), controller.signal);
+    } finally {
+      clearTimeout(timeout);
     }
-    if (!response.text) throw new Error('Missing arXiv response body');
-    return await waitForResponse(response.text(), controller.signal);
-  } finally {
-    clearTimeout(timeout);
-  }
+  });
 }
 
 function abortReason(signal: AbortSignal) {
@@ -290,6 +299,7 @@ export async function harvestArxiv(options: HarvestOptions, dependencies: Harves
     requestTimeoutMs,
     retryJitterMs,
     capacityCooldownMs,
+    rateLimitPath: options.rateLimitPath,
     onRetry: (event) => dependencies.onRetry?.({
       type: 'discovery-retry',
       ...event,
@@ -376,6 +386,7 @@ cli({
     { name: 'request-timeout-ms', type: 'int', required: true, help: 'Per-request timeout in milliseconds' },
     { name: 'retry-jitter-ms', type: 'int', required: true, help: 'Maximum random retry jitter in milliseconds' },
     { name: 'capacity-cooldown-ms', type: 'int', required: true, help: 'Cooldown after an arXiv system-capacity limit response' },
+    { name: 'rate-limit-path', type: 'string', help: 'Shared machine-level arXiv request lock path' },
     { name: 'start', type: 'int', default: 0, help: '0-based result offset' },
     { name: 'output', type: 'string', default: '-', help: 'Optional JSON envelope path; - keeps output on stdout' },
   ],
@@ -389,6 +400,7 @@ cli({
       maxAttempts: Number(args['max-attempts']), maxBackoffMs: Number(args['max-backoff-ms']), requestTimeoutMs: Number(args['request-timeout-ms']), retryJitterMs: Number(args['retry-jitter-ms']), capacityCooldownMs: Number(args['capacity-cooldown-ms']),
       start: Number(args.start), output: String(args.output ?? '-'),
       ...(args['api-base'] === undefined ? {} : { apiBase: String(args['api-base']) }),
+      ...(args['rate-limit-path'] === undefined ? {} : { rateLimitPath: String(args['rate-limit-path']) }),
     };
     const papers = await harvestArxiv(options, {
       onRetry: (event) => process.stderr.write(serializeArxivProgress(event)),

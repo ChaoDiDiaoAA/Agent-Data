@@ -112,8 +112,14 @@ export async function withArxivRetry<T>(operation: () => Promise<T>, policy: Ret
           ? 'system-capacity'
           : 'request-rate';
         const retryAfter = Number.isFinite(error.retryAfterMs) ? error.retryAfterMs! : 0;
-        const waitMs = Math.max(capacityCooldownMs, retryAfter);
-        const retryNotBefore = new Date(clock() + waitMs).toISOString();
+        const now = clock();
+        // The shared limiter already chose a deadline. Do not restart or shorten
+        // its cooldown when another library encounters the same closed gate.
+        const sharedDeadline = error.code === 'ARXIV_CAPACITY_LIMITED' && error.retryNotBefore
+          ? Date.parse(error.retryNotBefore) : NaN;
+        const deadline = Number.isFinite(sharedDeadline) ? sharedDeadline : now + Math.max(capacityCooldownMs, retryAfter);
+        const waitMs = Math.max(0, deadline - now);
+        const retryNotBefore = new Date(deadline).toISOString();
         if (normalized instanceof Error) {
           const failure = normalized;
           failure.code = 'ARXIV_CAPACITY_LIMITED';
