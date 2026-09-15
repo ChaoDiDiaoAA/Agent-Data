@@ -5,23 +5,23 @@ start_date: 2026-01-01
 overlap_hours: 48
 download_after_hard_filter: true
 current_task:
-  max_papers: 150
+  max_papers: 450
   track_limits:
-    harness-control-loop: 10
-    agent-loop: 10
-    runtime-execution: 10
-    tool-mcp: 10
-    context-prompt: 10
-    memory-state-session: 10
-    guardrails-policy: 10
-    permissions-authorization: 10
-    identity-tenancy-governance: 10
-    hitl-approval: 10
-    sandbox-isolation: 10
-    testing-evaluation: 10
-    agent-evaluation-methodology: 10
-    tracing-observability: 10
-    reliability-operations: 10
+    harness-control-loop: 30
+    agent-loop: 30
+    runtime-execution: 30
+    tool-mcp: 30
+    context-prompt: 30
+    memory-state-session: 30
+    guardrails-policy: 30
+    permissions-authorization: 30
+    identity-tenancy-governance: 30
+    hitl-approval: 30
+    sandbox-isolation: 30
+    testing-evaluation: 30
+    agent-evaluation-methodology: 30
+    tracing-observability: 30
+    reliability-operations: 30
 weekly_schedule:
   enabled: true
   task_name: paper-knowledge-engine-agent-engineering-weekly
