@@ -88,7 +88,7 @@ export function loadArxivConfig(raw: unknown): ArxivConfig {
   if (!Number.isInteger(result.maxBackoffMs) || result.maxBackoffMs < result.requestIntervalMs) throw new Error('invalid arxiv max backoff');
   if (!Number.isInteger(result.requestTimeoutMs) || result.requestTimeoutMs < 10000) throw new Error('arxiv timeout must be at least 10 seconds');
   if (!Number.isInteger(result.retryJitterMs) || result.retryJitterMs < 0 || result.retryJitterMs > 5000) throw new Error('arxiv retry jitter must be 0-5000ms');
-  if (!Number.isInteger(result.capacityCooldownMs) || result.capacityCooldownMs < 1000) throw new Error('arxiv capacity cooldown must be positive');
+  if (!Number.isInteger(result.capacityCooldownMs) || result.capacityCooldownMs < 0) throw new Error('arxiv capacity cooldown must be non-negative');
   if (!Number.isInteger(result.candidatePoolMultiplier) || result.candidatePoolMultiplier < 1) throw new Error('candidate pool multiplier must be positive');
   if (!Number.isInteger(result.maxResultsPerShard) || result.maxResultsPerShard < result.pageSize) throw new Error('max results per shard must cover one page');
   return result;

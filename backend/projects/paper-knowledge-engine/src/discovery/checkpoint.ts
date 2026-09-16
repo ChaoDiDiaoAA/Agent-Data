@@ -6,7 +6,7 @@ import type { HarvestShardInput } from '../types/jobs.ts';
 type CheckpointShard = Pick<HarvestShardInput, 'track' | 'dateMode' | 'query' | 'categories'> & { key: string };
 type CheckpointStore = Pick<ReturnType<typeof openStateStore>, 'listCompletedHarvestShardKeys' | 'beginHarvestShard' | 'completeHarvestShard' | 'failHarvestShard' | 'listHarvestObservations'>;
 
-export function createHarvestCheckpointSession({ store, runId, plan }: { store: CheckpointStore; runId: string; plan: { shards: CheckpointShard[] } }) {
+export function createHarvestCheckpointSession({ store, runId, plan, localCooldownEnabled = true }: { store: CheckpointStore; runId: string; plan: { shards: CheckpointShard[] }; localCooldownEnabled?: boolean }) {
   const currentShardKeys = plan.shards.map((shard) => shard.key);
   const currentShardKeySet = new Set(currentShardKeys);
   const completedKeys = new Set(store.listCompletedHarvestShardKeys(runId).filter((key) => currentShardKeySet.has(key)));
@@ -22,7 +22,7 @@ export function createHarvestCheckpointSession({ store, runId, plan }: { store: 
         dateMode: shard.dateMode,
         query: shard.query,
         categories: shard.categories,
-      });
+      }, { enforceCooldown: localCooldownEnabled });
     },
     complete(shard: CheckpointShard, _index: number, papers: PaperMetadata[]) {
       assertHarvestedSourceMetadata(papers);

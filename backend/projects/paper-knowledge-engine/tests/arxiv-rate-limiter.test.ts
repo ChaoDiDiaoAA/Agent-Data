@@ -6,6 +6,46 @@ import { join } from 'node:path';
 import { withArxivRequestSlot } from '../src/discovery/arxiv-rate-limiter.ts';
 import { harvestArxiv } from '../opencli/arxiv/harvest.ts';
 
+test('disabled local cooldown ignores old windows but still spaces requests and stops on 429', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'paper-engine-arxiv-no-local-cooldown-'));
+  try {
+    const lockPath = join(root, 'request.lock');
+    let now = 1000;
+    const waits: number[] = [];
+    let calls = 0;
+    const options = {
+      from: '2026-08-01', to: '2026-08-02', dateMode: 'submitted', query: 'all:test', categories: ['cs.SE'],
+      pageSize: 100, maxResults: 1, requestIntervalMs: 10_000, capacityCooldownMs: 0, rateLimitPath: lockPath,
+    };
+    const dependencies = {
+      clock: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; },
+      fetchImpl: async () => { calls++; return { ok: false, status: 429, text: async () => 'Rate exceeded.' }; },
+    };
+    for (const state of [{nextRequestAt: 3_601_000}, {nextRequestAt: 3_601_000, cooldownUntil: 3_601_000, consecutive429: 3}]) {
+      await writeFile(`${lockPath}.state.json`, JSON.stringify(state));
+      await assert.rejects(() => harvestArxiv(options, dependencies), { code: 'ARXIV_CAPACITY_LIMITED', retryAfterMs: 0 });
+    }
+    await assert.rejects(() => harvestArxiv(options, dependencies), { code: 'ARXIV_CAPACITY_LIMITED', retryAfterMs: 0 });
+    assert.equal(calls, 3, 'one attempt per invocation, no automatic 429 loop');
+    assert.deepEqual(waits, [10_000,10_000,10_000]);
+  } finally { await rm(root, {recursive:true,force:true}); }
+});
+
+test('disabled local cooldown still honors server Retry-After across callers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'paper-engine-arxiv-server-delay-'));
+  try {
+    let now = 1000;
+    const options = {lockPath:join(root,'request.lock'),intervalMs:3000,capacityCooldownMs:0,clock:()=>now};
+    await assert.rejects(() => withArxivRequestSlot(options, () => {
+      throw Object.assign(new Error('limited'), {httpStatus:429,retryAfterMs:60_000});
+    }), {retryAfterMs:60_000});
+    now = 11_000;
+    let called = false;
+    await assert.rejects(() => withArxivRequestSlot(options, () => {called=true;}), {retryNotBefore:'1970-01-01T00:01:01.000Z'});
+    assert.equal(called,false);
+  } finally {await rm(root,{recursive:true,force:true});}
+});
+
 test('shared arXiv request slots enforce spacing across sequential callers', async () => {
   const root = await mkdtemp(join(tmpdir(), 'paper-engine-arxiv-rate-'));
   try {

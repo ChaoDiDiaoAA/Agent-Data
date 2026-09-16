@@ -321,7 +321,7 @@ function loadEngine(path: string): EngineConfig {
     maxBackoffMs: integer(arxiv.max_backoff_seconds, file, 'arxiv.max_backoff_seconds') * 1000,
     requestTimeoutMs: integer(arxiv.request_timeout_seconds, file, 'arxiv.request_timeout_seconds') * 1000,
     retryJitterMs: integer(arxiv.retry_jitter_ms, file, 'arxiv.retry_jitter_ms', 0),
-    capacityCooldownMs: integer(arxiv.capacity_cooldown_seconds, file, 'arxiv.capacity_cooldown_seconds') * 1000,
+    capacityCooldownMs: integer(arxiv.capacity_cooldown_seconds, file, 'arxiv.capacity_cooldown_seconds', 0) * 1000,
     candidatePoolMultiplier: integer(arxiv.candidate_pool_multiplier, file, 'arxiv.candidate_pool_multiplier'),
     maxResultsPerShard: integer(arxiv.max_results_per_shard, file, 'arxiv.max_results_per_shard'),
   };
@@ -331,7 +331,7 @@ function loadEngine(path: string): EngineConfig {
   if (arxivConfig.maxBackoffMs < arxivConfig.requestIntervalMs) configError('INVALID_FIELD', file, 'arxiv.max_backoff_seconds', 'must cover the request interval');
   if (arxivConfig.requestTimeoutMs < 10000) configError('INVALID_FIELD', file, 'arxiv.request_timeout_seconds', 'must be >= 10');
   if (arxivConfig.retryJitterMs > 5000) configError('INVALID_FIELD', file, 'arxiv.retry_jitter_ms', 'must be <= 5000');
-  if (arxivConfig.capacityCooldownMs < 1000) configError('INVALID_FIELD', file, 'arxiv.capacity_cooldown_seconds', 'must be >= 1');
+  if (arxivConfig.capacityCooldownMs < 0) configError('INVALID_FIELD', file, 'arxiv.capacity_cooldown_seconds', 'must be >= 0');
   if (arxivConfig.maxResultsPerShard < arxivConfig.pageSize) configError('INVALID_FIELD', file, 'arxiv.max_results_per_shard', 'must cover one page');
 
   return {

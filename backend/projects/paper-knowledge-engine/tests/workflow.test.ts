@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { admitOperation, captureOperationPolicy, fingerprint, readOperationEvents, resumeOperation, saveOperationRecord, type OperationRecord } from '../src/library/operations/operation-store.ts';
+import { admitOperation, captureOperationPolicy, fingerprint, readOperation, readOperationEvents, resumeOperation, saveOperationRecord, type OperationRecord } from '../src/library/operations/operation-store.ts';
 import { currentOwner } from '../src/runtime/run-lock.ts';
 import { executeOperation } from '../src/library/workflow.ts';
 import { loadProjectPaths } from '../src/shared/config.ts';
@@ -32,6 +32,24 @@ function createFakeSession() {
 function borrowedSession() {
   return createFakeSession().session;
 }
+
+for (const retryAfterMs of [0, 60_000]) test(`workflow final and persisted errors retain arXiv delay (${retryAfterMs}ms)`, () => fixture(async stateRoot => {
+  const { job } = await admitOperation({operationsRoot:stateRoot,request});
+  const result = await executeOperation({root:stateRoot,jobId:job.jobId}, {
+    operationsRoot:stateRoot,dataRoot:stateRoot,mineruSession:borrowedSession(),
+    runTask:async () => { throw Object.assign(new Error('private-secret'), {
+      code:'ARXIV_CAPACITY_LIMITED',retryAfterMs,retryNotBefore:'2026-09-15T13:06:43.952Z',
+    }); },
+  });
+  const persisted = await readOperation(stateRoot,job.jobId);
+  for (const value of [result,persisted]) {
+    assert.equal(value.status,'failed');
+    assert.equal(value.error?.retryAfterMs,retryAfterMs);
+    assert.ok(value.error?.message.includes(retryAfterMs === 0 ? '未设置本地冷却' : '冷却至'));
+    assert.doesNotMatch(JSON.stringify(value),/private-secret/);
+  }
+  assert.deepEqual(persisted.error,result.error);
+}));
 
 async function createImportJob(stateRoot: string): Promise<string> {
   const snapshotId = randomUUID();

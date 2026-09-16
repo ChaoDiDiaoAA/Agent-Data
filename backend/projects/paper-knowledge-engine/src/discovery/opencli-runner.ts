@@ -94,7 +94,7 @@ function createRetryProgressChannel(onProgress: ProgressReporter, progressBase: 
 function arxivDeferredError(event: NonNullable<ReturnType<ReturnType<typeof createRetryProgressChannel>['deferred']>>) {
   const reason = event.rateLimitKind === 'system-capacity' ? 'system capacity is temporarily unavailable' : 'request rate is temporarily limited';
   return Object.assign(
-    new Error(`ARXIV_CAPACITY_LIMITED: arXiv ${reason}; retry after ${event.retryNotBefore}`),
+    new Error(`ARXIV_CAPACITY_LIMITED: arXiv ${reason}; ${event.retryAfterMs === 0 ? 'no local cooldown; manual retry available' : `retry after ${event.retryNotBefore}`}`),
     {
       code: 'ARXIV_CAPACITY_LIMITED', retryNotBefore: event.retryNotBefore,
       diagnostic: event.diagnostic, httpStatus: event.httpStatus,

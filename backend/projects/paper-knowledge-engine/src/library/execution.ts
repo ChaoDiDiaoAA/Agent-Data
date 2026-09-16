@@ -154,7 +154,7 @@ export async function runConfiguredTask(input: TaskInput, root: string, context:
       bootstrap: () => (context.bootstrap ?? bootstrapStageOne)(config, categories),
       discovery: {
         harvest: async ({ window, run }) => {
-          const checkpoint = createHarvestCheckpointSession({ store: stateStore, runId: run.id, plan });
+          const checkpoint = createHarvestCheckpointSession({ store: stateStore, runId: run.id, plan, localCooldownEnabled: config.arxiv.capacityCooldownMs > 0 });
           if (run.resumed) {
             onProgress({
               type: 'task-resume',

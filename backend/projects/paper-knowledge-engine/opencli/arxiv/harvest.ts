@@ -283,7 +283,7 @@ export async function harvestArxiv(options: HarvestOptions, dependencies: Harves
   if (!Number.isInteger(requestIntervalMs) || requestIntervalMs < 3000) throw new ArgumentError('arxiv request-interval-ms must be an integer of at least 3000');
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ArgumentError('arxiv page-size must be an integer from 1 to 100');
   if (!Number.isInteger(maxResults) || maxResults < 1) throw new ArgumentError('arxiv max-results must be positive');
-  if (!Number.isInteger(capacityCooldownMs) || capacityCooldownMs < 1) throw new ArgumentError('arxiv capacity-cooldown-ms must be positive');
+  if (!Number.isInteger(capacityCooldownMs) || capacityCooldownMs < 0) throw new ArgumentError('arxiv capacity-cooldown-ms must be non-negative');
   if (!['submitted', 'updated'].includes(options.dateMode)) throw new ArgumentError('arxiv date-mode must be submitted or updated');
   if (!options.query || !options.categories?.length) throw new ArgumentError('arxiv query and categories are required');
   const papers: Paper[] = [];

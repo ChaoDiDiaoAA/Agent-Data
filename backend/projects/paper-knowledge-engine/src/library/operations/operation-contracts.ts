@@ -12,7 +12,7 @@ export type Operation = { kind: 'current'; limit?: number; from?: string; to?: s
 export type InternalOperation = { kind: 'bootstrap' } | { kind: 'import-local'; path: string; reparse: boolean }
   | { kind: 'parse-local'; baseId: string; reparse: boolean } | { kind: 'reconcile'; baseId?: string; keepPath?: string };
 export interface JobView { jobId: string; libraryId: LibraryId; requestId: string; runId?: string; status: JobStatus; stage: Stage;
-  current?: number; total?: number; updatedAt: string; error?: { code: string; message: string; retryNotBefore?: string }; canResume: boolean }
+  current?: number; total?: number; updatedAt: string; error?: { code: string; message: string; retryNotBefore?: string; retryAfterMs?: number }; canResume: boolean }
 export interface EventView { seq: number; jobId: string; stage: Stage; type: string; at: string; current?: number; total?: number; baseId?: string; message?: string }
 export interface SubmitRequest { libraryId: LibraryId; requestId: string; operation: Operation | InternalOperation }
 export function operationError(code: string): Error & { code: string } { return Object.assign(new Error(code), { code }); }
@@ -70,13 +70,17 @@ const codes = new Set(['ARXIV_CAPACITY_LIMITED', 'ARXIV_COOLDOWN_ACTIVE', 'ARXIV
   'process_cleanup_unconfirmed', 'path_too_long', 'cuda_oom', 'system_memory', 'model_missing', 'dependency', 'invalid_artifact',
   'empty_output', 'missing_pages', 'low_text_quality', 'invalid_artifact', 'OLD_SOURCE_UNAVAILABLE']);
 /** Never return arbitrary exception text or raw results across the browser boundary. */
-export function publicError(error: unknown): { code: string; message: string; retryNotBefore?: string } {
+export function publicError(error: unknown): { code: string; message: string; retryNotBefore?: string; retryAfterMs?: number } {
   const candidate = record(error) ? error.code ?? error.errorClass : undefined;
   const code = typeof candidate === 'string' && codes.has(candidate) ? candidate : 'OPERATION_FAILED';
   if (code === 'ARXIV_CAPACITY_LIMITED' || code === 'ARXIV_COOLDOWN_ACTIVE') {
     const retryNotBefore = record(error) && validArxivRetryTime(error.retryNotBefore) ? error.retryNotBefore : undefined;
-    return { code, message: `${code}: ${code === 'ARXIV_COOLDOWN_ACTIVE' ? 'arXiv 冷却尚未结束' : 'arXiv 请求受到限流'}；${arxivCooldownHint(retryNotBefore)}`,
-      ...(retryNotBefore ? { retryNotBefore } : {}) };
+    // jobView sanitizes persisted public errors again. Preserve the numeric
+    // delay so zero does not turn back into a cooldown when rendered a second time.
+    const retryAfterMs = record(error) && typeof error.retryAfterMs === 'number'
+      && Number.isFinite(error.retryAfterMs) && error.retryAfterMs >= 0 ? error.retryAfterMs : undefined;
+    return { code, message: `${code}: ${code === 'ARXIV_COOLDOWN_ACTIVE' ? 'arXiv 冷却尚未结束' : 'arXiv 请求受到限流'}；${arxivCooldownHint(retryNotBefore, code === 'ARXIV_CAPACITY_LIMITED' && retryAfterMs === 0)}`,
+      ...(retryNotBefore ? { retryNotBefore } : {}), ...(retryAfterMs === undefined ? {} : { retryAfterMs }) };
   }
   if (code === 'ARXIV_TRANSPORT_UNAVAILABLE') {
     const mode = record(error) && ['configured', 'direct', 'inherit'].includes(String(error.proxyMode)) ? String(error.proxyMode) : 'selected';

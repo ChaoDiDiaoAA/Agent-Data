@@ -31,7 +31,7 @@ export function formatProgressEvent(event: ProgressEvent): string | null {
     }
     case 'discovery-deferred': {
       const reason = event.rateLimitKind === 'request-rate' ? 'arXiv 请求限流' : 'arXiv 系统容量受限';
-      return `[发现 ${event.current}/${event.total}] ${reason}；已保存检查点，${arxivCooldownHint(event.retryNotBefore)}`;
+      return `[发现 ${event.current}/${event.total}] ${reason}；已保存检查点，${arxivCooldownHint(event.retryNotBefore, event.waitMs === 0)}`;
     }
     case 'discovery-transport-failed':
       return `[发现 ${event.current}/${event.total}] arXiv 传输不可用（${event.transportCode ?? 'unknown'}）`;

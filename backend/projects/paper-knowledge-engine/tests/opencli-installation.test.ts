@@ -478,7 +478,7 @@ test('runner uses the leased Bun entry, configured output budget, cancellation a
   } finally { await fx.dispose(); }
 });
 
-for (const scenario of ['paging', 'retry', 'capacity', 'budget', 'invalid'] as const) {
+for (const scenario of ['paging', 'retry', 'capacity', 'no-cooldown', 'budget', 'invalid'] as const) {
   test(`real project OpenCLI discovers generated arxiv harvest: ${scenario}`, async () => {
     const fx = await fixture();
     const boundary = realCliBoundary(fx);
@@ -497,6 +497,7 @@ for (const scenario of ['paging', 'retry', 'capacity', 'budget', 'invalid'] as c
       }
       if (scenario === 'retry' && requests.length === 1) return new Response('temporarily unavailable', { status: 503 });
       if (scenario === 'capacity') return new Response('Rate exceeded.', { status: 429, headers: { 'Retry-After': '1', Server: 'fixture' } });
+      if (scenario === 'no-cooldown') return new Response('Rate exceeded.', {status:429});
       if (scenario === 'invalid') return new Response('<feed><entry></feed>');
       return new Response(`<feed xmlns="http://www.w3.org/2005/Atom">${scenario === 'retry' ? entries.join('') : entries[Number(url.searchParams.get('start'))] ?? ''}</feed>`, { headers: { 'Content-Type': 'application/atom+xml' } });
     } });
@@ -511,9 +512,11 @@ for (const scenario of ['paging', 'retry', 'capacity', 'budget', 'invalid'] as c
         env: { ...runtime.env, FSD_ARXIV_API_BASE: `http://127.0.0.1:${server.port}/query`, FSD_PROCESS_MAX_OUTPUT_BYTES: String(context.policy.maxOutputBytes) },
         args: [...runtime.prefixArgs, 'arxiv', 'harvest', '--from', '2026-01-01', '--to', '2026-08-31', '--date-mode', scenario === 'budget' ? 'updated' : 'submitted', '--track', 'fixture', '--query', 'all:test', '--categories', 'cs.SE', '--page-size', scenario === 'retry' ? '2' : '1', '--max-results', scenario === 'budget' ? '1' : '2', '--request-interval-ms', '3000', '--max-attempts', '2', '--max-backoff-ms', '3000', '--request-timeout-ms', '5000', '--retry-jitter-ms', '0', '--capacity-cooldown-ms', '900000', '--output', '-', '-f', 'json'],
         };
-        if (scenario === 'capacity') spec.args.push('--rate-limit-path', join(fx.root, 'shared-arxiv.lock'));
+        if (scenario === 'capacity' || scenario === 'no-cooldown') spec.args.push('--rate-limit-path', join(fx.root, 'shared-arxiv.lock'));
+        if (scenario === 'no-cooldown') spec.args[spec.args.indexOf('--capacity-cooldown-ms') + 1] = '0';
         return boundary.run(spec, checkedSpec => runManagedProcess(checkedSpec, { signal: controller.signal }));
       });
+      if (scenario === 'no-cooldown') await writeFile(join(fx.root,'shared-arxiv.lock.state.json'), JSON.stringify({nextRequestAt:Date.now()+3_600_000,cooldownUntil:Date.now()+3_600_000,consecutive429:3}));
       const result = await invoke();
       assert.equal(result.cleanupConfirmed, true, JSON.stringify(result));
       assert.deepEqual(result.activePids, []);
@@ -527,6 +530,16 @@ for (const scenario of ['paging', 'retry', 'capacity', 'budget', 'invalid'] as c
         assert.deepEqual(requests.map(url => url.searchParams.get('start')), scenario === 'retry' ? ['0', '0'] : ['0', '1']);
         assert.doesNotMatch(result.stdout, /__ARXIV_PROGRESS__/);
         if (scenario === 'retry') assert.match(result.stderr, /__ARXIV_PROGRESS__=.*"httpStatus":503/);
+      } else if (scenario === 'no-cooldown') {
+        assert.notEqual(result.exitCode,0);
+        assert.equal(requests.length,1);
+        assert.match(result.stderr,/"retryAfterMs":0/);
+        const resumed = await invoke();
+        assert.equal(resumed.cleanupConfirmed,true);
+        assert.deepEqual(resumed.activePids,[]);
+        assert.notEqual(resumed.exitCode,0);
+        assert.equal(requests.length,2, 'manual restart makes one new request despite old local cooldown');
+        assert.match(resumed.stderr,/"retryAfterMs":0/);
       } else if (scenario === 'capacity') {
         assert.notEqual(result.exitCode, 0);
         assert.equal(requests.length, 1);

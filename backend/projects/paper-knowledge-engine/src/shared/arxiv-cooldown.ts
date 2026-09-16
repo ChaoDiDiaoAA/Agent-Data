@@ -6,7 +6,8 @@ export function validArxivRetryTime(retryNotBefore: unknown): retryNotBefore is 
     && new Date(retryNotBefore).toISOString() === retryNotBefore;
 }
 
-export function arxivCooldownHint(retryNotBefore: unknown): string {
+export function arxivCooldownHint(retryNotBefore: unknown, noCooldown = false): string {
+  if (noCooldown) return '未设置本地冷却，可手动重新执行同一方向、同一模式的任务，将恢复原 run 并跳过已完成分片；上游仍可能返回 429，请勿连续重试或删除检查点。';
   const time = validArxivRetryTime(retryNotBefore)
     ? new Date(Date.parse(retryNotBefore) + 8 * 3600000).toISOString().slice(0, 19).replace('T', ' ') + ' 北京时间'
     : undefined;

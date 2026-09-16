@@ -7,7 +7,7 @@ arxiv:
   max_backoff_seconds: 180
   request_timeout_seconds: 60
   retry_jitter_ms: 1000
-  capacity_cooldown_seconds: 900
+  capacity_cooldown_seconds: 0
   candidate_pool_multiplier: 25
   max_results_per_shard: 200
 

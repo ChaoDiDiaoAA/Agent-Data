@@ -1,6 +1,37 @@
 import { test, expect } from 'bun:test';
 import { publicError } from '../src/library/operations/operation-contracts.ts';
 import { formatProgressEvent } from '../src/cli/progress.ts';
+import { jobView } from '../src/library/operations/operation-store.ts';
+import { asLibraryId } from '../src/shared/identity.ts';
+
+for (const retryAfterMs of [0,60_000]) test(`job summary preserves cooldown meaning through serialization (${retryAfterMs}ms)`, () => {
+  const safe = publicError({code:'ARXIV_CAPACITY_LIMITED',retryAfterMs,retryNotBefore:'2026-09-15T13:06:43.952Z',diagnostic:'private-secret'});
+  const stored = JSON.parse(JSON.stringify(safe));
+  const summary = jobView({jobId:'fixture',requestId:'fixture',libraryId:asLibraryId('agent-engineering'),
+    status:'failed',stage:'acquire',updatedAt:'2026-09-15T13:06:44.000Z',canResume:true,error:stored});
+  expect(summary.error).toEqual(safe);
+  expect(summary.error?.message).toContain(retryAfterMs === 0 ? '未设置本地冷却' : '冷却至');
+  expect(JSON.stringify(summary)).not.toContain('private-secret');
+  expect(publicError(summary.error)).toEqual(safe);
+});
+
+test('a 429 without a local or server delay does not tell users to wait for cooldown', () => {
+  const result = publicError({code:'ARXIV_CAPACITY_LIMITED',retryAfterMs:0,retryNotBefore:'2026-09-15T10:00:00.000Z'});
+  expect(result.message).toContain('未设置本地冷却');
+  expect(result.message).not.toContain('冷却至');
+  const progress = formatProgressEvent({type:'discovery-deferred',phase:'discovery',waitMs:0,retryNotBefore:'2026-09-15T10:00:00.000Z'});
+  expect(progress).toContain('未设置本地冷却');
+  expect(progress).not.toContain('冷却至');
+});
+
+test('invalid delay metadata is neither exposed nor treated as zero cooldown', () => {
+  for (const retryAfterMs of [-1, NaN, Infinity, 'private-secret', {secret:'private-secret'}]) {
+    const result = publicError({code:'ARXIV_CAPACITY_LIMITED',retryAfterMs,retryNotBefore:'2026-09-15T13:06:43.952Z'});
+    expect(result.retryAfterMs).toBeUndefined();
+    expect(result.message).not.toContain('未设置本地冷却');
+    expect(JSON.stringify(result)).not.toContain('private-secret');
+  }
+});
 
 for (const code of ['ARXIV_CAPACITY_LIMITED', 'ARXIV_COOLDOWN_ACTIVE']) {
   test(`${code} survives public output with local recovery time but no raw diagnostics`, () => {

@@ -15,7 +15,7 @@ const sourcePaper = (baseId: string, version = 1) => ({
   updated: '2026-08-01T00:00:00Z',
 });
 
-for (const expired of [false,true]) test(`capacity cooldown gates transport and preserves completed shards (expired=${expired})`, async () => {
+for (const [expired, localCooldownEnabled] of [[false,true],[true,true],[false,false]]) test(`capacity cooldown gates transport and preserves completed shards (expired=${expired}, enabled=${localCooldownEnabled})`, async () => {
   const store = openStateStore(':memory:');
   const window = {from:'2026-08-01',to:'2026-08-30'};
   const plan = {shards:[
@@ -24,7 +24,7 @@ for (const expired of [false,true]) test(`capacity cooldown gates transport and 
   ]};
   try {
     const run = store.startRun({from:'2026-08-01T00:00:00.000Z',to:'2026-08-30T23:59:59.999Z'}, 'current');
-    const session = () => createHarvestCheckpointSession({store,runId:run.id,plan});
+    const session = () => createHarvestCheckpointSession({store,runId:run.id,plan,localCooldownEnabled});
     const checkpoint=session();
     checkpoint.start(plan.shards[0]!,0);
     checkpoint.complete(plan.shards[0]!,0,[sourcePaper('2608.1')]);
@@ -37,7 +37,7 @@ for (const expired of [false,true]) test(`capacity cooldown gates transport and 
       sleep:async()=>{},
       execFile:async(_file,args)=>{requests.push(args[args.indexOf('--track')+1]!);return {stdout:JSON.stringify({schemaVersion:1,dateMode:'updated',papers:[]})};},
     });
-    if (expired) {
+    if (expired || !localCooldownEnabled) {
       await execute();
       assert.deepEqual(requests,['T2']);
       assert.deepEqual(store.listCompletedHarvestShardKeys(run.id).sort(),['done','retry']);

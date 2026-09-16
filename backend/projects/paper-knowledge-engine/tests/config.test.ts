@@ -152,7 +152,7 @@ test('loads fixed stage-one paths and normalized production schedule', () => {
     maxBackoffMs: 180000,
     requestTimeoutMs: 60000,
     retryJitterMs: 1000,
-    capacityCooldownMs: 900000,
+    capacityCooldownMs: 0,
     candidatePoolMultiplier: 25,
     maxResultsPerShard: 200,
   });
@@ -270,7 +270,7 @@ for (const [name, mutate, message] of [
   ['max backoff', (value) => { value.arxiv.max_backoff_seconds = 5; }, /invalid arxiv max backoff/],
   ['request timeout', (value) => { value.arxiv.request_timeout_seconds = 9; }, /arxiv timeout must be at least 10 seconds/],
   ['retry jitter', (value) => { value.arxiv.retry_jitter_ms = 5001; }, /arxiv retry jitter must be 0-5000ms/],
-  ['capacity cooldown', (value) => { value.arxiv.capacity_cooldown_seconds = 0; }, /arxiv capacity cooldown must be positive/],
+  ['capacity cooldown', (value) => { value.arxiv.capacity_cooldown_seconds = -1; }, /arxiv capacity cooldown must be non-negative/],
   ['candidate pool multiplier', (value) => { value.arxiv.candidate_pool_multiplier = 0; }, /candidate pool multiplier must be positive/],
   ['max results per shard', (value) => { value.arxiv.max_results_per_shard = 99; }, /max results per shard must cover one page/],
 ] satisfies [string, (value: {arxiv: Record<string, number>}) => void, RegExp][]) {
@@ -280,6 +280,12 @@ for (const [name, mutate, message] of [
     assert.throws(() => loadArxivConfig(value), message);
   });
 }
+
+test('zero capacity cooldown disables only the optional local delay', () => {
+  const result = loadArxivConfig({ arxiv: { ...validArxiv(), capacity_cooldown_seconds: 0 } });
+  assert.equal(result.capacityCooldownMs, 0);
+  assert.ok(result.requestIntervalMs >= 3000);
+});
 
 test('loads explicit equivalent term forms from the paper policy', () => {
   const policy = loadPaperPolicy('config/fsd/paper-policy.yaml');

@@ -5,6 +5,8 @@ import { withRunLock } from '../runtime/run-lock.ts';
 interface RateLimitState {
   nextRequestAt: number;
   cooldownUntil?: number;
+  serverRetryUntil?: number;
+  requestIntervalUntil?: number;
   consecutive429?: number;
   rateLimitKind?: 'request-rate' | 'system-capacity';
 }
@@ -37,6 +39,8 @@ function readState(statePath: string): RateLimitState {
     const timestamp = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 8.64e15;
     if (!parsed || !timestamp(parsed.nextRequestAt)
       || (parsed.cooldownUntil !== undefined && !timestamp(parsed.cooldownUntil))
+      || (parsed.serverRetryUntil !== undefined && !timestamp(parsed.serverRetryUntil))
+      || (parsed.requestIntervalUntil !== undefined && !timestamp(parsed.requestIntervalUntil))
       || (parsed.consecutive429 !== undefined && (!Number.isSafeInteger(parsed.consecutive429) || parsed.consecutive429 < 0))
       || (parsed.rateLimitKind !== undefined && !['request-rate', 'system-capacity'].includes(parsed.rateLimitKind))) {
       throw new Error('invalid state');
@@ -83,8 +87,8 @@ export async function withArxivRequestSlot<T>(
     throw new Error('arXiv rate-limit interval must be a positive integer');
   }
   if (options.capacityCooldownMs !== undefined
-    && (!Number.isSafeInteger(options.capacityCooldownMs) || options.capacityCooldownMs < 1)) {
-    throw new Error('arXiv capacity cooldown must be a positive integer');
+    && (!Number.isSafeInteger(options.capacityCooldownMs) || options.capacityCooldownMs < 0)) {
+    throw new Error('arXiv capacity cooldown must be a non-negative integer');
   }
 
   const sleep = options.sleep ?? ((ms: number) => new Promise(resolve => setTimeout(resolve, ms)));
@@ -94,7 +98,10 @@ export async function withArxivRequestSlot<T>(
   return await withRunLock(options.lockPath, async () => {
     const state = readState(statePath);
     // Older versions stored both spacing and cooldown in nextRequestAt alone.
-    const cooldownUntil = state.cooldownUntil ?? (state.nextRequestAt - clock() > options.intervalMs ? state.nextRequestAt : 0);
+    const localCooldownEnabled = options.capacityCooldownMs !== 0;
+    const cooldownUntil = localCooldownEnabled
+      ? state.cooldownUntil ?? (state.nextRequestAt - clock() > options.intervalMs ? state.nextRequestAt : 0)
+      : state.serverRetryUntil ?? 0;
     if (cooldownUntil > clock()) {
       throw Object.assign(new Error('arXiv shared cooldown is active; no request was sent'), {
         code: 'ARXIV_CAPACITY_LIMITED', httpStatus: 429,
@@ -102,21 +109,28 @@ export async function withArxivRequestSlot<T>(
         rateLimitKind: state.rateLimitKind ?? 'request-rate',
       });
     }
-    const waitMs = Math.max(0, state.nextRequestAt - clock());
+    // Legacy state combines spacing and local cooldown. Disabling the latter
+    // retains at most one ordinary request interval, never the old hours-long gate.
+    const spacingUntil = localCooldownEnabled ? state.nextRequestAt
+      : state.requestIntervalUntil ?? Math.min(state.nextRequestAt, clock() + options.intervalMs);
+    const waitMs = Math.max(0, spacingUntil - clock());
     if (waitMs > 0) await sleep(waitMs);
     const nextRequestAt = clock() + options.intervalMs;
-    writeState(statePath, { ...state, nextRequestAt, cooldownUntil: 0 });
+    writeState(statePath, { ...state, nextRequestAt, requestIntervalUntil: nextRequestAt, cooldownUntil: 0 });
     try {
       const result = await operation();
-      writeState(statePath, { nextRequestAt, cooldownUntil: 0, consecutive429: 0 });
+      writeState(statePath, { nextRequestAt, requestIntervalUntil: nextRequestAt, serverRetryUntil: 0, cooldownUntil: 0, consecutive429: 0 });
       return result;
     } catch (error) {
       if (rateLimitField(error, 'httpStatus') === 429) {
         const consecutive429 = Math.min((state.consecutive429 ?? 0) + 1, 3);
-        const cooldownMs = Math.max((options.capacityCooldownMs ?? 900_000) * 2 ** (consecutive429 - 1), rateLimitField(error, 'retryAfterMs') ?? 0);
-        const cooldownUntil = clock() + cooldownMs;
+        const serverRetryMs = rateLimitField(error, 'retryAfterMs') ?? 0;
+        const cooldownMs = Math.max((options.capacityCooldownMs ?? 900_000) * 2 ** (consecutive429 - 1), serverRetryMs);
+        const failedAt = clock();
+        const cooldownUntil = failedAt + cooldownMs;
         const rateLimitKind = Reflect.get(error as object, 'rateLimitKind') === 'system-capacity' ? 'system-capacity' : 'request-rate';
-        writeState(statePath, { nextRequestAt: Math.max(nextRequestAt, cooldownUntil), cooldownUntil, consecutive429, rateLimitKind });
+        writeState(statePath, { nextRequestAt: Math.max(nextRequestAt, cooldownUntil), requestIntervalUntil: nextRequestAt,
+          serverRetryUntil: serverRetryMs > 0 ? failedAt + serverRetryMs : 0, cooldownUntil, consecutive429, rateLimitKind });
         Object.assign(error as object, {
           code: 'ARXIV_CAPACITY_LIMITED', retryAfterMs: cooldownMs,
           retryNotBefore: new Date(cooldownUntil).toISOString(), rateLimitKind,

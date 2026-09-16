@@ -17,6 +17,41 @@ import { createHash } from 'node:crypto';
 import { loadEngineContext } from '../src/shared/engine-context.ts';
 import { asLibraryId } from '../src/shared/identity.ts';
 
+for (const id of ['fsd','agent-engineering','multi-agent-engineering','llm-post-training']) {
+  test(`${id} configured task bypasses an old local cooldown without discarding its run`, async () => {
+    let observed = false;
+    let runId = '';
+    const store = openStateStore(':memory:');
+    const result = await runConfiguredTask(['--mode','current','--limit','0'], process.cwd(), {
+      libraryId: asLibraryId(id), openStateStore: () => store, bootstrap: async () => {},
+      harvest: async (shards, _window, options) => {
+        assert.equal(options.arxiv?.capacityCooldownMs, 0);
+        assert.ok(options.rateLimitPath);
+        const shard = shards[0]!;
+        store.beginHarvestShard({runId,shardKey:shard.key,shardIndex:1,totalShards:shards.length,
+          track:shard.track,dateMode:shard.dateMode,query:shard.query,categories:shard.categories});
+        store.failHarvestShard({runId,shardKey:shard.key}, Object.assign(new Error('old cooldown'), {
+          code:'ARXIV_CAPACITY_LIMITED',retryNotBefore:'2999-01-01T00:00:00.000Z',
+        }));
+        options.checkpoint.start(shard,0);
+        options.checkpoint.complete(shard,0,[]);
+        assert.deepEqual(store.listCompletedHarvestShardKeys(runId),[shard.key]);
+        observed=true;
+        return [];
+      },
+      executeTask: async (options, dependencies) => {
+        const window={from:'2026-01-01T00:00:00.000Z',to:'2026-09-15T23:59:59.999Z'};
+        const run=dependencies.store.startRun(window,options.mode);
+        runId=run.id;
+        await dependencies.discovery.harvest({window,run});
+        return {status:'completed',mode:options.mode,runId:run.id,window,selected:[],paperCount:0};
+      },
+    });
+    assert.equal(result.status,'completed');
+    assert.equal(observed,true);
+  });
+}
+
 async function createPdf(path: string, title: string) {
   const document = await PDFDocument.create();
   document.setTitle(title);

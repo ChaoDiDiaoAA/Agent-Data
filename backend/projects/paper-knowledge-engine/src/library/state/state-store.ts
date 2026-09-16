@@ -424,7 +424,7 @@ function initializeStateStore(db: ReturnType<typeof stateRowDatabase>, migration
     if (sourceMetadata) persistSourceMetadata(sourceMetadata);
   }
 
-  function beginHarvestShard(input: HarvestShardInput) {
+  function beginHarvestShard(input: HarvestShardInput, options: { enforceCooldown?: boolean } = {}) {
     const startedAt = now();
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -432,7 +432,9 @@ function initializeStateStore(db: ReturnType<typeof stateRowDatabase>, migration
         SELECT retry_not_before,reason,diagnostic FROM harvest_retry_windows
         WHERE run_id=? AND shard_key=?
       `, harvestRetryWindowRow).get(input.runId, input.shardKey);
-      if (retryWindow && Date.parse(retryWindow.retry_not_before) > Date.now()) {
+      // When optional local cooldown is disabled, the shared transport gate
+      // remains responsible for server-provided Retry-After deadlines.
+      if (options.enforceCooldown !== false && retryWindow && Date.parse(retryWindow.retry_not_before) > Date.now()) {
         throw Object.assign(
           new Error(`ARXIV_COOLDOWN_ACTIVE: arXiv discovery is deferred until ${retryWindow.retry_not_before}`),
           {
@@ -936,7 +938,7 @@ function initializeStateStore(db: ReturnType<typeof stateRowDatabase>, migration
     markParseFailed(id: string, error: unknown) { db.prepare('UPDATE papers SET status=?,processing_error=?,updated_at=? WHERE base_id=?').run('parse_failed', String(error), now(), id); },
     startRun(window: RunWindow, kind: string, options?: { autoResume?: boolean }) { return startRun(window, kind, options); },
     failRun(id: string, message: string) { db.prepare('UPDATE runs SET status=?,finished_at=?,error_message=? WHERE run_id=?').run('failed', now(), message, id); },
-    beginHarvestShard(input: HarvestShardInput) { return beginHarvestShard(input); },
+    beginHarvestShard(input: HarvestShardInput, options?: { enforceCooldown?: boolean }) { return beginHarvestShard(input, options); },
     completeHarvestShard(identity: HarvestShardIdentity, papers: PaperMetadata[]) { completeHarvestShard(identity, papers); },
     failHarvestShard(identity: HarvestShardIdentity, error: unknown) { failHarvestShard(identity, error); },
     listCompletedHarvestShardKeys(runId: string) { return listCompletedHarvestShardKeys(runId); },
