@@ -24,10 +24,28 @@ export class PdfUnavailableError extends Error {
   get arxivId() { return this.paper.arxivId; }
 }
 
+/** The paper metadata exists, but arXiv has not made this version's PDF asset available yet. */
+export class PdfNotReadyError extends Error {
+  readonly code = 'PDF_NOT_READY';
+  readonly permanent = false;
+  constructor(readonly paper: Pick<PdfPaper, 'baseId' | 'arxivId' | 'version'>, readonly status: number) {
+    super(`PDF download HTTP ${status}: file unavailable`);
+    this.name = 'PdfNotReadyError';
+  }
+  get baseId() { return this.paper.baseId; }
+  get arxivId() { return this.paper.arxivId; }
+}
+
 export function isPermanentPdfUnavailable(error: unknown): error is PdfUnavailableError {
   return !!error && typeof error === 'object'
     && Reflect.get(error, 'code') === 'PDF_NOT_FOUND'
     && Reflect.get(error, 'permanent') === true;
+}
+
+export function isDeferredPdfUnavailable(error: unknown): error is PdfNotReadyError {
+  return !!error && typeof error === 'object'
+    && Reflect.get(error, 'code') === 'PDF_NOT_READY'
+    && Reflect.get(error, 'permanent') === false;
 }
 
 export interface PdfDownloadOptions {
@@ -96,6 +114,12 @@ function shouldRetryResponse(response: PdfResponse) {
   return response.status === 429 || response.status >= 500;
 }
 
+function isFileUnavailableResponse(status: number, body: Uint8Array) {
+  if (status < 500) return false;
+  const preview = Buffer.from(body.subarray(0, 64 * 1024)).toString('utf8').toLowerCase();
+  return preview.includes('file unavailable');
+}
+
 async function fetchWithRetry(url: string, { fetchImpl, sleep = delay, maxAttempts = 4, signal, network }: Pick<PdfDownloadOptions, 'sleep' | 'maxAttempts' | 'signal' | 'network'> & { fetchImpl: PdfFetch }) {
   let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -155,13 +179,13 @@ export async function downloadAcceptedPdf(
   if (response.status === 404 || response.status === 410) throw new PdfUnavailableError(paper, response.status);
   const bytes = await response.arrayBuffer();
   body = bytes instanceof Uint8Array ? Buffer.from(bytes) : Buffer.from(new Uint8Array(bytes));
+  if (isFileUnavailableResponse(response.status, body)) throw new PdfNotReadyError(paper, response.status);
   if (!response.ok) throw new Error(`PDF download HTTP ${response.status}`);
   if (status < 200 || status >= 300 || !contentType.toLowerCase().includes('pdf') || body.subarray(0, 5).toString() !== '%PDF-') {
     throw new Error('response is not a valid PDF');
   }
   if (body.length > 200 * 1024 * 1024) throw new Error('PDF exceeds 200MB');
   const pageCount = (await PDFDocument.load(body, { ignoreEncryption: false })).getPageCount();
-  if (pageCount > 200) throw new Error('PDF exceeds 200 pages');
 
   const sha256 = createHash('sha256').update(body).digest('hex');
   const latest = stateStore.findByBaseId(paper.baseId);

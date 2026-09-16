@@ -68,6 +68,30 @@ test('Bun fetch downloads and validates a PDF on every platform', async () => {
   } finally { await removeOwnedTestDirectory(f.root); }
 });
 
+test('accepts a valid arXiv PDF over the local-import page limit', async () => {
+  const f = await fixture();
+  const pdf = await PDFDocument.create();
+  for (let page = 0; page < 201; page += 1) pdf.addPage();
+  const bytes = Buffer.from(await pdf.save());
+  try {
+    const result = await downloadAcceptedPdf({ accepted: true, paper: {
+      baseId: 'long-paper', arxivId: 'long-paperv1', version: 1,
+      title: 'Long paper', pdfUrl: 'https://arxiv.org/pdf/long-paperv1',
+    } }, {
+      ...f,
+      maxAttempts: 1,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/pdf' },
+        arrayBuffer: async () => bytes,
+      }),
+      stateStore: stateStore(),
+    });
+    assert.equal(result.pageCount, 201);
+  } finally { await removeOwnedTestDirectory(f.root); }
+});
+
 test('abort signal reaches the Bun fetch boundary without creating partial files', async () => {
   const f = await fixture();
   const controller = new AbortController();
@@ -93,6 +117,66 @@ test('retries transient network failures before accepting a PDF response', async
       ...f, fetchImpl: async () => { attempts += 1; throw Object.assign(new Error('reset'), { code: 'ECONNRESET' }); }, sleep: async () => {}, maxAttempts: 3, stateStore: stateStore(),
     }), /ECONNRESET|reset/);
     assert.equal(attempts, 3);
+  } finally { await removeOwnedTestDirectory(f.root); }
+});
+
+test('classifies an arXiv file-unavailable 500 as a deferred PDF without mutating state', async () => {
+  const f = await fixture();
+  let registered = false;
+  try {
+    await assert.rejects(
+      () => downloadAcceptedPdf({ accepted: true, paper: {
+        baseId: 'not-ready', arxivId: 'not-readyv3', version: 3,
+        pdfUrl: 'https://arxiv.org/pdf/not-readyv3',
+      } }, {
+        ...f,
+        maxAttempts: 1,
+        fetchImpl: async () => ({
+          ok: false,
+          status: 500,
+          headers: { get: () => 'text/html; charset=utf-8' },
+          arrayBuffer: async () => Buffer.from('<html><body><h1>file unavailable</h1></body></html>'),
+        }),
+        stateStore: stateStore({ markDownloaded() { registered = true; } }),
+      }),
+      error => {
+        assert.equal((error as { code?: string }).code, 'PDF_NOT_READY');
+        assert.equal((error as { status?: number }).status, 500);
+        assert.equal((error as { baseId?: string }).baseId, 'not-ready');
+        assert.equal((error as { permanent?: boolean }).permanent, false);
+        assert.match((error as Error).message, /file unavailable/i);
+        return true;
+      },
+    );
+    assert.equal(registered, false);
+  } finally { await removeOwnedTestDirectory(f.root); }
+});
+
+test('keeps a generic HTTP 500 fatal after the final retry', async () => {
+  const f = await fixture();
+  try {
+    await assert.rejects(
+      () => downloadAcceptedPdf({ accepted: true, paper: {
+        baseId: 'server-error', arxivId: 'server-errorv1', version: 1,
+        pdfUrl: 'https://arxiv.org/pdf/server-errorv1',
+      } }, {
+        ...f,
+        maxAttempts: 1,
+        fetchImpl: async () => ({
+          ok: false,
+          status: 500,
+          headers: { get: () => 'text/html; charset=utf-8' },
+          arrayBuffer: async () => Buffer.from('<html><body><h1>internal server error</h1></body></html>'),
+        }),
+        stateStore: stateStore(),
+      }),
+      error => {
+        assert.equal((error as { code?: string }).code, undefined);
+        assert.equal((error as { status?: number }).status, undefined);
+        assert.match((error as Error).message, /PDF download HTTP 500/);
+        return true;
+      },
+    );
   } finally { await removeOwnedTestDirectory(f.root); }
 });
 

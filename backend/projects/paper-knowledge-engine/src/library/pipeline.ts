@@ -57,7 +57,7 @@ function assertParseManifest(value: unknown, runId: string): asserts value is Ta
 }
 
 import { selectTaskDecisions, taskPaperLimit } from './selection/task-selection.ts';
-import { hasStoredPaperPdf, isPermanentPdfUnavailable } from './sources/pdf-store.ts';
+import { hasStoredPaperPdf, isDeferredPdfUnavailable, isPermanentPdfUnavailable } from './sources/pdf-store.ts';
 import { readTaskArtifact, validateTaskArtifact, validateTaskSelection } from './state/task-artifacts.ts';
 
 
@@ -311,18 +311,20 @@ export async function runTask(options: TaskOptions, dependencies: TaskDependenci
           try {
             result = await dependencies.pdfStore.download(decision);
           } catch (error) {
-            if (isPermanentPdfUnavailable(error)) {
+            if (isPermanentPdfUnavailable(error) || isDeferredPdfUnavailable(error)) {
+              const deferred = isDeferredPdfUnavailable(error);
               await replenishFallbackCandidates();
               const replacementIndex = fallbackCandidates.findIndex(candidate => candidate.primaryTrack === decision.primaryTrack);
               const replacement = fallbackCandidates.splice(replacementIndex < 0 ? 0 : replacementIndex, 1)[0];
-              dependencies.store.markExcluded(decision.paper.baseId, `pdf-unavailable:${error.status}`, decision.paper.version ?? 1);
+              if (!deferred) dependencies.store.markExcluded(decision.paper.baseId, `pdf-unavailable:${error.status}`, decision.paper.version ?? 1);
               if (replacement) selected[index] = replacement;
               else selected.splice(index, 1);
               await persistSelectionCheckpoint();
               onProgress({
                 type: 'download-skipped', phase: 'download', current: index + 1, total: selected.length,
-                baseId: decision.paper.baseId, arxivId: decision.paper.arxivId, status: 'unavailable',
-                error: `PDF 不可用（HTTP ${error.status}）`, replacementArxivId: replacement?.paper.arxivId,
+                baseId: decision.paper.baseId, arxivId: decision.paper.arxivId, status: deferred ? 'deferred' : 'unavailable',
+                error: deferred ? `PDF 暂不可用（HTTP ${error.status}）；后续任务将重试` : `PDF 不可用（HTTP ${error.status}）`,
+                replacementArxivId: replacement?.paper.arxivId,
                 elapsedMs: clock() - downloadStartedAt, totalElapsedMs: clock() - taskStartedAt,
               });
               index -= 1;

@@ -18,7 +18,7 @@ export interface TaskSelection extends Record<string, unknown> {
     paper: { baseId: string; version?: number; [field: string]: unknown };
     [field: string]: unknown;
   }[];
-  /** Candidates retained to replace a permanently unavailable PDF. */
+  /** Candidates retained to replace an unavailable PDF. */
   fallbacks?: TaskSelection['selected'];
 }
 

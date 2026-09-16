@@ -155,6 +155,39 @@ test('permanently unavailable PDFs are excluded and replaced from the saved fall
   assert.deepEqual(finalSelection.fallbacks, []);
 });
 
+test('deferred arXiv PDFs are replaced without exclusion and the task continues', async () => {
+  const events: unknown[][] = [];
+  const dependencies = fakeDependencies(events);
+  const downloads: string[] = [];
+  const excluded: string[] = [];
+  const checkpoints: any[] = [];
+  const progress: ProgressEvent[] = [];
+  dependencies.onProgress = event => progress.push(event);
+  dependencies.store.markExcluded = (baseId) => { excluded.push(baseId); };
+  dependencies.pdfStore.download = async decision => {
+    downloads.push(decision.paper.baseId);
+    if (decision.paper.baseId === '4') {
+      throw Object.assign(new Error('PDF download HTTP 500: file unavailable'), {
+        code: 'PDF_NOT_READY', status: 500, baseId: '4', permanent: false,
+      });
+    }
+    return { ...decision.paper, version: 1, sha256: decision.paper.baseId.repeat(64).slice(0, 64), pdfPath: `D:/paper/${decision.paper.baseId}.pdf` };
+  };
+  dependencies.writeManifest = async (_path, manifest) => { checkpoints.push(manifest); };
+
+  const result = await runTask({ mode: 'current', now: '2026-08-02T00:00:00Z', limit: 3 }, dependencies);
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(downloads, ['4', '1', '2', '3']);
+  assert.deepEqual(excluded, []);
+  const finalSelection = checkpoints.filter(manifest => Array.isArray(manifest.selected)).at(-1);
+  assert.deepEqual(finalSelection.selected.map((item: any) => item.paper.baseId), ['1', '2', '3']);
+  assert.deepEqual(finalSelection.fallbacks, []);
+  const skipped = progress.find(event => event.type === 'download-skipped');
+  assert.ok(skipped);
+  assert.equal(skipped.baseId, '4');
+});
+
 test('legacy selection without fallbacks replenishes from its persisted discovery observations', async () => {
   const events: unknown[][] = [];
   const dependencies = fakeDependencies(events);
