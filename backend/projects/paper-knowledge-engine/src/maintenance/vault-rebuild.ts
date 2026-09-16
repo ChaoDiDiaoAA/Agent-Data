@@ -41,6 +41,11 @@ const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('h
 const absent = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
 const info = (path: string) => lstat(path).catch(error => { if (absent(error)) return null; throw error; });
 const fail = (code: string, detail: string): never => { throw new Error(`VAULT_REBUILD_${code}: ${detail}`); };
+const pathFailureDetail = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const prefix = 'VAULT_REBUILD_PATH_UNSAFE: ';
+  return message.startsWith(prefix) ? message.slice(prefix.length) : message;
+};
 const key = (path: string) => path.replaceAll('\\', '/').toLowerCase();
 const inside = (a: string, b: string) => key(a) === key(b) || key(b).startsWith(key(a) + '/');
 const disjoint = (a: string, b: string) => { if (inside(a, b) || inside(b, a)) fail('PATH_UNSAFE', `overlapping roots: ${a}, ${b}`); };
@@ -84,12 +89,17 @@ async function checkedRoots(input: VaultRebuildInput): Promise<VaultRebuildInput
       runtimeRoots: canonicalRuntimeRoots(input.runtimeRoots) };
     const values = [roots.legacyVaultRoot, roots.archiveRoot, roots.vaultRoot];
     for (let i = 0; i < values.length; i++) for (const b of values.slice(i + 1)) disjoint(values[i]!, b);
+    for (const [name, runtime] of Object.entries(roots.runtimeRoots)) {
+      if (inside(roots.legacyVaultRoot, runtime) || inside(runtime, roots.legacyVaultRoot)) {
+        fail('PATH_UNSAFE', `legacy Vault source must be outside runtime root ${name}; choose a separate review directory`);
+      }
+    }
     protectRuntime(roots.legacyVaultRoot, roots.runtimeRoots);
     protectRuntime(roots.vaultRoot, roots.runtimeRoots);
     for (const path of [...values, ...Object.values(roots.runtimeRoots)]) await prospectiveDirectory(path);
     await assertRealPath(roots.archiveRoot); await assertRealPath(roots.legacyVaultRoot);
     return roots;
-  } catch (error) { return fail('PATH_UNSAFE', String(error)); }
+  } catch (error) { return fail('PATH_UNSAFE', pathFailureDetail(error)); }
 }
 async function tree(root: string): Promise<{ snapshot: TreeSnapshot; payloads: Map<string, Uint8Array> }> {
   const paths = await realTree(root); assertUniqueVaultPaths(paths);

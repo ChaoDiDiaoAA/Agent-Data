@@ -254,6 +254,23 @@ for (const rootName of ['dataRoot', 'workRoot', 'runsRoot', 'operationsRoot', 'b
   }
 }
 
+test('reports an actionable error when the legacy Vault source is inside a runtime root', async () => {
+  const f = await vaultFixture();
+  try {
+    const { createVaultRebuildPlan } = await api();
+    const input = {
+      ...f.input,
+      legacyVaultRoot: join(f.input.runtimeRoots.backupRoot, 'legacy-vault'),
+    };
+    await assert.rejects(createVaultRebuildPlan(input), error => {
+      const message = String(error);
+      assert.match(message, /legacy Vault source must be outside runtime root backupRoot/);
+      assert.doesNotMatch(message, /VAULT_REBUILD_PATH_UNSAFE: Error: VAULT_REBUILD_PATH_UNSAFE/);
+      return true;
+    });
+  } finally { await f.close(); }
+});
+
 test('review R1: runtime roots are canonical, required and bound to the reviewed plan hash', async () => {
   const f = await vaultFixture();
   try {

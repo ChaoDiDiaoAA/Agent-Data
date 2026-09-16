@@ -6,10 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readVerifiedRunSources } from '../src/evidence/archive-reader.ts';
 import { prepareEvidenceSources } from '../src/evidence/layout-v3.ts';
-import { publishRunEvidence } from '../src/evidence/publication-service.ts';
+import { publishRunEvidence, verifyEvidencePublicationHistory } from '../src/evidence/publication-service.ts';
 import { planEvidencePublication } from '../src/evidence/publisher.ts';
 import { openStateStore } from '../src/library/state/state-store.ts';
 import { createVaultRebuildPlan, applyVaultRebuild } from '../src/maintenance/vault-rebuild.ts';
+import { routeEvidenceRendererBaseline } from '../src/cli/routes.ts';
 import { canonicalJson, hashCanonical } from '../src/shared/manifest.ts';
 import { archiveContext } from './fixtures/library-paths.ts';
 import { validRunSourceFixture } from './fixtures/publication-baseline.ts';
@@ -185,7 +186,9 @@ async function crossRunBackfillFixture() {
 test('reviewed renderer baseline authenticates drift and permits cumulative publication without rewriting old receipts', async () => {
   const f = await fixture();
   try {
-    await expect(publishRunEvidence(f.next)).rejects.toThrow('completed publication Evidence manifest identity differs');
+    await expect(publishRunEvidence(f.next)).rejects.toThrow(
+      /completed publication Evidence manifest identity differs.*renderer-baseline/s,
+    );
     expect(f.store.findEvidencePublication(f.next.runId)).toBeUndefined();
 
     const { createRendererUpgradeBaseline, applyRendererUpgradeBaseline } = await api();
@@ -213,6 +216,35 @@ test('reviewed renderer baseline authenticates drift and permits cumulative publ
       expect((await readFile(receipt.path)).equals(receipt.bytes)).toBe(true);
       expect(hash(await readFile(receipt.path))).toBe(receipt.sha256);
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test('CLI renderer baseline route is explicit, hash-bound, and reuses the reviewed baseline implementation', async () => {
+  const f = await fixture();
+  try {
+    const dryRun = await routeEvidenceRendererBaseline(['--dry-run', '--format', 'json'], { input: f.baselineInput });
+    if (!('kind' in dryRun) || dryRun.kind !== 'evidence-v3-renderer-upgrade-baseline') throw new Error('renderer baseline dry-run returned apply output');
+    const baselineFile = join(f.root, 'renderer-baseline.json');
+    await writeFile(baselineFile, canonicalJson(dryRun));
+    await expect(routeEvidenceRendererBaseline(['--apply'], { input: f.baselineInput })).rejects.toThrow('EVIDENCE_BASELINE_ARGUMENTS');
+    await expect(routeEvidenceRendererBaseline([
+      '--apply', '--baseline-file', baselineFile, '--baseline-sha256', dryRun.sha256,
+    ], { input: f.baselineInput })).resolves.toEqual({ mode: 'apply', replayed: false, sha256: dryRun.sha256 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('publication history preflight fails before a new task can spend time on discovery or parsing', async () => {
+  const f = await fixture();
+  try {
+    await expect(verifyEvidencePublicationHistory({
+      stateRoot: f.next.stateRoot,
+      libraryId: f.baselineInput.libraryId,
+      store: f.store,
+    })).rejects.toThrow(/evidence-renderer-baseline/);
   } finally {
     await f.close();
   }

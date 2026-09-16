@@ -47,6 +47,29 @@ async function reviewed<T extends { sha256: string; schemaVersion: number }>(inp
   return plan;
 }
 
+/** Read a reviewed renderer-upgrade baseline without installing it. The CLI
+ * uses this to keep the operator's file and hash as explicit authority; the
+ * apply path still regenerates the baseline from the live Archive/Vault before
+ * touching SQLite. */
+export async function readRendererUpgradeBaseline(input: ReviewedPlan): Promise<RendererUpgradePublicationBaseline> {
+  const bytes = await regular(input.path);
+  let parsed: unknown;
+  try { parsed = JSON.parse(bytes.toString()); }
+  catch { return fail('reviewed renderer baseline is not valid JSON'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return fail('reviewed renderer baseline is not an object');
+  }
+  const record = parsed as Record<string, unknown>;
+  const embedded = record.sha256;
+  const body = Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'sha256'));
+  if (!/^[0-9a-f]{64}$/.test(input.sha256) || embedded !== input.sha256
+    || hashCanonical(body) !== input.sha256 || canonicalJson(parsed) !== bytes.toString()
+    || record.schemaVersion !== 1 || record.kind !== 'evidence-v3-renderer-upgrade-baseline') {
+    return fail('reviewed renderer baseline hash differs');
+  }
+  return parsed as RendererUpgradePublicationBaseline;
+}
+
 /** Read-only dry-run. Reviewed plans are explicit authority, independently hash-pinned
  * by the operator. Their old paths are never opened; all active paths are derived. */
 export async function createPublicationBaseline(input: PublicationBaselineInput): Promise<ArchiveV2PublicationBaseline> {

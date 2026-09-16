@@ -65,7 +65,7 @@ export function validateRequest(value: unknown, internal = false): SubmitRequest
 const codes = new Set(['ARXIV_CAPACITY_LIMITED', 'ARXIV_COOLDOWN_ACTIVE', 'ARXIV_TRANSPORT_UNAVAILABLE', 'INVALID_REQUEST', 'REQUEST_CONFLICT', 'PROJECT_BUSY', 'JOB_NOT_FOUND', 'NOT_RESUMABLE', 'PROCESS_CLEANUP_UNCONFIRMED',
   'PROCESS_IDENTITY_UNAVAILABLE', 'CAPABILITY_UNAVAILABLE', 'CONFIG_REQUIRED', 'SOURCE_NOT_AUTHORIZED', 'BUDGET_EXHAUSTED', 'POLICY_CHANGED', 'PREVIEW_CHANGED', 'PREVIEW_EXPIRED', 'IMPORT_LIMIT_EXCEEDED',
   'INPUT_CHANGED', 'RUN_ID_MISMATCH', 'PARSE_FAILED', 'DOWNLOAD_FAILED', 'LAUNCH_FAILED', 'INTERRUPTED', 'WEEKLY_DISABLED',
-  'OPERATION_FAILED', 'EVIDENCE_CONFLICT', 'process_error', 'timeout', 'quality_failed', 'invalid_output',
+  'OPERATION_FAILED', 'EVIDENCE_CONFLICT', 'EVIDENCE_RECEIPT_CONFLICT', 'process_error', 'timeout', 'quality_failed', 'invalid_output',
   'EVIDENCE_IO',
   'process_cleanup_unconfirmed', 'path_too_long', 'cuda_oom', 'system_memory', 'model_missing', 'dependency', 'invalid_artifact',
   'empty_output', 'missing_pages', 'low_text_quality', 'invalid_artifact', 'OLD_SOURCE_UNAVAILABLE']);
@@ -91,6 +91,17 @@ export function publicError(error: unknown): { code: string; message: string; re
     return { code, message: `${code}: Evidence 文件事务写入失败，恢复材料已保留；请稍后重试 Evidence 发布` };
   }
   const candidateMessage = record(error) ? error.message : undefined;
+  if (code === 'EVIDENCE_RECEIPT_CONFLICT') {
+    const rendererDrift = typeof candidateMessage === 'string'
+      && /^EVIDENCE_RECEIPT_CONFLICT: completed publication Evidence manifest identity differs: [A-Za-z0-9][A-Za-z0-9._-]{0,199}; current renderer differs from immutable history; run evidence-renderer-baseline after a reviewed vault-rebuild$/.test(candidateMessage);
+    const rendererRecoveryMessage = `${code}: 历史 Evidence 与当前 renderer 不一致；请先执行 evidence-renderer-baseline（需经过审阅的 vault-rebuild）`;
+    return {
+      code,
+      message: rendererDrift || candidateMessage === rendererRecoveryMessage
+        ? rendererRecoveryMessage
+        : `${code}: 历史 Evidence receipt 校验失败；请检查 receipt、Archive 与 Vault 后再重试`,
+    };
+  }
   const safeEvidenceMessage = code === 'EVIDENCE_CONFLICT' && typeof candidateMessage === 'string'
     && [
       /^EVIDENCE_CONFLICT: (?:managed file differs|staging file differs|unexpected install temporary|uncommitted install temporary|journal backup differs): [A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/,

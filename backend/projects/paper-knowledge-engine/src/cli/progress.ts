@@ -21,6 +21,10 @@ export function formatProgressEvent(event: ProgressEvent): string | null {
         + '\n[说明] 发现阶段统计候选，候选数量不等于下载数量；筛选后才按任务上限下载与解析。';
     case 'task-resume':
       return `[任务] 恢复 run ${String(event.runId).slice(0, 8)}...，已完成 ${event.completedShards}/${event.totalShards} 个分片`;
+    case 'evidence-history-preflight-start':
+      return '[预检] 正在校验历史 Evidence、Archive 与 renderer，请稍候';
+    case 'evidence-history-preflight-complete':
+      return '[预检] 历史 Evidence 校验通过';
     case 'discovery-shard-skipped':
       return `[发现 ${event.current}/${event.total}] 已有检查点，跳过`;
     case 'discovery-shard-start':

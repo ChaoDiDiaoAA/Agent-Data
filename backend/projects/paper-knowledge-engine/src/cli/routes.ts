@@ -18,6 +18,7 @@ import { applyEvidenceMigration, createEvidenceMigrationInventory, refreshEviden
 import { applyArchiveMigration, createArchiveMigrationPlan, type ArchiveMigrationInput } from '../maintenance/archive-migration.ts';
 import { applyLibraryStatePlan, createLibraryStatePlan, type LibraryStateInput } from '../maintenance/library-state-migration.ts';
 import { applyVaultRebuild, createVaultRebuildPlan, type VaultRebuildInput } from '../maintenance/vault-rebuild.ts';
+import { applyRendererUpgradeBaseline, createRendererUpgradeBaseline, readRendererUpgradeBaseline, type RendererUpgradeBaselineInput } from '../maintenance/publication-baseline.ts';
 import { historicalStateDatabasePath } from '../library/state/state-store.ts';
 import { canonicalJson } from '../shared/manifest.ts';
 import { applyVaultCleanup, createVaultCleanupReview, publicVaultCleanupPlan } from '../maintenance/vault-cleanup.ts';
@@ -49,6 +50,7 @@ interface VaultCleanupContext extends RootContext {
 }
 interface CleanupContext extends RootContext { input?: CleanupPlanInput }
 interface ArxivCheckContext extends ConfigContext { probe?: (options: ArxivProbeOptions) => Promise<unknown> }
+interface RendererBaselineContext extends RootContext { input?: RendererUpgradeBaselineInput }
 export interface ResearchImportArguments { path: string; kind: 'local-artifact'; track: string }
 const argValue = (args: string[], name: string, fallback: string | null = null) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : fallback; };
 const has = (args: string[], name: string) => args.includes(name);
@@ -140,7 +142,7 @@ export function parseResearchImportArguments(args: string[]): ResearchImportArgu
   if (!researchSourceKinds.has(kind as ResearchSourceKind)) throw new Error(`INVALID_SOURCE_KIND: ${kind}`);
   if (kind !== 'local-artifact') throw new Error('LOCAL_ARTIFACT_KIND_REQUIRED: local imports must use --kind local-artifact');
   if (!track || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(track)) throw new Error('INVALID_TRACK: --track must be a safe Track id');
-  if (/[ -]/.test(path)) throw new Error('INVALID_PATH: --path contains control characters');
+  if (/[\u0000-\u001f\u007f]/.test(path)) throw new Error('INVALID_PATH: --path contains control characters');
   return { path, kind: 'local-artifact', track };
 }
 
@@ -389,6 +391,92 @@ export async function routeVaultRebuild(args: string[], context: RootContext & {
   return applyVaultRebuild({ ...input, planFile: resolve(String(values.get('--plan-file'))), planSha256: String(values.get('--plan-sha256')) });
 }
 
+/** Explicit offline recovery for an intentional Evidence renderer upgrade.
+ * Dry-run only computes a reviewed baseline; apply re-authenticates the
+ * Vault-rebuild plan, Archive, Vault, receipts, and current projections before
+ * installing one SQLite trust anchor. */
+export async function routeEvidenceRendererBaseline(
+  args: string[],
+  context: RendererBaselineContext = {},
+) {
+  const values = new Map<string, string | true>();
+  const flags = new Set(['--dry-run', '--apply']);
+  const options = new Set([
+    '--format', '--vault-plan-file', '--vault-plan-sha256',
+    '--baseline-file', '--baseline-sha256',
+  ]);
+  const invalid = (): never => {
+    throw new Error(
+      'EVIDENCE_BASELINE_ARGUMENTS: use --dry-run --format json [--vault-plan-file FILE --vault-plan-sha256 SHA256] '
+      + 'or --apply --baseline-file FILE --baseline-sha256 SHA256 '
+      + '[--vault-plan-file FILE --vault-plan-sha256 SHA256]',
+    );
+  };
+  for (let index = 0; index < args.length; index += 1) {
+    const name = args[index]!;
+    if (values.has(name)) invalid();
+    if (flags.has(name)) values.set(name, true);
+    else if (options.has(name)) {
+      const value = args[++index];
+      if (!value || value.startsWith('--')) invalid();
+      values.set(name, value);
+    } else invalid();
+  }
+
+  const dryRun = values.has('--dry-run');
+  if (dryRun === values.has('--apply')) invalid();
+  const hasVaultPlanFile = values.has('--vault-plan-file');
+  const hasVaultPlanSha256 = values.has('--vault-plan-sha256');
+  if (hasVaultPlanFile !== hasVaultPlanSha256) invalid();
+  if (dryRun) {
+    if (values.get('--format') !== 'json' || values.has('--baseline-file') || values.has('--baseline-sha256')) invalid();
+  } else if (values.has('--format')
+    || !values.has('--baseline-file')
+    || !values.has('--baseline-sha256')
+    || !/^[0-9a-f]{64}$/.test(String(values.get('--baseline-sha256')))) invalid();
+
+  const root = context.root ?? process.cwd();
+  const libraryId = context.libraryId ?? context.input?.libraryId ?? asLibraryId('fsd');
+  if (context.input && context.libraryId && context.input.libraryId !== context.libraryId) invalid();
+  const injectedPlan = context.input?.vaultPlan;
+  const vaultPlan = hasVaultPlanFile
+    ? { path: resolve(String(values.get('--vault-plan-file'))), sha256: String(values.get('--vault-plan-sha256')) }
+    : injectedPlan;
+  const resolvedVaultPlan = vaultPlan ?? invalid();
+
+  const paths = context.input ? undefined : loadEngineContext({ root, libraryId }).paths;
+  const ownsStore = !context.input;
+  const store = context.input?.store ?? (dryRun
+    ? openReadOnlyStateStore(paths!.databasePath)
+    : openStateStore(paths!.databasePath));
+  const input: RendererUpgradeBaselineInput = context.input
+    ? { ...context.input, libraryId, vaultPlan: resolvedVaultPlan }
+    : {
+      libraryId,
+      stateRoot: paths!.dataRoot,
+      vaultRoot: paths!.vaultRoot,
+      store,
+      vaultPlan: resolvedVaultPlan,
+    };
+  try {
+    if (dryRun) return createRendererUpgradeBaseline(input);
+    const baseline = await readRendererUpgradeBaseline({
+      path: resolve(String(values.get('--baseline-file'))),
+      sha256: String(values.get('--baseline-sha256')),
+    });
+    return {
+      mode: 'apply' as const,
+      ...(await applyRendererUpgradeBaseline({
+        ...input,
+        baseline,
+        baselineSha256: String(values.get('--baseline-sha256')),
+      })),
+    };
+  } finally {
+    if (ownsStore) store.close();
+  }
+}
+
 /** Historical Archive migration stays outside the normal operation workflow and is always hash-bound. */
 export async function routeEvidenceMigrate(args: string[], context: EvidenceMigrationContext = {}) {
   const dryRun = has(args, '--dry-run');
@@ -545,6 +633,8 @@ export async function routeCommand(argv: string[], engine: () => EngineContext, 
       '  library-migrate --apply --plan-file FILE --plan-sha256 SHA256 [--source-root ABSOLUTE_PATH --pdf-root ABSOLUTE_PATH]',
       '  vault-rebuild --dry-run --format json [--source-root ABSOLUTE_PATH]',
       '  vault-rebuild --apply --plan-file FILE --plan-sha256 SHA256 [--source-root ABSOLUTE_PATH]',
+      '  evidence-renderer-baseline --dry-run --format json --vault-plan-file FILE --vault-plan-sha256 SHA256',
+      '  evidence-renderer-baseline --apply --baseline-file FILE --baseline-sha256 SHA256 [--vault-plan-file FILE --vault-plan-sha256 SHA256]',
       '  evidence-migrate --dry-run --format json',
       '  evidence-migrate --apply --inventory-sha256 SHA256',
       '  evidence-migrate --refresh-metadata --inventory-sha256 SHA256',
@@ -562,6 +652,11 @@ export async function routeCommand(argv: string[], engine: () => EngineContext, 
   if (command === '--bridge') return bridgeMain(['--library', libraryId, ...args]);
   if (command === 'vault-rebuild') {
     const result = await routeVaultRebuild(args, { root, libraryId, input: context.vaultRebuild });
+    if (context.output) context.output(result); else process.stdout.write(canonicalJson(result));
+    return;
+  }
+  if (command === 'evidence-renderer-baseline') {
+    const result = await routeEvidenceRendererBaseline(args, { root, libraryId, input: context.rendererBaseline });
     if (context.output) context.output(result); else process.stdout.write(canonicalJson(result));
     return;
   }

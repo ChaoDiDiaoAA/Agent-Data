@@ -64,6 +64,15 @@ test('Evidence I/O failures expose stable recovery guidance without filesystem d
   });
   expect(JSON.stringify(result)).not.toContain('publication-journal.json');
 });
+test('renderer-history conflicts preserve the actionable recovery message', () => {
+  const result = publicError(Object.assign(new Error(
+    'EVIDENCE_RECEIPT_CONFLICT: completed publication Evidence manifest identity differs: run-1; '
+    + 'current renderer differs from immutable history; run evidence-renderer-baseline after a reviewed vault-rebuild',
+  ), { code: 'EVIDENCE_RECEIPT_CONFLICT' }));
+  expect(result.code).toBe('EVIDENCE_RECEIPT_CONFLICT');
+  expect(result.message).toContain('evidence-renderer-baseline');
+  expect(JSON.stringify(result)).not.toContain('private');
+});
 test('invalid cooldown timestamps never leak arbitrary text or prevent displaying recovery guidance', () => {
   const result = publicError({code:'ARXIV_COOLDOWN_ACTIVE',retryNotBefore:'secret-invalid-time'});
   expect(result.code).toBe('ARXIV_COOLDOWN_ACTIVE');

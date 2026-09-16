@@ -146,13 +146,14 @@ async function verifyCompletedHistory(input: {
   completed: readonly CompletedPublication[];
   stateRoot: string;
   store: StateStore;
+  libraryId?: LibraryId;
   sourceOverrides?: ReadonlyMap<string, readonly VerifiedArchiveSource[]>;
 }): Promise<VerifiedHistory> {
   const historicalIdentities = new Map<string, SourceIdentity>();
   const authenticatedReceipts = new Map<string, EvidencePublicationReceipt>();
   const publications: VerifiedCompletedPublication[] = [];
   const baseline = readPublicationBaseline(input.store);
-  const libraryId = baseline ? asLibraryId(baseline.libraryId) : undefined;
+  const libraryId = baseline ? asLibraryId(baseline.libraryId) : input.libraryId;
   const attestations = new Map(baseline?.publications.map(p => [p.original.runId, p]) ?? []);
   // Effective rows describe the reviewed V3 projection of migrated Archives.
   // Original SQLite identities and receipt bytes remain authenticated below.
@@ -221,7 +222,10 @@ async function verifyCompletedHistory(input: {
       sources: verified.sources,
     });
     if (canonicalJson(regenerated.sources) !== canonicalJson(verified.publication.sources)) {
-      receiptConflict(`completed publication Evidence manifest identity differs: ${verified.publication.runId}`);
+      receiptConflict(
+        `completed publication Evidence manifest identity differs: ${verified.publication.runId}; `
+        + 'current renderer differs from immutable history; run evidence-renderer-baseline after a reviewed vault-rebuild',
+      );
     }
     const receipt = authenticatedReceipts.get(verified.publication.runId)!;
     const attested = attestations.get(verified.publication.runId);
@@ -252,6 +256,25 @@ async function verifyCompletedHistory(input: {
     baselineRunIds: new Set(attestations.keys()),
     libraryId,
   };
+}
+
+/** Read-only publication-history preflight used before a configured paper task
+ * starts discovery. It intentionally performs the same immutable receipt,
+ * Archive, and renderer checks as publication, so a renderer upgrade cannot
+ * waste a long-running download/parse batch before reporting remediation. */
+export async function verifyEvidencePublicationHistory(input: {
+  stateRoot: string;
+  store: StateStore;
+  libraryId?: LibraryId;
+}): Promise<void> {
+  const completed = input.store.listCompletedEvidencePublications();
+  if (!completed.length) return;
+  await verifyCompletedHistory({
+    completed,
+    stateRoot: input.stateRoot,
+    store: input.store,
+    libraryId: input.libraryId,
+  });
 }
 
 function sortedSources(identities: ReadonlyMap<string, SourceIdentity>): VerifiedArchiveSource[] {
@@ -407,6 +430,7 @@ export async function publishRunEvidence(input: {
   tempRoot: string;
   vaultRoot: string;
   store: StateStore;
+  libraryId?: LibraryId;
   lastSuccess: string;
   eligibility?: EvidencePublicationEligibility;
   historicalVerifiedSources?: readonly HistoricalArchiveSource[];
@@ -425,6 +449,7 @@ export async function publishRunEvidence(input: {
     completed,
     stateRoot: input.stateRoot,
     store: input.store,
+    libraryId: input.libraryId,
     sourceOverrides,
   });
   const current = sourceOverrides?.get(input.runId) ?? await readPublicationRunSources({

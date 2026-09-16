@@ -261,6 +261,7 @@ test('configured task delegates Evidence publication once to the normal reserve-
   const fixture = await makeRuntimeFixture();
   await configureLayeredRuntimeFixture(fixture);
   const calls: unknown[] = [];
+  let historyPreflightCalls = 0;
   let publicationResult: Awaited<ReturnType<Dependencies['publishEvidence']>> | undefined;
   const store = openStateStore(':memory:');
   const guardedStore = new Proxy(store, {
@@ -274,6 +275,10 @@ test('configured task delegates Evidence publication once to the normal reserve-
   try {
     const result = await runConfiguredTask(['--mode', 'current'], fixture.projectRoot, {
       openStateStore: () => guardedStore,
+      verifyEvidencePublicationHistory: async input => {
+        historyPreflightCalls += 1;
+        assert.equal(input.libraryId, 'fsd');
+      },
       publishRunEvidence: async input => {
         calls.push(input);
         return {
@@ -292,6 +297,7 @@ test('configured task delegates Evidence publication once to the normal reserve-
     });
 
     assert.equal(result.status, 'completed');
+    assert.equal(historyPreflightCalls, 1);
     assert.deepEqual(publicationResult, { publicationId: 'service-publication', sourceCount: 7, replayed: true });
     assert.equal(calls.length, 1);
     assert.equal((calls[0] as { eligibility: string }).eligibility, 'normal');

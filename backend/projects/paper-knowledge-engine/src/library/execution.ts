@@ -36,7 +36,7 @@ import { importLocalPdfs } from './sources/local-pdf-import.ts';
 import { createProcessContext } from '../runtime/process.ts';
 import { readVerifiedRunSources } from '../evidence/archive-reader.ts';
 import { EvidencePublicationError } from '../evidence/publisher.ts';
-import { publishRunEvidence } from '../evidence/publication-service.ts';
+import { publishRunEvidence, verifyEvidencePublicationHistory } from '../evidence/publication-service.ts';
 import { runResearchTask, resumeResearchTask, type ResearchWorkflowDependencies, type ResearchRunResult } from '../research/research-workflow.ts';
 import type { ResearchRunMode } from '../types/research-sources.ts';
 import { canonicalJson } from '../shared/manifest.ts';
@@ -54,7 +54,7 @@ export interface ResearchExecutionContext {
   run?: typeof runResearchTask;
   resume?: typeof resumeResearchTask;
 }
-export interface ConfiguredContext { jobId?: string; libraryId?: LibraryId; resumeRunId?: string; onProgress?: import('../types/jobs.ts').ProgressReporter; openStateStore?: typeof openStateStore; bootstrap?: (config: Config, categories: Categories) => Promise<unknown>; harvest?: (shards: HarvestPlan['shards'], window: import('../types/jobs.ts').RunWindow, options: NonNullable<Parameters<typeof runHarvestShards>[2]> & { checkpoint: ReturnType<typeof createHarvestCheckpointSession> }) => ReturnType<typeof runHarvestShards>; executeTask?: typeof runTask; publishRunEvidence?: typeof publishRunEvidence; rules?: PaperPolicy; processContext?: ProcessContext; signal?: AbortSignal; runner?: ParseDependencies['runner']; mineruSession?: MineruApiSession }
+export interface ConfiguredContext { jobId?: string; libraryId?: LibraryId; resumeRunId?: string; onProgress?: import('../types/jobs.ts').ProgressReporter; openStateStore?: typeof openStateStore; bootstrap?: (config: Config, categories: Categories) => Promise<unknown>; harvest?: (shards: HarvestPlan['shards'], window: import('../types/jobs.ts').RunWindow, options: NonNullable<Parameters<typeof runHarvestShards>[2]> & { checkpoint: ReturnType<typeof createHarvestCheckpointSession> }) => ReturnType<typeof runHarvestShards>; executeTask?: typeof runTask; publishRunEvidence?: typeof publishRunEvidence; verifyEvidencePublicationHistory?: typeof verifyEvidencePublicationHistory; rules?: PaperPolicy; processContext?: ProcessContext; signal?: AbortSignal; runner?: ParseDependencies['runner']; mineruSession?: MineruApiSession }
 export type ConfiguredResearchContext = ConfiguredContext & { research: ResearchExecutionContext };
 type ReachConfig = { currentTask: { trackLimits: Record<string, number> }; arxiv?: Config['arxiv'] };
 export interface BootstrapContext extends RootContext { config?: ReachConfig & { root?: string; pdfRoot: string; vaultRoot: string }; categories?: Categories; rules?: Pick<PaperPolicy, 'trackPriority'>; matrix?: unknown; plan?: { tracks: string[] }; bootstrap?: (config: Parameters<typeof bootstrapStageOne>[0], categories: Categories) => Promise<{ pdfDirectories?: number } | void> }
@@ -146,6 +146,13 @@ export async function runConfiguredTask(input: TaskInput, root: string, context:
   const stateStore = (context.openStateStore ?? openStateStore)(layered.paths.databasePath);
   const onProgress = context.onProgress ?? (() => {});
   try {
+    onProgress({ type: 'evidence-history-preflight-start' });
+    await (context.verifyEvidencePublicationHistory ?? verifyEvidencePublicationHistory)({
+      stateRoot: config.stateRoot,
+      libraryId,
+      store: stateStore,
+    });
+    onProgress({ type: 'evidence-history-preflight-complete' });
     return await (context.executeTask ?? runTask)({ mode, now: new Date().toISOString(), ...(limit === undefined ? {} : { limit }), windowOverride: window, resumeRunId: context.resumeRunId, jobId: context.jobId }, {
       config,
       store: stateStore,
@@ -196,6 +203,7 @@ export async function runConfiguredTask(input: TaskInput, root: string, context:
           tempRoot: config.tempRoot,
           vaultRoot: config.vaultRoot,
           store: stateStore,
+          libraryId,
           lastSuccess: requireString(manifest.window?.to ?? stateStore.getRun(runId)?.to_utc, 'run completion watermark'),
           eligibility: 'normal',
         });

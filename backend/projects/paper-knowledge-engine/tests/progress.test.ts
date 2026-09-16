@@ -161,3 +161,9 @@ test('formats deterministic Archive and Evidence publication progress', async ()
   assert.equal(formatProgressEvent({ type: 'evidence-publish-start', phase: 'publish', sourceCount: 2, totalElapsedMs: 1300 }), '[Evidence] 发布 2 个来源开始（累计 00:01）');
   assert.equal(formatProgressEvent({ type: 'evidence-publish-complete', phase: 'publish', publicationId: 'evidence-run-1', sourceCount: 2, replayed: false, totalElapsedMs: 1400 }), '[Evidence] 发布 evidence-run-1 完成：2 个来源，累计耗时 00:01');
 });
+
+test('formats the historical Evidence preflight so long validation is visible', async () => {
+  const { formatProgressEvent } = await loadProgressModule();
+  assert.equal(formatProgressEvent({ type: 'evidence-history-preflight-start' }), '[预检] 正在校验历史 Evidence、Archive 与 renderer，请稍候');
+  assert.equal(formatProgressEvent({ type: 'evidence-history-preflight-complete' }), '[预检] 历史 Evidence 校验通过');
+});

@@ -50,6 +50,7 @@ bun src/cli.ts --library agent-engineering run-task --mode weekly
 bun src/cli.ts --library agent-engineering import-local --path D:\papers\agent
 bun src/cli.ts --library agent-engineering parse-local --base-id BASE_ID
 bun src/cli.ts --library agent-engineering evidence-publish --run-id RUN_ID
+bun src/cli.ts --library agent-engineering evidence-renderer-baseline --dry-run --format json --vault-plan-file VAULT_PLAN_FILE --vault-plan-sha256 VAULT_PLAN_SHA256
 bun src/cli.ts --library agent-engineering reconcile
 bun src/cli.ts --library agent-engineering opencli-prepare
 ```
@@ -153,6 +154,8 @@ D:\agent-data\backend\projects\paper-knowledge-engine\config\
 
 PDF 下载阶段会区分“版本暂未生成 PDF”和真正的服务故障：arXiv 返回 HTTP 5xx 且响应正文明确包含 `file unavailable` 时，仅延期该论文，优先用同方向 fallback 补位并继续任务，不写入永久排除；arXiv 论文 PDF 不受本地导入的 200 页上限约束，但仍保留 200 MB 文件大小保护；普通 5xx、429 和网络错误仍按重试策略处理，耗尽后保留 run 与 checkpoint 供恢复。
 
+Archive v2 对 MinerU 输出中的 HTML/MathML-like 资源标签执行严格解析；因此正文里的数学比较文本（例如 `<V`）在尚未进入真实 `src/href/srcset` 资源属性时不会再被误判并触发 `unparseable HTML attribute value`。一旦进入资源属性，仍执行严格的 URL、路径和引用校验，避免把损坏或不安全的资源静默发布。
+
 取消本地冷却不代表上游恢复，仍可能收到 429。当前没有后台自动恢复，也不应连续高频重试。需要恢复自适应保护时，将上述配置改为正整数秒数，连续 429 会使用基础值的 1、2、4 倍冷却；更长的服务端等待优先。初次全量任务成功后，日常更新优先使用已有的 `weekly` 增量入口，避免反复从年初扫描。共享门控目前覆盖正式论文任务的发现请求，不覆盖独立网络探针或其他外部程序。
 
 ### FSD 当前检索范围
@@ -232,6 +235,20 @@ Multi-Agent Engineering 从 `2026-01-01` 开始检索，固定覆盖 18 个 Trac
 `current` 总上限为 180，每个 Track 的 10 是共享选篇器的初始分配目标，空额允许外溢，并非每类硬上限；`weekly` 总上限为 18，使用本库成功水位和 48 小时重叠窗口。自动来源仅为 OpenCLI/arXiv。本地 PDF 只能通过显式 `import-local` / `parse-local` 进入，且不会恢复完整 arXiv 元数据、自动归入上述 18 个 Track 或推进自动发现水位。
 
 FSD、Agent Engineering、Multi-Agent Engineering 与 LLM Post-Training 的论文任务都按以下顺序运行：`discovery → 去重/硬筛选 → selection 冻结 → PDF → MinerU → Archive v2 → Evidence/papers/（v3）`。新 `current` 从各方向的 `start_date` 起扫描，`weekly` 使用各自方向库的成功水位和重叠窗口；失败恢复沿用已冻结的任务。论文 v1/v2 作为不同版本保存，同一论文命中多个 Track 不重复计数。
+
+Evidence v3 的历史 receipt 和 publication 身份是不可变的。若确定性 renderer 有意升级（例如把已验证的 `images/...` 引用修正为 `assets/images/...`），旧 receipt 不会被覆盖；需要先用当前 Archive 重建完整 Vault，再生成并安装 hash-pinned renderer baseline：
+
+```powershell
+# 先将现有 Vault 做可恢复备份，并让 --source-root 指向独立目录；该目录必须位于所有运行时根目录之外（尤其不能放在 D:\agent-data\backups\paper-libraries\agent-engineering 这个 backupRoot 内）；不要删除旧目录
+bun src/cli.ts --library agent-engineering vault-rebuild --dry-run --format json --source-root OLD_VAULT_ROOT > VAULT_PLAN_FILE
+bun src/cli.ts --library agent-engineering vault-rebuild --apply --plan-file VAULT_PLAN_FILE --plan-sha256 VAULT_PLAN_SHA256 --source-root OLD_VAULT_ROOT
+bun src/cli.ts --library agent-engineering evidence-renderer-baseline --dry-run --format json --vault-plan-file VAULT_PLAN_FILE --vault-plan-sha256 VAULT_PLAN_SHA256 > BASELINE_FILE
+bun src/cli.ts --library agent-engineering evidence-renderer-baseline --apply --baseline-file BASELINE_FILE --baseline-sha256 BASELINE_SHA256 --vault-plan-file VAULT_PLAN_FILE --vault-plan-sha256 VAULT_PLAN_SHA256
+# 基线安装后，再恢复原 run；不重新发现、不改旧 receipt、不删除 SQLite
+bun src/cli.ts --library agent-engineering evidence-publish --run-id RUN_ID
+```
+
+其中两个 `SHA256` 必须来自人工审阅后的 canonical JSON 文件。普通 `run-task` 现在会在 discovery 前执行历史 Evidence 预检；若发现同类冲突会立即停止并提示上述恢复入口，不再运行数小时后才在 publish 阶段失败。
 
 论文 Archive 和 Evidence 布局如下；`Knowledge/` 始终由人工拥有，自动发布器不会创建或覆盖它：
 

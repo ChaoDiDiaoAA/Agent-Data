@@ -246,6 +246,22 @@ test('Evidence errors with unsafe detail remain code-only', () => fixture(async 
   assert.deepEqual(result.error, { code: 'EVIDENCE_CONFLICT', message: 'EVIDENCE_CONFLICT' });
 }));
 
+test('renderer history conflicts remain visible and actionable in the failed JobView', () => fixture(async stateRoot => {
+  const { job } = await admitOperation({ operationsRoot: stateRoot, request: {
+    libraryId: 'fsd', requestId: 'publish-renderer-conflict', operation: { kind: 'evidence-publish', runId: 'run-1' },
+  } });
+  const result = await executeOperation({ root: stateRoot, jobId: job.jobId }, {
+    operationsRoot: stateRoot,
+    dataRoot: stateRoot,
+    publishEvidence: async () => { throw Object.assign(new Error(
+      'EVIDENCE_RECEIPT_CONFLICT: completed publication Evidence manifest identity differs: run-1; '
+      + 'current renderer differs from immutable history; run evidence-renderer-baseline after a reviewed vault-rebuild',
+    ), { code: 'EVIDENCE_RECEIPT_CONFLICT' }); },
+  });
+  assert.equal(result.error?.code, 'EVIDENCE_RECEIPT_CONFLICT');
+  assert.match(result.error?.message ?? '', /evidence-renderer-baseline/);
+}));
+
 test('command-owned MinerU session is disposed on business error', () => fixture(async stateRoot => {
   const { calls, session } = createFakeSession();
   const { job } = await admitOperation({ operationsRoot: stateRoot, request });

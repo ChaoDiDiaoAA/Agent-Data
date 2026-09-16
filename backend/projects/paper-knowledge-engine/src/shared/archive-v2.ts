@@ -150,8 +150,10 @@ export function validateFrozenSource(value: unknown, kind: ArchiveSourceV2['sour
   return s as FrozenSourceMetadata;
 }
 
-/** Parse attributes on every HTML tag, not just img/source. Reject ambiguous
- * syntax rather than letting a browser interpret a different local target. */
+/** Parse attributes on every HTML-like tag, not just img/source. Reject
+ * ambiguous resource syntax rather than letting a browser interpret a
+ * different local target. Non-resource prose that merely resembles a tag is
+ * left untouched so mathematical comparisons cannot abort parsing. */
 function mapHtmlResources(html: string, visit: (value: string) => string, markdownDestinations: { start: number; end: number }[] = []): string {
   const tags = /<[A-Za-z][\w:-]*(?=[\s/>])/g;
   let output = '', copied = 0, tag: RegExpExecArray | null;
@@ -201,7 +203,11 @@ function mapHtmlResources(html: string, visit: (value: string) => string, markdo
         value = html.slice(cursor + 1, end); cursor = end + 1;
       } else {
         const token = /^[^\s"'=<>\x60]+/.exec(html.slice(cursor));
-        if (!token) throw new Error('unparseable HTML attribute value');
+        if (!token) {
+          if (resourceSeen) throw new Error('unparseable HTML attribute value');
+          ignoreCandidate = true;
+          break;
+        }
         value = token[0]; cursor += value.length;
       }
       if (resource) {

@@ -78,6 +78,17 @@ test('does not treat less-than comparisons followed by prose as HTML', () => {
   expect(rewriteArchiveReferences(prose, [], new Map()).fullMarkdown).toBe(prose);
 });
 
+test('does not treat uppercase mathematical comparison variables as HTML tags', () => {
+  const prose = 'The rule <V does not match a post-release. A boundary such as | = > 1 remains prose.';
+  expect(archiveReferences(prose, [])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [], new Map()).fullMarkdown).toBe(prose);
+  expect(archiveReferences('', [{ type: 'text', text: prose }])).toEqual([]);
+});
+
+test('keeps resource discovery for HTML-like custom elements', () => {
+  expect(archiveReferences('<widget href="assets/figure.jpg">figure</widget>', [])).toEqual(['assets/figure.jpg']);
+});
+
 test('does not treat angle-bracket placeholders as HTML image elements', () => {
   const prose = 'The prompt contains <source\\_request> and <img\\_tag> placeholders.';
   expect(archiveReferences(prose, [])).toEqual([]);
