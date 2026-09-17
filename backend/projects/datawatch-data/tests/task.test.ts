@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DataWatchPaths, HttpClient, HttpResult, SourceConfig, WorkbenchConfig } from '../src/contracts.ts';
-import { runDataWatchTask } from '../src/task.ts';
+import { latestManifest, loadManifests, runDataWatchTask } from '../src/task.ts';
 import { createDownloader } from '../src/downloader.ts';
+import { main } from '../src/cli.ts';
 
 const revision = 'b'.repeat(40);
 const workbench: WorkbenchConfig = {
@@ -289,4 +290,48 @@ test('rolls back every dataset when batch activation fails after its first swap'
     expect(await readFile(join(dataPaths.dataRoot, id, 'manifest.json'), 'utf8')).toContain('a'.repeat(40));
   }
   expect((await run('c'.repeat(40), 'new')).status).toBe('completed');
+});
+
+test('loads only the requested current manifest', async () => {
+  const dataPaths = await paths();
+  const manifest = (dataset_id: string, retrieved_at: string) => ({
+    schema_version: 1, dataset_id, source_id: dataset_id, repository: 'example/' + dataset_id,
+    revision: dataset_id[0]!.repeat(40), homepage: 'https://example.test', declared_license: 'CC BY 4.0',
+    license_evidence: 'https://example.test/license', data_kind: 'sample', origin_kind: 'public_redacted', retrieved_at, files: [],
+  });
+  await mkdir(join(dataPaths.dataRoot, 'fda-recalls'), { recursive: true });
+  await mkdir(join(dataPaths.dataRoot, 'hospital-resources'), { recursive: true });
+  await writeFile(join(dataPaths.dataRoot, 'fda-recalls', 'manifest.json'), JSON.stringify(manifest('fda-recalls', '2026-01-01T00:00:00.000Z')));
+  await writeFile(join(dataPaths.dataRoot, 'hospital-resources', 'manifest.json'), JSON.stringify(manifest('hospital-resources', '2027-01-01T00:00:00.000Z')));
+  expect((await loadManifests(dataPaths, ['fda-recalls'])).map(item => item.dataset_id)).toEqual(['fda-recalls']);
+  expect((await latestManifest(dataPaths, 'fda-recalls'))?.dataset_id).toBe('fda-recalls');
+});
+
+test('keeps unselected datasets in the shared overview', async () => {
+  const dataPaths = await paths();
+  const hospital = { ...source, dataset_id: 'hospital-resources' as const, source_id: 'hospital-resources', repository: 'example/hospital' };
+  const run = async (ids: Array<'fda-recalls' | 'hospital-resources'>, revision: string, fdaBody: string, hospitalBody: string) => runDataWatchTask({
+    paths: dataPaths, sources: [source, hospital], datasetIds: ids, workbench: { ...workbench, enabled_dataset_ids: ['fda-recalls', 'hospital-resources'] },
+    httpFactory: item => ({ async get(url: string): Promise<HttpResult> {
+      const body = item.dataset_id === 'fda-recalls' ? fdaBody : hospitalBody;
+      const response = url.includes('/api/datasets/') ? (url.includes('/tree/') ? JSON.stringify([{ type: 'file', path: 'README.md', size: body.length }]) : JSON.stringify({ sha: revision })) : body;
+      return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(response) };
+    } }),
+  });
+  expect((await run(['fda-recalls', 'hospital-resources'], 'a'.repeat(40), 'old', 'old')).status).toBe('completed');
+  expect((await run(['fda-recalls'], 'c'.repeat(40), 'new', 'unused')).status).toBe('completed');
+  const overview = await readFile(join(dataPaths.vaultRoot, 'indexes', 'overview.md'), 'utf8');
+  expect(overview).toContain('fda-recalls');
+  expect(overview).toContain('hospital-resources');
+});
+
+test('returns a failing exit code for text and JSON task output', async () => {
+  const dataPaths = await paths();
+  const context = { root: dataPaths.projectRoot, paths: dataPaths, sources: [source], workbench, httpFactory: () => ({ async get(url: string): Promise<HttpResult> { return { url, status: 500, headers: new Headers(), bytes: new Uint8Array() }; } }) };
+  const text: string[] = [];
+  expect(await main(['run-task', '--dataset', 'fda-recalls'], { context, interactive: false, writeLine: line => text.push(line) })).toBe(1);
+  expect(text[0]).toContain('[任务] 失败');
+  const json: string[] = [];
+  expect(await main(['run-task', '--dataset', 'fda-recalls', '--format', 'json'], { context, interactive: false, writeLine: line => json.push(line) })).toBe(1);
+  expect(json[0]).toContain('"status": "failed"');
 });

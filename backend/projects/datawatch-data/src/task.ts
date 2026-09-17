@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, readFile, readdir, rename, rm, rmdir } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rename, rm, rmdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DataWatchPaths, DatasetFile, DatasetId, DatasetManifest, DatasetResult, SourceConfig, TaskResult, TaskRun, TaskStage, TaskStageStatus, WorkbenchConfig } from './contracts.ts';
 import { createSourceHttp } from './http.ts';
@@ -320,8 +320,6 @@ async function activateBatch(options: TaskOptions, runId: string, manifests: Dat
   await saveBatchJournal(paths, journal);
   for (const entry of journal.entries) {
     if (entry.had_manifest) { const source = join(datasetRoot(paths, entry.dataset_id), 'manifest.json'); const target = join(previous, 'state', entry.dataset_id, 'manifest.json'); await mkdir(join(target, '..'), { recursive: true }); await copyFile(source, target); }
-    if (entry.had_original) await copyTree(originalRoot(paths, entry.dataset_id), join(previous, 'verify-original', entry.dataset_id));
-    if (journal.publish && entry.had_vault) await copyTree(join(paths.vaultRoot, entry.dataset_id), join(previous, 'verify-vault', entry.dataset_id));
   }
   const capture = async (source: string, target: string, exists: boolean): Promise<void> => { if (exists) { await mkdir(join(target, '..'), { recursive: true }); await copyFile(source, target); } };
   await capture(join(paths.dataRoot, 'versions.json'), join(previous, 'versions.json'), journal.had_versions);
@@ -383,11 +381,16 @@ async function cleanLegacyGeneratedSnapshot(paths: DataWatchPaths, datasetId: Da
     await rm(card, { force: true });
     await rm(join(root, 'manifest.json'), { force: true });
   }
-  for (const directory of [join(root, 'raw'), root]) {
+  const pruneEmptyDirectories = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
+      if (entry.isDirectory()) await pruneEmptyDirectories(join(directory, entry.name));
+    }
     await rmdir(directory).catch(error => {
       if (!(error && typeof error === 'object' && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTEMPTY'))) throw error;
     });
-  }
+  };
+  await pruneEmptyDirectories(join(root, 'raw'));
+  await pruneEmptyDirectories(root);
 }
 
 /** Migrates one verified legacy snapshot to the current flat layout. */
@@ -415,12 +418,17 @@ export async function migrateLegacyStorage(paths: DataWatchPaths, wanted?: Datas
       const source = resolveOwnedPath(join(paths.originalRoot, datasetId, manifest.revision), file.path);
       const destination = resolveOwnedPath(originalRoot(paths, datasetId), file.path);
       await mkdir(join(destination, '..'), { recursive: true });
-      if (!(await pathExists(destination))) await copyFile(source, destination);
+      if (await pathExists(destination)) {
+        const info = await stat(destination);
+        if (!info.isFile() || info.size !== file.bytes || await sha256File(destination) !== file.sha256) {
+          throw new Error('MIGRATION_DESTINATION_CONFLICT');
+        }
+      } else await copyFile(source, destination);
       files += 1;
     }
     const capturedLegacyAssets = await legacyAssets(paths);
     await saveManifest(paths, manifest);
-    await buildCatalog(paths, [manifest]);
+    await buildCatalog(paths, [manifest], []);
     await rm(join(paths.dataRoot, 'datasets', datasetId), { recursive: true, force: true });
     for (const revision of revisions) {
       await rm(join(paths.originalRoot, datasetId, revision), { recursive: true, force: true });
@@ -447,6 +455,9 @@ export async function migrateLegacyStorage(paths: DataWatchPaths, wanted?: Datas
       if (!(error && typeof error === 'object' && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTEMPTY'))) throw error;
     });
   }
+  await rmdir(join(paths.dataRoot, 'datasets')).catch(error => {
+    if (!(error && typeof error === 'object' && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTEMPTY'))) throw error;
+  });
   return { datasets, files };
 }
 
@@ -536,11 +547,17 @@ export async function runDataWatchTask(options: TaskOptions): Promise<TaskResult
     const complete = [...manifests.values()].filter(manifest => manifest.files.every(file => file.sha256));
     if (!run.errors?.length && complete.length === datasetIds.length) {
       try {
-        if (options.workbench.publish_snapshot) await validateCatalogTargets(options.paths, complete);
+        const selected = new Set(complete.map(manifest => manifest.dataset_id));
+        const activeCatalogManifests = await loadManifests(options.paths);
+        const catalogByDataset = new Map(activeCatalogManifests.map(manifest => [manifest.dataset_id, manifest]));
+        for (const manifest of complete) catalogByDataset.set(manifest.dataset_id, manifest);
+        const catalogManifests = [...catalogByDataset.values()];
+        if (options.workbench.publish_snapshot) await validateCatalogTargets(options.paths, catalogManifests, activeCatalogManifests);
         const batch = batchRoot(options.paths, run.run_id);
         await rm(batch, { recursive: true, force: true });
-        for (const manifest of complete) {
-          await copyTree(stageRawRoot(options.paths, manifest), join(batch, 'original', manifest.dataset_id));
+        for (const manifest of catalogManifests) {
+          if (selected.has(manifest.dataset_id)) await copyTree(stageRawRoot(options.paths, manifest), join(batch, 'original', manifest.dataset_id));
+          else await copyTree(originalRoot(options.paths, manifest.dataset_id), join(batch, 'original', manifest.dataset_id));
           if (options.workbench.publish_snapshot) await copyTree(join(options.paths.vaultRoot, manifest.dataset_id), join(batch, 'vault', manifest.dataset_id));
         }
         const stagedDataRoot = join(batch, 'state-data');
@@ -550,7 +567,9 @@ export async function runDataWatchTask(options: TaskOptions): Promise<TaskResult
         if (options.workbench.publish_snapshot) {
           const activeAssets = join(options.paths.vaultRoot, '.datawatch-assets.json');
           if (await pathExists(activeAssets)) { await mkdir(join(batch, 'vault'), { recursive: true }); await copyFile(activeAssets, join(batch, 'vault', '.datawatch-assets.json')); }
-          await buildCatalog({ ...options.paths, originalRoot: join(batch, 'original'), vaultRoot: join(batch, 'vault') }, complete);
+          const activeOverview = join(options.paths.vaultRoot, 'indexes', 'overview.md');
+          if (await pathExists(activeOverview)) { await mkdir(join(batch, 'vault', 'indexes'), { recursive: true }); await copyFile(activeOverview, join(batch, 'vault', 'indexes', 'overview.md')); }
+          await buildCatalog({ ...options.paths, originalRoot: join(batch, 'original'), vaultRoot: join(batch, 'vault') }, catalogManifests, activeCatalogManifests);
         }
         await activateBatch(options, run.run_id, complete, batch);
         await rm(batch, { recursive: true, force: true });
@@ -615,9 +634,7 @@ export async function loadManifests(paths: DataWatchPaths, datasetIds?: DatasetI
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return [] as string[];
     throw error;
   })) {
-    if (!datasetIds?.includes(datasetId as DatasetId)) {
-      if (!(['regulatory-affairs', 'fda-recalls', 'procurement-pricing', 'hospital-resources'] as string[]).includes(datasetId)) continue;
-    }
+    if (wanted ? !wanted.has(datasetId as DatasetId) : !(['regulatory-affairs', 'fda-recalls', 'procurement-pricing', 'hospital-resources'] as string[]).includes(datasetId)) continue;
     const path = join(root, datasetId, 'manifest.json');
     if (await pathExists(path)) found.push(await readJson<DatasetManifest>(path));
   }

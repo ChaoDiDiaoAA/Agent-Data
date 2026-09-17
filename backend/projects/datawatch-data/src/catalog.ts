@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import type { DataWatchPaths, DatasetFile, DatasetManifest } from './contracts.ts';
-import { pathExists, resolveOwnedPath, sha256File, writeAtomic, writeCanonicalJson } from './util.ts';
+import { canonicalJson, pathExists, resolveOwnedPath, sha256, sha256File, writeAtomic, writeCanonicalJson } from './util.ts';
 
 const generatedBy = 'datawatch-data';
 
@@ -55,7 +55,7 @@ async function copyImmutable(source: string, destination: string, expectedBytes:
   if (info.size !== expectedBytes || await sha256File(destination) !== expectedSha256) fail('CATALOG_ASSET_VERIFY_FAILED');
 }
 interface Asset { path: string; bytes?: number; sha256?: string; }
-interface AssetRegistry { generated_by?: string; files?: Asset[]; }
+interface AssetRegistry { generated_by?: string; schema_version?: number; files?: Asset[]; integrity_sha256?: string; }
 async function loadAssets(paths: DataWatchPaths): Promise<Map<string, Asset>> {
   try {
     const registry = JSON.parse(await readFile(join(paths.vaultRoot, '.datawatch-assets.json'), 'utf8')) as AssetRegistry;
@@ -66,15 +66,96 @@ function assetPath(paths: DataWatchPaths, target: string): string { return relat
 async function validateGenerated(path: string): Promise<void> {
   if (await pathExists(path) && !(await readFile(path, 'utf8')).startsWith('---\ngenerated_by: ' + generatedBy + '\n')) fail('CATALOG_USER_FILE_CONFLICT');
 }
-export async function validateCatalogTargets(paths: DataWatchPaths, manifests: DatasetManifest[]): Promise<void> {
+function contentAsset(path: string, content: string): Asset {
+  const bytes = new TextEncoder().encode(content);
+  return { path, bytes: bytes.byteLength, sha256: sha256(bytes) };
+}
+function expectedRawAssets(manifests: DatasetManifest[]): Asset[] {
+  return [...manifests].sort((left, right) => left.dataset_id.localeCompare(right.dataset_id) || left.revision.localeCompare(right.revision)).flatMap(manifest => manifest.files.map(file => ({
+    dataset_id: manifest.dataset_id,
+    revision: manifest.revision,
+    path: manifest.dataset_id + '/raw/' + file.path,
+    bytes: file.bytes,
+    sha256: file.sha256,
+  })));
+}
+async function validateAsset(path: string, asset: Asset | undefined): Promise<boolean> {
+  if (!asset || !(await pathExists(path))) return false;
+  const info = await stat(path);
+  if (!info.isFile() || !asset.sha256 || info.size !== asset.bytes || await sha256File(path) !== asset.sha256) fail('CATALOG_USER_FILE_CONFLICT');
+  return true;
+}
+async function validateManifestTarget(paths: DataWatchPaths, path: string, datasetId: string, owned: Map<string, Asset>, expected?: DatasetManifest): Promise<void> {
+  if (!(await pathExists(path))) return;
+  if (await validateAsset(path, owned.get(assetPath(paths, path)))) return;
+  if (expected) {
+    const expectedAsset = contentAsset(assetPath(paths, path), canonicalJson(expected));
+    await validateAsset(path, expectedAsset);
+    return;
+  }
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8')) as { schema_version?: unknown; dataset_id?: unknown };
+    if (value.schema_version !== 1 || value.dataset_id !== datasetId) fail('CATALOG_USER_FILE_CONFLICT');
+  } catch (error) {
+    if (error instanceof Error && error.message === 'CATALOG_USER_FILE_CONFLICT') throw error;
+    fail('CATALOG_USER_FILE_CONFLICT');
+  }
+}
+async function validateRegistryTarget(paths: DataWatchPaths, owned: Map<string, Asset>, existingManifests: DatasetManifest[]): Promise<void> {
+  const path = join(paths.vaultRoot, '.datawatch-assets.json');
+  if (!(await pathExists(path))) return;
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8')) as AssetRegistry;
+    if (value.generated_by !== generatedBy) fail('CATALOG_USER_FILE_CONFLICT');
+    if (value.integrity_sha256) {
+      const { integrity_sha256: integrity, ...body } = value;
+      if (integrity !== sha256(new TextEncoder().encode(canonicalJson(body)))) fail('CATALOG_USER_FILE_CONFLICT');
+    } else {
+      // Historical registries predate an integrity marker. For a flat snapshot,
+      // require their full canonical content to match the active manifests before
+      // sealing them on the next successful catalog publication.
+      if (existingManifests.length) {
+        const expected = { generated_by: generatedBy, schema_version: 1, files: expectedRawAssets(existingManifests) };
+        const actual = { generated_by: value.generated_by, schema_version: value.schema_version, files: value.files ?? [] };
+        if (canonicalJson(actual) !== canonicalJson(expected)) fail('CATALOG_USER_FILE_CONFLICT');
+      } else if ((value.files ?? []).some(asset => !asset.path.startsWith('Evidence/'))) {
+        fail('CATALOG_USER_FILE_CONFLICT');
+      }
+      for (const asset of owned.values()) if (asset.path.includes('/raw/') && !asset.path.startsWith('Evidence/')) await validateAsset(resolveOwnedPath(paths.vaultRoot, asset.path), asset);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === 'CATALOG_USER_FILE_CONFLICT') throw error;
+    fail('CATALOG_USER_FILE_CONFLICT');
+  }
+}
+export async function validateCatalogTargets(paths: DataWatchPaths, manifests: DatasetManifest[], existingManifests = manifests): Promise<void> {
   const owned = await loadAssets(paths);
+  const priorByDataset = new Map(existingManifests.map(manifest => [manifest.dataset_id, manifest]));
+  const overview = join(paths.vaultRoot, 'indexes', 'overview.md');
+  if (!(await validateAsset(overview, owned.get(assetPath(paths, overview))))) {
+    if (await pathExists(overview) && existingManifests.length) await validateAsset(overview, contentAsset(assetPath(paths, overview), overviewContent(existingManifests)));
+    else await validateGenerated(overview);
+  }
+  await validateRegistryTarget(paths, owned, existingManifests);
   for (const manifest of manifests) {
-    await validateGenerated(join(vaultDatasetRoot(paths, manifest), 'dataset.md'));
+    const card = join(vaultDatasetRoot(paths, manifest), 'dataset.md');
+    if (!(await validateAsset(card, owned.get(assetPath(paths, card))))) {
+      const prior = priorByDataset.get(manifest.dataset_id);
+      if (await pathExists(card) && prior) await validateAsset(card, contentAsset(assetPath(paths, card), cardContent(prior)));
+      else await validateGenerated(card);
+    }
+    await validateManifestTarget(paths, join(vaultDatasetRoot(paths, manifest), 'manifest.json'), manifest.dataset_id, owned, priorByDataset.get(manifest.dataset_id));
     for (const file of manifest.files) {
       const target = vaultRawPath(paths, manifest, file);
-      if (await pathExists(target) && !owned.has(assetPath(paths, target))) {
+      const registered = owned.get(assetPath(paths, target));
+      if (await pathExists(target) && registered) {
         const info = await stat(target);
-        if (!info.isFile() || info.size !== file.bytes || await sha256File(target) !== file.sha256) fail('CATALOG_ASSET_CONFLICT');
+        if (!info.isFile() || !registered.sha256 || info.size !== registered.bytes || await sha256File(target) !== registered.sha256) {
+          fail('CATALOG_USER_FILE_CONFLICT');
+        }
+      } else if (await pathExists(target)) {
+        const info = await stat(target);
+        if (!info.isFile() || info.size !== file.bytes || await sha256File(target) !== file.sha256) fail('CATALOG_USER_FILE_CONFLICT');
       }
     }
     const wanted = new Set(manifest.files.map(file => manifest.dataset_id + '/raw/' + file.path));
@@ -105,9 +186,9 @@ async function writeGenerated(path: string, content: string): Promise<void> {
   await writeAtomic(path, content);
 }
 
-export async function buildCatalog(paths: DataWatchPaths, manifests: DatasetManifest[]): Promise<{ datasets: number; files: number }> {
+export async function buildCatalog(paths: DataWatchPaths, manifests: DatasetManifest[], existingManifests = manifests): Promise<{ datasets: number; files: number }> {
   const ordered = [...manifests].sort((left, right) => left.dataset_id.localeCompare(right.dataset_id) || left.revision.localeCompare(right.revision));
-  await validateCatalogTargets(paths, ordered);
+  await validateCatalogTargets(paths, ordered, existingManifests);
   const owned = await loadAssets(paths);
   const overview = join(paths.vaultRoot, 'indexes', 'overview.md');
   await mkdir(join(paths.vaultRoot, 'indexes'), { recursive: true });
@@ -136,18 +217,19 @@ export async function buildCatalog(paths: DataWatchPaths, manifests: DatasetMani
       }
     }
   }
-  await writeGenerated(overview, overviewContent(ordered));
-  await writeCanonicalJson(join(paths.vaultRoot, '.datawatch-assets.json'), {
+  const overviewValue = overviewContent(ordered);
+  await writeGenerated(overview, overviewValue);
+  const files = [...[...owned.values()].filter(asset => !ordered.some(manifest => asset.path.startsWith(manifest.dataset_id + '/raw/') || asset.path === manifest.dataset_id + '/manifest.json') && asset.path !== 'indexes/overview.md'), ...ordered.flatMap(manifest => [
+    ...expectedRawAssets([manifest]),
+    contentAsset(manifest.dataset_id + '/dataset.md', cardContent(manifest)),
+    contentAsset(manifest.dataset_id + '/manifest.json', canonicalJson(manifest)),
+  ]), contentAsset('indexes/overview.md', overviewValue)];
+  const registry = {
     generated_by: generatedBy,
     schema_version: 1,
-    files: [...[...owned.values()].filter(asset => !ordered.some(manifest => asset.path.startsWith(manifest.dataset_id + '/raw/'))), ...ordered.flatMap(manifest => manifest.files.map(file => ({
-      dataset_id: manifest.dataset_id,
-      revision: manifest.revision,
-      path: manifest.dataset_id + '/raw/' + file.path,
-      bytes: file.bytes,
-      sha256: file.sha256,
-    })))],
-  });
+    files,
+  };
+  await writeCanonicalJson(join(paths.vaultRoot, '.datawatch-assets.json'), { ...registry, integrity_sha256: sha256(new TextEncoder().encode(canonicalJson(registry))) });
   return { datasets: ordered.length, files: fileCount };
 }
 

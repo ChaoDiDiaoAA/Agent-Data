@@ -37,7 +37,8 @@ export async function main(args = process.argv.slice(2), options: CliOptions = {
     const result = await routeCommand(commandArgs, context);
     if (result !== undefined) {
       const format = commandArgs.includes('--format') ? 'json' : 'text';
-      const output = format === 'json' || typeof result !== 'string' ? (typeof result === 'string' ? result : JSON.stringify(result, null, 2)) : result;
+      const taskText = commandArgs[0] === 'run-task' && result && typeof result === 'object' && 'text' in result && typeof result.text === 'string';
+      const output = taskText && format === 'text' ? (result as { text: string }).text : (format === 'json' || typeof result !== 'string' ? (typeof result === 'string' ? result : JSON.stringify(result, null, 2)) : result);
       (options.writeLine ?? (line => console.log(line)))(output);
       if (commandArgs[0] === 'run-task' && result && typeof result === 'object' && 'status' in result && (result as { status?: unknown }).status === 'failed') return 1;
     }

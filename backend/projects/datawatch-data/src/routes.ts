@@ -6,7 +6,8 @@ import { fetchRepositoryTree, resolveHuggingFaceRevision } from './huggingface.t
 import { buildCatalog, verifyCatalog } from './catalog.ts';
 import { createBackup, restoreSmoke, verifyBackup } from './backup.ts';
 import { latestManifest, listRuns, loadManifests, runDataWatchTask } from './task.ts';
-import { loadSharedEngineNetwork, type HttpScope } from './engine-bridge.ts';
+import { loadSharedEngineNetwork, withRunLock, type HttpScope } from './engine-bridge.ts';
+import { resolveOwnedPath } from './util.ts';
 
 export interface DataWatchContext {
   root: string;
@@ -17,6 +18,7 @@ export interface DataWatchContext {
   output?: (value: unknown) => void;
   httpFactory?: (source: SourceConfig) => ReturnType<typeof createSourceHttp>;
 }
+export interface TaskTextResult { status: 'completed' | 'failed'; text: string; }
 
 function fail(code: string): never { throw new Error(code); }
 function argValue(args: string[], name: string): string | undefined {
@@ -90,7 +92,7 @@ export async function routeCommand(args: string[], context: DataWatchContext): P
   if (command === 'run-task') {
     const ids = has(args, '--all') ? context.workbench.enabled_dataset_ids : [dataset(argValue(args, '--dataset'))];
     const result = await runDataWatchTask({ paths: context.paths, sources: context.sources, datasetIds: ids, workbench: context.workbench, httpFactory: context.httpFactory, network: context.network });
-    if (format(args) === 'text') return summarizeTask(result);
+    if (format(args) === 'text') return { status: result.status, text: summarizeTask(result) } satisfies TaskTextResult;
     return result;
   }
   if (command === 'status') {
@@ -112,8 +114,10 @@ export async function routeCommand(args: string[], context: DataWatchContext): P
   }
   if (command === 'catalog' && args[1] === 'build') {
     format(args);
-    const result = await buildCatalog(context.paths, await loadManifests(context.paths));
-    return result;
+    return withRunLock(resolveOwnedPath(context.paths.dataRoot, 'work/run.lock'), async () => {
+      const manifests = await loadManifests(context.paths);
+      return buildCatalog(context.paths, manifests);
+    });
   }
   if (command === 'backup' && args[1] === 'create') {
     format(args);
