@@ -202,3 +202,60 @@ test('refuses to prune a user-modified formerly managed raw file', async () => {
   expect(result.status).toBe('failed');
   expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'B.txt'), 'utf8')).toBe('note');
 });
+
+test('recovers safely when journal preparation or state replacement is interrupted', async () => {
+  const dataPaths = await paths();
+  const run = async (revision: string, body: string, activationHook?: Parameters<typeof runDataWatchTask>[0]['activationHook']) => runDataWatchTask({
+    paths: dataPaths, sources: [source], datasetIds: ['fda-recalls'], workbench, activationHook,
+    httpFactory: () => ({ async get(url: string): Promise<HttpResult> {
+      const response = url.includes('/api/datasets/') ? (url.includes('/tree/') ? JSON.stringify([{ type: 'file', path: 'README.md', size: 3 }]) : JSON.stringify({ sha: revision })) : body;
+      return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(response) };
+    } }),
+  });
+  expect((await run('a'.repeat(40), 'old')).status).toBe('completed');
+  expect((await run('c'.repeat(40), 'new', async phase => { if (phase === 'prepared') throw new Error('before-move'); })).status).toBe('failed');
+  expect(await readFile(join(dataPaths.originalRoot, 'fda-recalls', 'README.md'), 'utf8')).toBe('old');
+  expect((await run('c'.repeat(40), 'new', async phase => { if (phase === 'state-swapped') throw new Error('after-state'); })).status).toBe('failed');
+  const recovered = await run('c'.repeat(40), 'new');
+  expect(recovered.status).toBe('completed');
+  expect(await readFile(join(dataPaths.originalRoot, 'fda-recalls', 'README.md'), 'utf8')).toBe('new');
+  expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'README.md'), 'utf8')).toBe('new');
+  expect(await readFile(join(dataPaths.dataRoot, 'fda-recalls', 'manifest.json'), 'utf8')).toContain('c'.repeat(40));
+});
+
+test('does not alter the Obsidian snapshot when publishing is disabled', async () => {
+  const dataPaths = await paths();
+  const run = async (revision: string, body: string, publish: boolean) => runDataWatchTask({
+    paths: dataPaths, sources: [source], datasetIds: ['fda-recalls'], workbench: { ...workbench, publish_snapshot: publish },
+    httpFactory: () => ({ async get(url: string): Promise<HttpResult> {
+      const response = url.includes('/api/datasets/') ? (url.includes('/tree/') ? JSON.stringify([{ type: 'file', path: 'README.md', size: 3 }]) : JSON.stringify({ sha: revision })) : body;
+      return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(response) };
+    } }),
+  });
+  expect((await run('a'.repeat(40), 'old', true)).status).toBe('completed');
+  const registry = await readFile(join(dataPaths.vaultRoot, '.datawatch-assets.json'), 'utf8');
+  expect((await run('c'.repeat(40), 'new', false)).status).toBe('completed');
+  expect(await readFile(join(dataPaths.originalRoot, 'fda-recalls', 'README.md'), 'utf8')).toBe('new');
+  expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'README.md'), 'utf8')).toBe('old');
+  expect(await readFile(join(dataPaths.vaultRoot, '.datawatch-assets.json'), 'utf8')).toBe(registry);
+});
+
+test('builds one multi-dataset overview and preserves dataset user notes', async () => {
+  const dataPaths = await paths();
+  const hospital = { ...source, dataset_id: 'hospital-resources' as const, source_id: 'hospital-resources', repository: 'example/hospital' };
+  const run = async (revision: string, fdaBody: string, hospitalBody: string) => runDataWatchTask({
+    paths: dataPaths, sources: [source, hospital], datasetIds: ['fda-recalls', 'hospital-resources'], workbench: { ...workbench, enabled_dataset_ids: ['fda-recalls', 'hospital-resources'] },
+    httpFactory: item => ({ async get(url: string): Promise<HttpResult> {
+      const body = item.dataset_id === 'fda-recalls' ? fdaBody : hospitalBody;
+      const response = url.includes('/api/datasets/') ? (url.includes('/tree/') ? JSON.stringify([{ type: 'file', path: 'README.md', size: body.length }]) : JSON.stringify({ sha: revision })) : body;
+      return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(response) };
+    } }),
+  });
+  expect((await run('a'.repeat(40), 'one', 'two')).status).toBe('completed');
+  await Bun.write(join(dataPaths.vaultRoot, 'fda-recalls', 'my-note.md'), 'keep');
+  expect((await run('c'.repeat(40), 'new', 'new')).status).toBe('completed');
+  const overview = await readFile(join(dataPaths.vaultRoot, 'indexes', 'overview.md'), 'utf8');
+  expect(overview).toContain('fda-recalls');
+  expect(overview).toContain('hospital-resources');
+  expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'my-note.md'), 'utf8')).toBe('keep');
+});
