@@ -127,8 +127,12 @@ test('preserves a user note inside a legacy Evidence snapshot during cleanup', a
   await writeFile(join(paths.originalRoot, 'fda-recalls', revision, 'README.md'), body);
   await writeFile(join(paths.dataRoot, 'datasets', 'fda-recalls', revision, 'manifest.json'), JSON.stringify(manifest));
   await writeFile(join(legacy, 'dataset.md'), '---\ngenerated_by: datawatch-data\n---\n');
+  await mkdir(join(legacy, 'raw'), { recursive: true });
+  await writeFile(join(legacy, 'raw', 'README.md'), 'legacy');
+  await writeFile(join(paths.vaultRoot, '.datawatch-assets.json'), JSON.stringify({ generated_by: 'datawatch-data', files: [{ path: 'Evidence/datasets/fda-recalls/' + revision + '/raw/README.md' }] }));
   await writeFile(join(legacy, 'my-note.md'), 'keep');
   await migrateLegacyStorage(paths);
   expect(await readFile(join(legacy, 'my-note.md'), 'utf8')).toBe('keep');
   await expect(readFile(join(legacy, 'dataset.md'), 'utf8')).rejects.toThrow();
+  await expect(readFile(join(legacy, 'raw', 'README.md'), 'utf8')).rejects.toThrow();
 });

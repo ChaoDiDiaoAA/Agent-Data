@@ -22,6 +22,7 @@ export interface TaskOptions {
   now?: () => Date;
   signal?: AbortSignal;
   runId?: string;
+  activationHook?: (phase: 'original-moved' | 'original-active' | 'vault-moved' | 'vault-active' | 'state-active') => Promise<void>;
 }
 
 const stages: TaskStage[] = ['probe', 'acquire', 'catalog', 'verify'];
@@ -36,8 +37,10 @@ function originalRoot(paths: DataWatchPaths, datasetId: DatasetId): string {
   return join(paths.originalRoot, datasetId);
 }
 function stageRoot(paths: DataWatchPaths, datasetId: DatasetId, revision: string): string { return join(paths.dataRoot, 'work', 'snapshots', datasetId, revision); }
-function stageRawRoot(paths: DataWatchPaths, manifest: DatasetManifest): string { return join(stageRoot(paths, manifest.dataset_id, manifest.revision), 'raw'); }
+function stageOriginalRoot(paths: DataWatchPaths, manifest: DatasetManifest): string { return join(stageRoot(paths, manifest.dataset_id, manifest.revision), 'original'); }
+function stageRawRoot(paths: DataWatchPaths, manifest: DatasetManifest): string { return join(stageOriginalRoot(paths, manifest), manifest.dataset_id); }
 function stageManifestPath(paths: DataWatchPaths, datasetId: DatasetId, revision: string): string { return join(stageRoot(paths, datasetId, revision), 'manifest.json'); }
+function activationJournalPath(paths: DataWatchPaths, datasetId: DatasetId): string { return join(paths.dataRoot, 'work', 'activation', datasetId + '.json'); }
 function initialStages(): Record<TaskStage, TaskStageStatus> {
   return { probe: 'pending', acquire: 'pending', catalog: 'pending', verify: 'pending' };
 }
@@ -183,15 +186,70 @@ async function acquireDataset(options: TaskOptions & { run: TaskRun }, source: S
   return { files: manifest.files.length, bytes, skipped };
 }
 
-async function activateDataset(paths: DataWatchPaths, manifest: DatasetManifest): Promise<void> {
-  const staged = stageRawRoot(paths, manifest);
-  if (!(await pathExists(staged))) throw new Error('STAGING_SNAPSHOT_MISSING');
-  const current = originalRoot(paths, manifest.dataset_id);
-  const previous = join(stageRoot(paths, manifest.dataset_id, manifest.revision), 'previous-original');
-  await rm(previous, { recursive: true, force: true });
-  await mkdir(join(current, '..'), { recursive: true });
-  if (await pathExists(current)) await rename(current, previous);
-  await rename(staged, current);
+interface ActivationJournal { dataset_id: DatasetId; revision: string; phase: 'prepared' | 'original-moved' | 'original-active' | 'vault-moved' | 'vault-active' | 'state-active'; had_original: boolean; had_vault: boolean; had_assets: boolean; had_overview: boolean; }
+async function saveActivation(paths: DataWatchPaths, journal: ActivationJournal): Promise<void> { await writeCanonicalJson(activationJournalPath(paths, journal.dataset_id), journal); }
+async function restoreOrRemove(current: string, previous: string, existed: boolean): Promise<void> {
+  if (await pathExists(current)) await rm(current, { recursive: true, force: true });
+  if (existed && await pathExists(previous)) await rename(previous, current);
+}
+async function recoverActivation(paths: DataWatchPaths): Promise<void> {
+  const directory = join(paths.dataRoot, 'work', 'activation');
+  for (const entry of await readdir(directory).catch(() => [] as string[])) {
+    let journal: ActivationJournal;
+    try { journal = await readJson<ActivationJournal>(join(directory, entry)); } catch { continue; }
+    const root = stageRoot(paths, journal.dataset_id, journal.revision);
+    if (journal.phase !== 'state-active') {
+      await restoreOrRemove(originalRoot(paths, journal.dataset_id), join(root, 'previous-original'), journal.had_original);
+      await restoreOrRemove(join(paths.vaultRoot, journal.dataset_id), join(root, 'previous-vault'), journal.had_vault);
+      const metadata = join(root, 'previous-metadata');
+      const restoreFile = async (name: string, existed: boolean): Promise<void> => {
+        const current = join(paths.vaultRoot, name);
+        const previous = join(metadata, name);
+        if (existed && await pathExists(previous)) { await mkdir(join(current, '..'), { recursive: true }); await copyFile(previous, current); }
+        else if (!existed) await rm(current, { force: true });
+      };
+      await restoreFile('.datawatch-assets.json', journal.had_assets);
+      await restoreFile(join('indexes', 'overview.md'), journal.had_overview);
+    }
+    await rm(activationJournalPath(paths, journal.dataset_id), { force: true });
+  }
+}
+async function activateDataset(options: TaskOptions, manifest: DatasetManifest): Promise<void> {
+  const paths = options.paths;
+  const root = stageRoot(paths, manifest.dataset_id, manifest.revision);
+  const stagedOriginal = stageRawRoot(paths, manifest);
+  const stagedVault = join(root, 'vault', manifest.dataset_id);
+  if (!(await pathExists(stagedOriginal)) || !(await pathExists(stagedVault))) throw new Error('STAGING_SNAPSHOT_MISSING');
+  const currentOriginal = originalRoot(paths, manifest.dataset_id);
+  const currentVault = join(paths.vaultRoot, manifest.dataset_id);
+  const assetsPath = join(paths.vaultRoot, '.datawatch-assets.json');
+  const overviewPath = join(paths.vaultRoot, 'indexes', 'overview.md');
+  const journal: ActivationJournal = { dataset_id: manifest.dataset_id, revision: manifest.revision, phase: 'prepared', had_original: await pathExists(currentOriginal), had_vault: await pathExists(currentVault), had_assets: await pathExists(assetsPath), had_overview: await pathExists(overviewPath) };
+  await saveActivation(paths, journal);
+  const metadata = join(root, 'previous-metadata');
+  if (journal.had_assets) { await mkdir(metadata, { recursive: true }); await copyFile(assetsPath, join(metadata, '.datawatch-assets.json')); }
+  if (journal.had_overview) { await mkdir(join(metadata, 'indexes'), { recursive: true }); await copyFile(overviewPath, join(metadata, 'indexes', 'overview.md')); }
+  await mkdir(join(currentOriginal, '..'), { recursive: true });
+  await mkdir(join(currentVault, '..'), { recursive: true });
+  if (journal.had_original) await rename(currentOriginal, join(root, 'previous-original'));
+  journal.phase = 'original-moved'; await saveActivation(paths, journal); await options.activationHook?.('original-moved');
+  await rename(stagedOriginal, currentOriginal);
+  journal.phase = 'original-active'; await saveActivation(paths, journal); await options.activationHook?.('original-active');
+  if (journal.had_vault) await rename(currentVault, join(root, 'previous-vault'));
+  journal.phase = 'vault-moved'; await saveActivation(paths, journal); await options.activationHook?.('vault-moved');
+  await rename(stagedVault, currentVault);
+  journal.phase = 'vault-active'; await saveActivation(paths, journal); await options.activationHook?.('vault-active');
+  const stagedAssets = join(root, 'vault', '.datawatch-assets.json');
+  if (await pathExists(stagedAssets)) await copyFile(stagedAssets, assetsPath);
+  const stagedOverview = join(root, 'vault', 'indexes', 'overview.md');
+  if (await pathExists(stagedOverview)) {
+    await mkdir(join(paths.vaultRoot, 'indexes'), { recursive: true });
+    await copyFile(stagedOverview, overviewPath);
+  }
+  await saveManifest(paths, manifest);
+  journal.phase = 'state-active'; await saveActivation(paths, journal); await options.activationHook?.('state-active');
+  await rm(root, { recursive: true, force: true });
+  await rm(activationJournalPath(paths, manifest.dataset_id), { force: true });
 }
 
 function lockPath(paths: DataWatchPaths): string {
@@ -205,13 +263,14 @@ async function verifyLegacyManifest(paths: DataWatchPaths, manifest: DatasetMani
     if (!(await pathExists(source)) || await sha256File(source) !== file.sha256) throw new Error('MIGRATION_HASH_MISMATCH');
   }
 }
-async function cleanLegacyGeneratedSnapshot(paths: DataWatchPaths, datasetId: DatasetId, revision: string): Promise<void> {
-  const root = join(paths.vaultRoot, 'Evidence', 'datasets', datasetId, revision);
-  let assets: Array<{ path?: string }> = [];
+async function legacyAssets(paths: DataWatchPaths): Promise<Array<{ path?: string }>> {
   try {
     const registry = JSON.parse(await readFile(join(paths.vaultRoot, '.datawatch-assets.json'), 'utf8')) as { generated_by?: string; files?: Array<{ path?: string }> };
-    if (registry.generated_by === 'datawatch-data') assets = registry.files ?? [];
-  } catch { /* no generated registry means no raw files are safe to remove */ }
+    return registry.generated_by === 'datawatch-data' ? registry.files ?? [] : [];
+  } catch { return []; }
+}
+async function cleanLegacyGeneratedSnapshot(paths: DataWatchPaths, datasetId: DatasetId, revision: string, assets: Array<{ path?: string }>): Promise<void> {
+  const root = join(paths.vaultRoot, 'Evidence', 'datasets', datasetId, revision);
   const prefix = 'Evidence/datasets/' + datasetId + '/' + revision + '/raw/';
   for (const asset of assets) if (asset.path?.startsWith(prefix)) await rm(resolveOwnedPath(paths.vaultRoot, asset.path), { force: true });
   const card = join(root, 'dataset.md');
@@ -256,12 +315,13 @@ export async function migrateLegacyStorage(paths: DataWatchPaths, wanted?: Datas
       if (!(await pathExists(destination))) await copyFile(source, destination);
       files += 1;
     }
+    const capturedLegacyAssets = await legacyAssets(paths);
     await saveManifest(paths, manifest);
     await buildCatalog(paths, [manifest]);
     await rm(join(paths.dataRoot, 'datasets', datasetId), { recursive: true, force: true });
     for (const revision of revisions) {
       await rm(join(paths.originalRoot, datasetId, revision), { recursive: true, force: true });
-      await cleanLegacyGeneratedSnapshot(paths, datasetId, revision);
+      await cleanLegacyGeneratedSnapshot(paths, datasetId, revision, capturedLegacyAssets);
     }
     datasets += 1;
   }
@@ -298,6 +358,7 @@ export async function runDataWatchTask(options: TaskOptions): Promise<TaskResult
     sources: datasetIds.map(id => sourceMap.get(id)),
   });
   return withRunLock(lockPath(options.paths), async () => {
+    await recoverActivation(options.paths);
     await migrateLegacyStorage(options.paths, datasetIds);
     await mkdir(runRoot(options.paths), { recursive: true });
     const results: DatasetResult[] = [];
@@ -372,7 +433,21 @@ export async function runDataWatchTask(options: TaskOptions): Promise<TaskResult
     if (!run.errors?.length && complete.length === datasetIds.length) {
       try {
         if (options.workbench.publish_snapshot) await validateCatalogTargets(options.paths, complete);
-        for (const manifest of complete) await activateDataset(options.paths, manifest);
+        for (const manifest of complete) {
+          const root = stageRoot(options.paths, manifest.dataset_id, manifest.revision);
+          if (options.workbench.publish_snapshot) {
+            const stagedVault = join(root, 'vault');
+            const activeAssets = join(options.paths.vaultRoot, '.datawatch-assets.json');
+            if (await pathExists(activeAssets)) {
+              await mkdir(stagedVault, { recursive: true });
+              await copyFile(activeAssets, join(stagedVault, '.datawatch-assets.json'));
+            }
+            await buildCatalog({ ...options.paths, originalRoot: stageOriginalRoot(options.paths, manifest), vaultRoot: join(root, 'vault') }, [manifest]);
+          } else {
+            await mkdir(join(root, 'vault', manifest.dataset_id), { recursive: true });
+          }
+          await activateDataset(options, manifest);
+        }
       } catch (error) {
         addError(run, undefined, undefined, error);
       }
@@ -381,21 +456,12 @@ export async function runDataWatchTask(options: TaskOptions): Promise<TaskResult
     await saveRun(options.paths, run);
     if (options.workbench.publish_snapshot && !run.errors?.length) {
       try {
-        await buildCatalog(options.paths, complete);
-        for (const manifest of complete) {
-          await saveManifest(options.paths, manifest);
-          await rm(stageRoot(options.paths, manifest.dataset_id, manifest.revision), { recursive: true, force: true });
-        }
         run.stages.catalog = 'completed';
       } catch (error) {
         addError(run, undefined, undefined, error);
         run.stages.catalog = 'failed';
       }
     } else if (!run.errors?.length) {
-      for (const manifest of complete) {
-        await saveManifest(options.paths, manifest);
-        await rm(stageRoot(options.paths, manifest.dataset_id, manifest.revision), { recursive: true, force: true });
-      }
       run.stages.catalog = 'completed';
     } else {
       run.stages.catalog = 'failed';

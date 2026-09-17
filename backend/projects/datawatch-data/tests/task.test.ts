@@ -168,3 +168,37 @@ test('keeps the active snapshot and manifest unchanged when a staged revision fa
   expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'README.md'), 'utf8')).toBe('abc');
   expect(await readFile(join(dataPaths.dataRoot, 'fda-recalls', 'manifest.json'), 'utf8')).toContain(revision);
 });
+
+test('recovers a journaled activation failure to one consistent revision on retry', async () => {
+  const dataPaths = await paths();
+  const run = async (revision: string, body: string, activationHook?: Parameters<typeof runDataWatchTask>[0]['activationHook']) => runDataWatchTask({
+    paths: dataPaths, sources: [source], datasetIds: ['fda-recalls'], workbench, activationHook,
+    httpFactory: () => ({ async get(url: string): Promise<HttpResult> {
+      const response = url.includes('/api/datasets/') ? (url.includes('/tree/') ? JSON.stringify([{ type: 'file', path: 'README.md', size: 3 }]) : JSON.stringify({ sha: revision })) : body;
+      return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(response) };
+    } }),
+  });
+  expect((await run('a'.repeat(40), 'old')).status).toBe('completed');
+  expect((await run('c'.repeat(40), 'new', async phase => { if (phase === 'original-moved') throw new Error('inject'); })).status).toBe('failed');
+  const recovered = await run('c'.repeat(40), 'new');
+  expect(recovered.status).toBe('completed');
+  expect(await readFile(join(dataPaths.originalRoot, 'fda-recalls', 'README.md'), 'utf8')).toBe('new');
+  expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'README.md'), 'utf8')).toBe('new');
+  expect(await readFile(join(dataPaths.dataRoot, 'fda-recalls', 'manifest.json'), 'utf8')).toContain('c'.repeat(40));
+});
+
+test('refuses to prune a user-modified formerly managed raw file', async () => {
+  const dataPaths = await paths();
+  const run = async (revision: string, files: Record<string, string>) => runDataWatchTask({
+    paths: dataPaths, sources: [source], datasetIds: ['fda-recalls'], workbench,
+    httpFactory: () => ({ async get(url: string): Promise<HttpResult> {
+      const response = url.includes('/api/datasets/') ? (url.includes('/tree/') ? JSON.stringify(Object.entries(files).map(([path, body]) => ({ type: 'file', path, size: body.length }))) : JSON.stringify({ sha: revision })) : files[decodeURIComponent(new URL(url).pathname).split('/').at(-1)!]!;
+      return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(response) };
+    } }),
+  });
+  expect((await run('a'.repeat(40), { 'A.txt': 'old', 'B.txt': 'old' })).status).toBe('completed');
+  await Bun.write(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'B.txt'), 'note');
+  const result = await run('c'.repeat(40), { 'A.txt': 'new' });
+  expect(result.status).toBe('failed');
+  expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'B.txt'), 'utf8')).toBe('note');
+});
