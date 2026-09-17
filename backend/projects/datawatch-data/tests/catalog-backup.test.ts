@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { buildCatalog, verifyCatalog } from '../src/catalog.ts';
+import { buildCatalog, cardContent, verifyCatalog } from '../src/catalog.ts';
 import { migrateLegacyStorage } from '../src/task.ts';
 import { createBackup, restoreBackup, restoreSmoke, verifyBackup } from '../src/backup.ts';
 import type { DataWatchPaths, DatasetManifest } from '../src/contracts.ts';
@@ -164,14 +164,16 @@ test('preserves a user note inside a legacy Evidence snapshot during cleanup', a
   await mkdir(legacy, { recursive: true });
   await writeFile(join(paths.originalRoot, 'fda-recalls', revision, 'README.md'), body);
   await writeFile(join(paths.dataRoot, 'datasets', 'fda-recalls', revision, 'manifest.json'), JSON.stringify(manifest));
-  await writeFile(join(legacy, 'dataset.md'), '---\ngenerated_by: datawatch-data\n---\n');
+  await writeFile(join(legacy, 'manifest.json'), JSON.stringify(manifest));
+  await writeFile(join(legacy, 'dataset.md'), cardContent(manifest));
   await mkdir(join(legacy, 'raw'), { recursive: true });
   await writeFile(join(legacy, 'raw', 'README.md'), 'legacy');
   await mkdir(join(legacy, 'raw', 'nested', 'sha'), { recursive: true });
   await writeFile(join(legacy, 'raw', 'nested', 'sha', 'old.txt'), 'legacy');
+  const nestedSha = createHash('sha256').update('legacy').digest('hex');
   await writeFile(join(paths.vaultRoot, '.datawatch-assets.json'), JSON.stringify({ generated_by: 'datawatch-data', files: [
     { path: 'Evidence/datasets/fda-recalls/' + revision + '/raw/README.md' },
-    { path: 'Evidence/datasets/fda-recalls/' + revision + '/raw/nested/sha/old.txt' },
+    { path: 'Evidence/datasets/fda-recalls/' + revision + '/raw/nested/sha/old.txt', bytes: 6, sha256: nestedSha },
   ] }));
   await writeFile(join(legacy, 'my-note.md'), 'keep');
   await migrateLegacyStorage(paths);
@@ -180,4 +182,32 @@ test('preserves a user note inside a legacy Evidence snapshot during cleanup', a
   await expect(readFile(join(legacy, 'raw', 'README.md'), 'utf8')).rejects.toThrow();
   await expect(readFile(join(legacy, 'raw', 'nested', 'sha', 'old.txt'), 'utf8')).rejects.toThrow();
   await expect(readFile(join(legacy, 'raw'), 'utf8')).rejects.toThrow();
+});
+
+test('stops migration before deleting edited legacy generated assets', async () => {
+  const paths = await roots();
+  const revision = 'g'.repeat(40);
+  const body = 'legacy';
+  const sha256 = createHash('sha256').update(body).digest('hex');
+  const manifest: DatasetManifest = {
+    schema_version: 1, dataset_id: 'fda-recalls', source_id: 'fda-recalls', repository: 'example/fda', revision,
+    homepage: 'https://example.test', declared_license: 'CC BY 4.0', license_evidence: 'https://example.test/license', data_kind: 'sample', origin_kind: 'public_redacted', retrieved_at: '2026-01-01T00:00:00.000Z',
+    files: [{ path: 'README.md', bytes: body.length, url: 'https://example.test/readme', sha256 }],
+  };
+  const legacy = join(paths.vaultRoot, 'Evidence', 'datasets', 'fda-recalls', revision);
+  await mkdir(join(paths.originalRoot, 'fda-recalls', revision), { recursive: true });
+  await mkdir(join(paths.dataRoot, 'datasets', 'fda-recalls', revision), { recursive: true });
+  await mkdir(join(legacy, 'raw'), { recursive: true });
+  await writeFile(join(paths.originalRoot, 'fda-recalls', revision, 'README.md'), body);
+  await writeFile(join(paths.dataRoot, 'datasets', 'fda-recalls', revision, 'manifest.json'), JSON.stringify(manifest));
+  await writeFile(join(legacy, 'manifest.json'), JSON.stringify(manifest));
+  await writeFile(join(legacy, 'dataset.md'), cardContent(manifest) + '\nuser annotation');
+  await writeFile(join(legacy, 'raw', 'README.md'), 'user edited');
+  await writeFile(join(paths.vaultRoot, '.datawatch-assets.json'), JSON.stringify({ generated_by: 'datawatch-data', files: [
+    { path: 'Evidence/datasets/fda-recalls/' + revision + '/raw/README.md', bytes: body.length, sha256 },
+  ] }));
+  await expect(migrateLegacyStorage(paths)).rejects.toThrow('CATALOG_USER_FILE_CONFLICT');
+  expect(await readFile(join(legacy, 'dataset.md'), 'utf8')).toContain('user annotation');
+  expect(await readFile(join(legacy, 'raw', 'README.md'), 'utf8')).toBe('user edited');
+  expect(await readFile(join(paths.originalRoot, 'fda-recalls', revision, 'README.md'), 'utf8')).toBe(body);
 });

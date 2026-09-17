@@ -1,12 +1,12 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, rename, rm, rmdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DataWatchPaths, DatasetFile, DatasetId, DatasetManifest, DatasetResult, SourceConfig, TaskResult, TaskRun, TaskStage, TaskStageStatus, WorkbenchConfig } from './contracts.ts';
 import { createSourceHttp } from './http.ts';
 import { fetchRepositoryTree, resolveHuggingFaceRevision, toDatasetFiles } from './huggingface.ts';
 import { createDownloader, type Downloader } from './downloader.ts';
-import { buildCatalog, validateCatalogTargets, verifyCatalog } from './catalog.ts';
-import { errorRecord, pathExists, readJson, resolveOwnedPath, sha256File, writeAtomic, writeCanonicalJson } from './util.ts';
+import { buildCatalog, cardContent, validateCatalogTargets, verifyCatalog } from './catalog.ts';
+import { canonicalJson, errorRecord, pathExists, readJson, resolveOwnedPath, sha256File, writeAtomic, writeCanonicalJson } from './util.ts';
 import { createBackupUnlocked } from './backup.ts';
 import { configHash } from './config.ts';
 import { withRunLock, type HttpScope } from './engine-bridge.ts';
@@ -364,23 +364,54 @@ async function verifyLegacyManifest(paths: DataWatchPaths, manifest: DatasetMani
     if (!(await pathExists(source)) || await sha256File(source) !== file.sha256) throw new Error('MIGRATION_HASH_MISMATCH');
   }
 }
-async function legacyAssets(paths: DataWatchPaths): Promise<Array<{ path?: string }>> {
+interface LegacyAsset { path?: string; bytes?: number; sha256?: string; }
+async function legacyAssets(paths: DataWatchPaths): Promise<LegacyAsset[]> {
   try {
-    const registry = JSON.parse(await readFile(join(paths.vaultRoot, '.datawatch-assets.json'), 'utf8')) as { generated_by?: string; files?: Array<{ path?: string }> };
+    const registry = JSON.parse(await readFile(join(paths.vaultRoot, '.datawatch-assets.json'), 'utf8')) as { generated_by?: string; files?: LegacyAsset[] };
     return registry.generated_by === 'datawatch-data' ? registry.files ?? [] : [];
   } catch { return []; }
 }
-async function cleanLegacyGeneratedSnapshot(paths: DataWatchPaths, datasetId: DatasetId, revision: string, assets: Array<{ path?: string }>): Promise<void> {
+async function cleanLegacyGeneratedSnapshot(paths: DataWatchPaths, datasetId: DatasetId, revision: string, assets: LegacyAsset[], remove = true): Promise<void> {
   const root = join(paths.vaultRoot, 'Evidence', 'datasets', datasetId, revision);
   const prefix = 'Evidence/datasets/' + datasetId + '/' + revision + '/raw/';
-  for (const asset of assets) if (asset.path?.startsWith(prefix)) await rm(resolveOwnedPath(paths.vaultRoot, asset.path), { force: true });
-  const card = join(root, 'dataset.md');
-  let generatedCard = false;
-  try { generatedCard = (await readFile(card, 'utf8')).startsWith('---\ngenerated_by: datawatch-data\n'); } catch { /* absent */ }
-  if (generatedCard) {
-    await rm(card, { force: true });
-    await rm(join(root, 'manifest.json'), { force: true });
+  let legacyManifest: DatasetManifest | undefined;
+  try { legacyManifest = await readJson<DatasetManifest>(join(root, 'manifest.json')); } catch { /* absent legacy metadata */ }
+  const manifestFiles = new Map((legacyManifest?.files ?? []).map(file => [file.path, file]));
+  const removals: string[] = [];
+  for (const asset of assets) {
+    if (!asset.path?.startsWith(prefix)) continue;
+    const target = resolveOwnedPath(paths.vaultRoot, asset.path);
+    if (!(await pathExists(target))) continue;
+    const relativePath = asset.path.slice(prefix.length);
+    const expected = manifestFiles.get(relativePath);
+    const bytes = asset.bytes ?? expected?.bytes;
+    const sha256 = asset.sha256 ?? expected?.sha256;
+    if (typeof bytes !== 'number' || typeof sha256 !== 'string') throw new Error('CATALOG_USER_FILE_CONFLICT');
+    const info = await stat(target);
+    if (!info.isFile() || info.size !== bytes || await sha256File(target) !== sha256) throw new Error('CATALOG_USER_FILE_CONFLICT');
+    removals.push(target);
   }
+  const card = join(root, 'dataset.md');
+  if (await pathExists(card)) {
+    const content = await readFile(card, 'utf8');
+    const registered = assets.find(asset => asset.path === 'Evidence/datasets/' + datasetId + '/' + revision + '/dataset.md');
+    if (registered?.bytes !== undefined && registered.sha256) {
+      if (new TextEncoder().encode(content).byteLength !== registered.bytes || createHash('sha256').update(content).digest('hex') !== registered.sha256) throw new Error('CATALOG_USER_FILE_CONFLICT');
+    } else if (legacyManifest && content !== cardContent(legacyManifest)) {
+      throw new Error('CATALOG_USER_FILE_CONFLICT');
+    } else if (!legacyManifest || !content.startsWith('---\ngenerated_by: datawatch-data\n')) {
+      throw new Error('CATALOG_USER_FILE_CONFLICT');
+    }
+    removals.push(card);
+  }
+  const manifestPath = join(root, 'manifest.json');
+  if (await pathExists(manifestPath)) {
+    const content = await readFile(manifestPath, 'utf8');
+    if (!legacyManifest || canonicalJson(JSON.parse(content)) !== canonicalJson(legacyManifest)) throw new Error('CATALOG_USER_FILE_CONFLICT');
+    removals.push(manifestPath);
+  }
+  if (!remove) return;
+  for (const path of removals) await rm(path, { force: true });
   const pruneEmptyDirectories = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
       if (entry.isDirectory()) await pruneEmptyDirectories(join(directory, entry.name));
@@ -410,6 +441,8 @@ export async function migrateLegacyStorage(paths: DataWatchPaths, wanted?: Datas
     const manifest = manifests.sort((left, right) => right.retrieved_at.localeCompare(left.retrieved_at))[0];
     if (!manifest) continue;
     await verifyLegacyManifest(paths, manifest);
+    const capturedLegacyAssets = await legacyAssets(paths);
+    for (const revision of revisions) await cleanLegacyGeneratedSnapshot(paths, datasetId, revision, capturedLegacyAssets, false);
     if (!legacyBackedUp) {
       await createBackupUnlocked(paths, 'backup-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14) + '-' + randomUUID().slice(0, 8));
       legacyBackedUp = true;
@@ -426,7 +459,6 @@ export async function migrateLegacyStorage(paths: DataWatchPaths, wanted?: Datas
       } else await copyFile(source, destination);
       files += 1;
     }
-    const capturedLegacyAssets = await legacyAssets(paths);
     await saveManifest(paths, manifest);
     await buildCatalog(paths, [manifest], []);
     await rm(join(paths.dataRoot, 'datasets', datasetId), { recursive: true, force: true });

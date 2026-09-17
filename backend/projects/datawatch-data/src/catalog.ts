@@ -21,7 +21,7 @@ function generatedFrontmatter(properties: Record<string, string>): string {
   lines.push('---', '');
   return lines.join('\n');
 }
-function cardContent(manifest: DatasetManifest): string {
+export function cardContent(manifest: DatasetManifest): string {
   const rawLinks = manifest.files.slice(0, 20).map(file => '- [' + file.path + '](raw/' + file.path + ')');
   const more = manifest.files.length > 20 ? '- ...（共 ' + manifest.files.length + ' 个文件）' : undefined;
   return generatedFrontmatter({
