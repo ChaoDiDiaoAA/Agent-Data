@@ -22,6 +22,7 @@ fsd-code2doc/output/
 **/node_modules/
 **/.venv/
 **/dist/
+/migration-reviews/
 /backend/projects/fsd-code2doc/config/paths.local.yaml
 /backend/projects/flowmate-data/config/paths.local.json
 # FlowmateData 本地运行配置只保留在工作机，不纳入 Git 跟踪。
