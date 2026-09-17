@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "source_id": "hospital-resources",
+  "dataset_id": "hospital-resources",
+  "repository": "diamondgible2/Hospital-Resource-And-Patient-Management-Dataset",
+  "homepage": "https://huggingface.co/datasets/diamondgible2/Hospital-Resource-And-Patient-Management-Dataset",
+  "revision": {
+    "kind": "huggingface-api",
+    "url": "https://huggingface.co/api/datasets/diamondgible2/Hospital-Resource-And-Patient-Management-Dataset"
+  },
+  "tree_url_template": "https://huggingface.co/api/datasets/diamondgible2/Hospital-Resource-And-Patient-Management-Dataset/tree/{revision}?recursive=true",
+  "file_url_template": "https://huggingface.co/datasets/diamondgible2/Hospital-Resource-And-Patient-Management-Dataset/resolve/{revision}/{path}?download=true",
+  "allowed_origins": ["https://huggingface.co"],
+  "redirect_origins": [
+    "https://cas-bridge.xethub.hf.co",
+    "https://cdn-lfs.hf.co",
+    "https://cdn-lfs-us-1.hf.co",
+    "https://cdn-lfs-eu-1.hf.co",
+    "https://us.aws.cdn.hf.co",
+    "https://hf.co"
+  ],
+  "declared_license": "Open license for research and educational purposes (dataset card)",
+  "license_evidence": "https://huggingface.co/datasets/diamondgible2/Hospital-Resource-And-Patient-Management-Dataset",
+  "data_kind": "synthetic-hospital-operations",
+  "origin_kind": "synthetic",
+  "retention": "allowed",
+  "local_use": "allowed",
+  "redistribution": "unknown",
+  "language": "en",
+  "enabled": true
+}

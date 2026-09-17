@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "source_id": "fda-recalls",
+  "dataset_id": "fda-recalls",
+  "repository": "wapplewhite4/fda-recall-intelligence",
+  "homepage": "https://huggingface.co/datasets/wapplewhite4/fda-recall-intelligence",
+  "revision": {
+    "kind": "huggingface-api",
+    "url": "https://huggingface.co/api/datasets/wapplewhite4/fda-recall-intelligence"
+  },
+  "tree_url_template": "https://huggingface.co/api/datasets/wapplewhite4/fda-recall-intelligence/tree/{revision}?recursive=true",
+  "file_url_template": "https://huggingface.co/datasets/wapplewhite4/fda-recall-intelligence/resolve/{revision}/{path}?download=true",
+  "allowed_origins": ["https://huggingface.co"],
+  "redirect_origins": [
+    "https://cas-bridge.xethub.hf.co",
+    "https://cdn-lfs.hf.co",
+    "https://cdn-lfs-us-1.hf.co",
+    "https://cdn-lfs-eu-1.hf.co",
+    "https://us.aws.cdn.hf.co",
+    "https://hf.co"
+  ],
+  "declared_license": "CC BY 4.0",
+  "license_evidence": "https://creativecommons.org/licenses/by/4.0/",
+  "data_kind": "public-fda-recall-sample",
+  "origin_kind": "public_redacted",
+  "retention": "allowed",
+  "local_use": "allowed",
+  "redistribution": "allowed",
+  "language": "en",
+  "enabled": true
+}

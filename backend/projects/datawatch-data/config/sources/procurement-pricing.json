@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "source_id": "procurement-pricing",
+  "dataset_id": "procurement-pricing",
+  "repository": "electricsheepafrica/pharmaceutical-procurement-pricing",
+  "homepage": "https://huggingface.co/datasets/electricsheepafrica/pharmaceutical-procurement-pricing",
+  "revision": {
+    "kind": "huggingface-api",
+    "url": "https://huggingface.co/api/datasets/electricsheepafrica/pharmaceutical-procurement-pricing"
+  },
+  "tree_url_template": "https://huggingface.co/api/datasets/electricsheepafrica/pharmaceutical-procurement-pricing/tree/{revision}?recursive=true",
+  "file_url_template": "https://huggingface.co/datasets/electricsheepafrica/pharmaceutical-procurement-pricing/resolve/{revision}/{path}?download=true",
+  "allowed_origins": ["https://huggingface.co"],
+  "redirect_origins": [
+    "https://cas-bridge.xethub.hf.co",
+    "https://cdn-lfs.hf.co",
+    "https://cdn-lfs-us-1.hf.co",
+    "https://cdn-lfs-eu-1.hf.co",
+    "https://us.aws.cdn.hf.co",
+    "https://hf.co"
+  ],
+  "declared_license": "CC BY 4.0; simulated procurement data",
+  "license_evidence": "https://creativecommons.org/licenses/by/4.0/",
+  "data_kind": "synthetic-pharmaceutical-procurement",
+  "origin_kind": "synthetic",
+  "retention": "allowed",
+  "local_use": "allowed",
+  "redistribution": "allowed",
+  "language": "en",
+  "enabled": true
+}

@@ -1,0 +1,22 @@
+{
+  "name": "datawatch-data",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": "1.4.0"
+  },
+  "packageManager": "bun@1.4.0",
+  "scripts": {
+    "test": "bun test --timeout 30000",
+    "typecheck": "bun ./node_modules/typescript/bin/tsc --noEmit",
+    "cli": "bun src/cli.ts"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "26.4.0",
+    "typescript": "7.0.2"
+  }
+}

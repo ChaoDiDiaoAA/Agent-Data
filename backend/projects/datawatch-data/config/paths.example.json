@@ -1,0 +1,8 @@
+{
+  "projectRoot": "D:\\agent-data\\backend\\projects\\datawatch-data",
+  "paperEngineRoot": "D:\\agent-data\\backend\\projects\\paper-knowledge-engine",
+  "originalRoot": "D:\\paper\\DataWatch",
+  "dataRoot": "D:\\agent-data\\data\\datawatch-data",
+  "vaultRoot": "D:\\obsidian\\data\\datawatch-data",
+  "backupRoot": "D:\\agent-data\\backups\\datawatch-data"
+}

@@ -1,0 +1,127 @@
+import { copyFile, mkdir, readFile, rm, stat } from 'node:fs/promises';
+import { dirname, join, relative } from 'node:path';
+import type { DataWatchPaths, DatasetFile, DatasetManifest } from './contracts.ts';
+import { pathExists, resolveOwnedPath, sha256File, writeAtomic, writeCanonicalJson } from './util.ts';
+
+const generatedBy = 'datawatch-data';
+
+function fail(code: string): never { throw new Error(code); }
+function rawRoot(paths: DataWatchPaths, manifest: DatasetManifest): string {
+  return join(paths.originalRoot, manifest.dataset_id);
+}
+function vaultDatasetRoot(paths: DataWatchPaths, manifest: DatasetManifest): string {
+  return join(paths.vaultRoot, manifest.dataset_id);
+}
+function vaultRawPath(paths: DataWatchPaths, manifest: DatasetManifest, file: DatasetFile): string {
+  return resolveOwnedPath(vaultDatasetRoot(paths, manifest), 'raw/' + file.path);
+}
+function generatedFrontmatter(properties: Record<string, string>): string {
+  const lines = ['---', 'generated_by: ' + generatedBy, 'schema_version: 1'];
+  for (const [key, value] of Object.entries(properties)) lines.push(key + ': ' + value.split(String.fromCharCode(10)).join(' '));
+  lines.push('---', '');
+  return lines.join('\n');
+}
+function cardContent(manifest: DatasetManifest): string {
+  const rawLinks = manifest.files.slice(0, 20).map(file => '- [' + file.path + '](raw/' + file.path + ')');
+  const more = manifest.files.length > 20 ? '- ...（共 ' + manifest.files.length + ' 个文件）' : undefined;
+  return generatedFrontmatter({
+    dataset_id: manifest.dataset_id,
+    repository: manifest.repository,
+    revision: manifest.revision,
+    files: String(manifest.files.length),
+    data_kind: manifest.data_kind,
+    origin_kind: manifest.origin_kind,
+    license: manifest.declared_license,
+  }) + '# ' + manifest.dataset_id + '\n\n'
+    + '来源：[' + manifest.repository + '](' + manifest.homepage + ')\n\n'
+    + '固定版本：' + manifest.revision + '\n\n'
+    + '文件：\n' + [...rawLinks, ...(more ? [more] : [])].join('\n') + '\n';
+}
+function overviewContent(manifests: DatasetManifest[]): string {
+  const rows = manifests.map(manifest => '- [' + manifest.dataset_id + '](../' + manifest.dataset_id + '/dataset.md) — ' + manifest.files.length + ' 个文件，版本 ' + manifest.revision);
+  return generatedFrontmatter({ dataset_count: String(manifests.length) }) + '# DataWatch 数据集\n\n'
+    + '本目录由 DataWatch 生成；数据已按固定 Hugging Face commit 归档。\n\n'
+    + (rows.length ? rows.join('\n') : '暂无已获取数据集。') + '\n';
+}
+async function copyImmutable(source: string, destination: string, expectedBytes: number, expectedSha256: string): Promise<void> {
+  await mkdir(dirname(destination), { recursive: true });
+  if (await pathExists(destination)) {
+    const info = await stat(destination);
+    if (!info.isFile() || info.size !== expectedBytes || await sha256File(destination) !== expectedSha256) fail('CATALOG_ASSET_CONFLICT');
+    return;
+  }
+  await copyFile(source, destination);
+  const info = await stat(destination);
+  if (info.size !== expectedBytes || await sha256File(destination) !== expectedSha256) fail('CATALOG_ASSET_VERIFY_FAILED');
+}
+async function writeGenerated(path: string, content: string): Promise<void> {
+  if (await pathExists(path)) {
+    const existing = await readFile(path, 'utf8');
+    if (!existing.startsWith('---\ngenerated_by: ' + generatedBy + '\n')) fail('CATALOG_USER_FILE_CONFLICT');
+  }
+  await writeAtomic(path, content);
+}
+
+export async function buildCatalog(paths: DataWatchPaths, manifests: DatasetManifest[]): Promise<{ datasets: number; files: number }> {
+  const ordered = [...manifests].sort((left, right) => left.dataset_id.localeCompare(right.dataset_id) || left.revision.localeCompare(right.revision));
+  const overview = join(paths.vaultRoot, 'indexes', 'overview.md');
+  await mkdir(join(paths.vaultRoot, 'indexes'), { recursive: true });
+  let fileCount = 0;
+  for (const manifest of ordered) {
+    if (!manifest.files.every(file => typeof file.sha256 === 'string')) fail('CATALOG_MANIFEST_INCOMPLETE');
+    const datasetRoot = vaultDatasetRoot(paths, manifest);
+    const datasetPath = join(datasetRoot, 'dataset.md');
+    await mkdir(join(datasetRoot, 'raw'), { recursive: true });
+    for (const file of manifest.files) {
+      const source = resolveOwnedPath(rawRoot(paths, manifest), file.path);
+      await copyImmutable(source, vaultRawPath(paths, manifest, file), file.bytes, file.sha256!);
+      fileCount += 1;
+    }
+    await writeGenerated(datasetPath, cardContent(manifest));
+    await writeCanonicalJson(join(datasetRoot, 'manifest.json'), manifest);
+  }
+  await writeGenerated(overview, overviewContent(ordered));
+  await writeCanonicalJson(join(paths.vaultRoot, '.datawatch-assets.json'), {
+    generated_by: generatedBy,
+    schema_version: 1,
+    files: ordered.flatMap(manifest => manifest.files.map(file => ({
+      dataset_id: manifest.dataset_id,
+      revision: manifest.revision,
+      path: manifest.dataset_id + '/raw/' + file.path,
+      bytes: file.bytes,
+      sha256: file.sha256,
+    }))),
+  });
+  return { datasets: ordered.length, files: fileCount };
+}
+
+export async function verifyCatalog(paths: DataWatchPaths, manifests: DatasetManifest[]): Promise<{ datasets: number; files: number }> {
+  let count = 0;
+  for (const manifest of manifests) {
+    if (!manifest.files.every(file => typeof file.sha256 === 'string')) fail('VERIFY_MANIFEST_INCOMPLETE');
+    for (const file of manifest.files) {
+      const source = resolveOwnedPath(rawRoot(paths, manifest), file.path);
+      const target = vaultRawPath(paths, manifest, file);
+      const sourceInfo = await stat(source);
+      const targetInfo = await stat(target);
+      if (sourceInfo.size !== file.bytes || targetInfo.size !== file.bytes
+        || await sha256File(source) !== file.sha256 || await sha256File(target) !== file.sha256) {
+        fail('VERIFY_HASH_MISMATCH');
+      }
+      count += 1;
+    }
+  }
+  return { datasets: manifests.length, files: count };
+}
+
+export async function cleanGeneratedCatalog(paths: DataWatchPaths): Promise<void> {
+  if (!(await pathExists(paths.vaultRoot))) return;
+  const generated = [join(paths.vaultRoot, 'indexes', 'overview.md'), join(paths.vaultRoot, '.datawatch-assets.json')];
+  for (const path of generated) {
+    if (await pathExists(path) && (await readFile(path, 'utf8')).startsWith('---\ngenerated_by: ' + generatedBy + '\n')) await rm(path);
+  }
+}
+
+export function catalogRelativePath(paths: DataWatchPaths, path: string): string {
+  return relative(paths.vaultRoot, resolveOwnedPath(paths.vaultRoot, path)).replaceAll('\\', '/');
+}
