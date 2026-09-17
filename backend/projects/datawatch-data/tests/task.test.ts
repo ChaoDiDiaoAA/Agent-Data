@@ -125,3 +125,46 @@ test('resumes the same failed run after a mid-dataset interruption', async () =>
   expect(fileCalls).toBe(2);
   expect(await readFile(join(dataPaths.originalRoot, 'fda-recalls', 'B.txt'), 'utf8')).toBe('bbb');
 });
+
+test('activates a changed revision, refreshes its Obsidian copy, and prunes removed managed files', async () => {
+  const dataPaths = await paths();
+  const run = async (revision: string, files: Record<string, string>) => runDataWatchTask({
+    paths: dataPaths, sources: [source], datasetIds: ['fda-recalls'], workbench,
+    httpFactory: () => ({ async get(url: string): Promise<HttpResult> {
+      if (url.includes('/api/datasets/')) {
+        const body = url.includes('/tree/')
+          ? JSON.stringify(Object.entries(files).map(([path, body]) => ({ type: 'file', path, size: new TextEncoder().encode(body).byteLength })))
+          : JSON.stringify({ sha: revision });
+        return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(body) };
+      }
+      const path = decodeURIComponent(new URL(url).pathname).split('/').at(-1)!;
+      return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(files[path]!) };
+    } }),
+  });
+  expect((await run('a'.repeat(40), { 'A.txt': 'old', 'B.txt': 'stale' })).status).toBe('completed');
+  expect((await run('c'.repeat(40), { 'A.txt': 'new' })).status).toBe('completed');
+  expect(await readFile(join(dataPaths.originalRoot, 'fda-recalls', 'A.txt'), 'utf8')).toBe('new');
+  expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'A.txt'), 'utf8')).toBe('new');
+  await expect(readFile(join(dataPaths.originalRoot, 'fda-recalls', 'B.txt'), 'utf8')).rejects.toThrow();
+  await expect(readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'B.txt'), 'utf8')).rejects.toThrow();
+});
+
+test('keeps the active snapshot and manifest unchanged when a staged revision fails', async () => {
+  const dataPaths = await paths();
+  const first = await runDataWatchTask({ paths: dataPaths, sources: [source], datasetIds: ['fda-recalls'], workbench, httpFactory: () => fakeHttp() });
+  expect(first.status).toBe('completed');
+  const nextRevision = 'e'.repeat(40);
+  const httpFactory = (): HttpClient => ({ async get(url: string): Promise<HttpResult> {
+    if (url.includes('/api/datasets/')) {
+      const body = url.includes('/tree/') ? JSON.stringify([{ type: 'file', path: 'README.md', size: 3 }, { type: 'file', path: 'other.txt', size: 3 }]) : JSON.stringify({ sha: nextRevision });
+      return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(body) };
+    }
+    if (url.includes('/other.txt')) throw Object.assign(new Error('stop'), { code: 'RESEARCH_TRANSPORT_FAILED' });
+    return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode('new') };
+  } });
+  const result = await runDataWatchTask({ paths: dataPaths, sources: [source], datasetIds: ['fda-recalls'], workbench, httpFactory, downloaderFactory: (_source, http) => createDownloader({ maxAttempts: 1, get: (url, request) => http.get(url, request) }) });
+  expect(result.status).toBe('failed');
+  expect(await readFile(join(dataPaths.originalRoot, 'fda-recalls', 'README.md'), 'utf8')).toBe('abc');
+  expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'raw', 'README.md'), 'utf8')).toBe('abc');
+  expect(await readFile(join(dataPaths.dataRoot, 'fda-recalls', 'manifest.json'), 'utf8')).toContain(revision);
+});

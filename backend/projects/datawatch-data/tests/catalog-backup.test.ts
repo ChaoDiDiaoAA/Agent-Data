@@ -109,3 +109,26 @@ test('leaves legacy files untouched when a user dataset note conflicts during mi
   expect(await readFile(join(paths.originalRoot, 'fda-recalls', revision, 'README.md'), 'utf8')).toBe('legacy');
   expect(await readFile(join(paths.vaultRoot, 'fda-recalls', 'dataset.md'), 'utf8')).toBe('my note');
 });
+
+test('preserves a user note inside a legacy Evidence snapshot during cleanup', async () => {
+  const paths = await roots();
+  const revision = 'e'.repeat(40);
+  const body = new TextEncoder().encode('legacy');
+  const sha256 = createHash('sha256').update(body).digest('hex');
+  const manifest: DatasetManifest = {
+    schema_version: 1, dataset_id: 'fda-recalls', source_id: 'fda-recalls', repository: 'example/fda', revision,
+    homepage: 'https://example.test', declared_license: 'CC BY 4.0', license_evidence: 'https://example.test/license', data_kind: 'sample', origin_kind: 'public_redacted', retrieved_at: '2026-01-01T00:00:00.000Z',
+    files: [{ path: 'README.md', bytes: body.byteLength, url: 'https://example.test/readme', sha256 }],
+  };
+  const legacy = join(paths.vaultRoot, 'Evidence', 'datasets', 'fda-recalls', revision);
+  await mkdir(join(paths.originalRoot, 'fda-recalls', revision), { recursive: true });
+  await mkdir(join(paths.dataRoot, 'datasets', 'fda-recalls', revision), { recursive: true });
+  await mkdir(legacy, { recursive: true });
+  await writeFile(join(paths.originalRoot, 'fda-recalls', revision, 'README.md'), body);
+  await writeFile(join(paths.dataRoot, 'datasets', 'fda-recalls', revision, 'manifest.json'), JSON.stringify(manifest));
+  await writeFile(join(legacy, 'dataset.md'), '---\ngenerated_by: datawatch-data\n---\n');
+  await writeFile(join(legacy, 'my-note.md'), 'keep');
+  await migrateLegacyStorage(paths);
+  expect(await readFile(join(legacy, 'my-note.md'), 'utf8')).toBe('keep');
+  await expect(readFile(join(legacy, 'dataset.md'), 'utf8')).rejects.toThrow();
+});

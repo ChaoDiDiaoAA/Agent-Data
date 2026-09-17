@@ -54,6 +54,40 @@ async function copyImmutable(source: string, destination: string, expectedBytes:
   const info = await stat(destination);
   if (info.size !== expectedBytes || await sha256File(destination) !== expectedSha256) fail('CATALOG_ASSET_VERIFY_FAILED');
 }
+interface AssetRegistry { generated_by?: string; files?: Array<{ path: string }>; }
+async function loadAssets(paths: DataWatchPaths): Promise<Set<string>> {
+  try {
+    const registry = JSON.parse(await readFile(join(paths.vaultRoot, '.datawatch-assets.json'), 'utf8')) as AssetRegistry;
+    return registry.generated_by === generatedBy ? new Set(registry.files?.map(file => file.path) ?? []) : new Set();
+  } catch { return new Set(); }
+}
+function assetPath(paths: DataWatchPaths, target: string): string { return relative(paths.vaultRoot, target).replaceAll('\\', '/'); }
+async function validateGenerated(path: string): Promise<void> {
+  if (await pathExists(path) && !(await readFile(path, 'utf8')).startsWith('---\ngenerated_by: ' + generatedBy + '\n')) fail('CATALOG_USER_FILE_CONFLICT');
+}
+export async function validateCatalogTargets(paths: DataWatchPaths, manifests: DatasetManifest[]): Promise<void> {
+  const owned = await loadAssets(paths);
+  for (const manifest of manifests) {
+    await validateGenerated(join(vaultDatasetRoot(paths, manifest), 'dataset.md'));
+    for (const file of manifest.files) {
+      const target = vaultRawPath(paths, manifest, file);
+      if (await pathExists(target) && !owned.has(assetPath(paths, target))) {
+        const info = await stat(target);
+        if (!info.isFile() || info.size !== file.bytes || await sha256File(target) !== file.sha256) fail('CATALOG_ASSET_CONFLICT');
+      }
+    }
+  }
+}
+async function copyManaged(source: string, destination: string, expectedBytes: number, expectedSha256: string, owned: Set<string>, paths: DataWatchPaths): Promise<void> {
+  if (await pathExists(destination)) {
+    const info = await stat(destination);
+    if (info.isFile() && info.size === expectedBytes && await sha256File(destination) === expectedSha256) return;
+    if (!owned.has(assetPath(paths, destination))) fail('CATALOG_ASSET_CONFLICT');
+    await writeAtomic(destination, await readFile(source));
+  } else await copyImmutable(source, destination, expectedBytes, expectedSha256);
+  const info = await stat(destination);
+  if (info.size !== expectedBytes || await sha256File(destination) !== expectedSha256) fail('CATALOG_ASSET_VERIFY_FAILED');
+}
 async function writeGenerated(path: string, content: string): Promise<void> {
   if (await pathExists(path)) {
     const existing = await readFile(path, 'utf8');
@@ -64,6 +98,8 @@ async function writeGenerated(path: string, content: string): Promise<void> {
 
 export async function buildCatalog(paths: DataWatchPaths, manifests: DatasetManifest[]): Promise<{ datasets: number; files: number }> {
   const ordered = [...manifests].sort((left, right) => left.dataset_id.localeCompare(right.dataset_id) || left.revision.localeCompare(right.revision));
+  await validateCatalogTargets(paths, ordered);
+  const owned = await loadAssets(paths);
   const overview = join(paths.vaultRoot, 'indexes', 'overview.md');
   await mkdir(join(paths.vaultRoot, 'indexes'), { recursive: true });
   let fileCount = 0;
@@ -74,23 +110,27 @@ export async function buildCatalog(paths: DataWatchPaths, manifests: DatasetMani
     await mkdir(join(datasetRoot, 'raw'), { recursive: true });
     for (const file of manifest.files) {
       const source = resolveOwnedPath(rawRoot(paths, manifest), file.path);
-      await copyImmutable(source, vaultRawPath(paths, manifest, file), file.bytes, file.sha256!);
+      await copyManaged(source, vaultRawPath(paths, manifest, file), file.bytes, file.sha256!, owned, paths);
       fileCount += 1;
     }
     await writeGenerated(datasetPath, cardContent(manifest));
     await writeCanonicalJson(join(datasetRoot, 'manifest.json'), manifest);
+    const wanted = new Set(manifest.files.map(file => manifest.dataset_id + '/raw/' + file.path));
+    for (const prior of owned) {
+      if (prior.startsWith(manifest.dataset_id + '/raw/') && !wanted.has(prior)) await rm(resolveOwnedPath(paths.vaultRoot, prior), { force: true });
+    }
   }
   await writeGenerated(overview, overviewContent(ordered));
   await writeCanonicalJson(join(paths.vaultRoot, '.datawatch-assets.json'), {
     generated_by: generatedBy,
     schema_version: 1,
-    files: ordered.flatMap(manifest => manifest.files.map(file => ({
+    files: [...[...owned].filter(path => !ordered.some(manifest => path.startsWith(manifest.dataset_id + '/raw/'))).map(path => ({ path })), ...ordered.flatMap(manifest => manifest.files.map(file => ({
       dataset_id: manifest.dataset_id,
       revision: manifest.revision,
       path: manifest.dataset_id + '/raw/' + file.path,
       bytes: file.bytes,
       sha256: file.sha256,
-    }))),
+    })))],
   });
   return { datasets: ordered.length, files: fileCount };
 }

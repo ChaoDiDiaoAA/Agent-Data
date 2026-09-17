@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, readFile, readdir, rm, rmdir } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rename, rm, rmdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DataWatchPaths, DatasetFile, DatasetId, DatasetManifest, DatasetResult, SourceConfig, TaskResult, TaskRun, TaskStage, TaskStageStatus, WorkbenchConfig } from './contracts.ts';
 import { createSourceHttp } from './http.ts';
 import { fetchRepositoryTree, resolveHuggingFaceRevision, toDatasetFiles } from './huggingface.ts';
 import { createDownloader, type Downloader } from './downloader.ts';
-import { buildCatalog, verifyCatalog } from './catalog.ts';
+import { buildCatalog, validateCatalogTargets, verifyCatalog } from './catalog.ts';
 import { errorRecord, pathExists, readJson, resolveOwnedPath, sha256File, writeCanonicalJson } from './util.ts';
 import { createBackupUnlocked } from './backup.ts';
 import { configHash } from './config.ts';
@@ -35,6 +35,9 @@ function datasetRoot(paths: DataWatchPaths, datasetId: DatasetId): string {
 function originalRoot(paths: DataWatchPaths, datasetId: DatasetId): string {
   return join(paths.originalRoot, datasetId);
 }
+function stageRoot(paths: DataWatchPaths, datasetId: DatasetId, revision: string): string { return join(paths.dataRoot, 'work', 'snapshots', datasetId, revision); }
+function stageRawRoot(paths: DataWatchPaths, manifest: DatasetManifest): string { return join(stageRoot(paths, manifest.dataset_id, manifest.revision), 'raw'); }
+function stageManifestPath(paths: DataWatchPaths, datasetId: DatasetId, revision: string): string { return join(stageRoot(paths, datasetId, revision), 'manifest.json'); }
 function initialStages(): Record<TaskStage, TaskStageStatus> {
   return { probe: 'pending', acquire: 'pending', catalog: 'pending', verify: 'pending' };
 }
@@ -94,7 +97,7 @@ async function saveManifest(paths: DataWatchPaths, manifest: DatasetManifest): P
   await writeCanonicalJson(indexPath, index);
 }
 function fileDestination(paths: DataWatchPaths, manifest: DatasetManifest, file: DatasetFile): string {
-  return resolveOwnedPath(originalRoot(paths, manifest.dataset_id), file.path);
+  return resolveOwnedPath(stageRawRoot(paths, manifest), file.path);
 }
 function fileTemporaryPath(paths: DataWatchPaths, manifest: DatasetManifest, file: DatasetFile): string {
   const root = join(paths.dataRoot, 'work', 'downloads', manifest.dataset_id, manifest.revision);
@@ -105,7 +108,8 @@ async function probeDataset(options: TaskOptions, source: SourceConfig, revision
   const entries = await fetchRepositoryTree(source, revision, http, options.workbench.max_response_bytes, options.workbench.request_timeout_ms);
   const retrievedAt = (options.now ?? (() => new Date()))().toISOString();
   let previous: DatasetManifest | undefined;
-  try { previous = await loadManifest(options.paths, source.dataset_id, revision); } catch { previous = undefined; }
+  try { previous = await readJson<DatasetManifest>(stageManifestPath(options.paths, source.dataset_id, revision)); }
+  catch { try { previous = await loadManifest(options.paths, source.dataset_id, revision); } catch { previous = undefined; } }
   const previousFiles = new Map(previous?.files.map(file => [file.path, file]));
   const files = toDatasetFiles(source, revision, entries).map(file => {
     const prior = previousFiles.get(file.path);
@@ -129,7 +133,7 @@ async function probeDataset(options: TaskOptions, source: SourceConfig, revision
     retrieved_at: retrievedAt,
     files,
   };
-  await saveManifest(options.paths, manifest);
+  await writeCanonicalJson(stageManifestPath(options.paths, source.dataset_id, revision), manifest);
   return manifest;
 }
 async function acquireDataset(options: TaskOptions & { run: TaskRun }, source: SourceConfig, manifest: DatasetManifest): Promise<{ files: number; bytes: number; skipped: number }> {
@@ -142,12 +146,19 @@ async function acquireDataset(options: TaskOptions & { run: TaskRun }, source: S
   for (const file of manifest.files) {
     if (options.signal?.aborted) throw new Error('TASK_ABORTED');
     try {
+      const destination = fileDestination(options.paths, manifest, file);
+      if (file.sha256 && !(await pathExists(destination))) {
+        const current = resolveOwnedPath(originalRoot(options.paths, manifest.dataset_id), file.path);
+        if (await pathExists(current) && await sha256File(current) === file.sha256) {
+          await mkdir(join(destination, '..'), { recursive: true });
+          await copyFile(current, destination);
+        }
+      }
       const receipt = await downloader.download({
         url: file.url,
-        destination: fileDestination(options.paths, manifest, file),
+        destination,
         temporaryPath: fileTemporaryPath(options.paths, manifest, file),
         expectedBytes: file.bytes,
-        replaceExisting: !file.sha256,
         ...(file.sha256 ? { expectedSha256: file.sha256 } : {}),
         maxBytes: options.workbench.max_response_bytes,
         timeoutMs: options.workbench.request_timeout_ms,
@@ -162,7 +173,7 @@ async function acquireDataset(options: TaskOptions & { run: TaskRun }, source: S
       }
       bytes += receipt.bytes;
       if (receipt.skipped) skipped += 1;
-      await saveManifest(options.paths, manifest);
+      await writeCanonicalJson(stageManifestPath(options.paths, manifest.dataset_id, manifest.revision), manifest);
     } catch (error) {
       addError(options.run, manifest.dataset_id, file.path, error);
       await saveRun(options.paths, options.run);
@@ -170,6 +181,17 @@ async function acquireDataset(options: TaskOptions & { run: TaskRun }, source: S
     }
   }
   return { files: manifest.files.length, bytes, skipped };
+}
+
+async function activateDataset(paths: DataWatchPaths, manifest: DatasetManifest): Promise<void> {
+  const staged = stageRawRoot(paths, manifest);
+  if (!(await pathExists(staged))) throw new Error('STAGING_SNAPSHOT_MISSING');
+  const current = originalRoot(paths, manifest.dataset_id);
+  const previous = join(stageRoot(paths, manifest.dataset_id, manifest.revision), 'previous-original');
+  await rm(previous, { recursive: true, force: true });
+  await mkdir(join(current, '..'), { recursive: true });
+  if (await pathExists(current)) await rename(current, previous);
+  await rename(staged, current);
 }
 
 function lockPath(paths: DataWatchPaths): string {
@@ -181,6 +203,28 @@ async function verifyLegacyManifest(paths: DataWatchPaths, manifest: DatasetMani
     if (!file.sha256) throw new Error('MIGRATION_MANIFEST_INCOMPLETE');
     const source = resolveOwnedPath(join(paths.originalRoot, manifest.dataset_id, manifest.revision), file.path);
     if (!(await pathExists(source)) || await sha256File(source) !== file.sha256) throw new Error('MIGRATION_HASH_MISMATCH');
+  }
+}
+async function cleanLegacyGeneratedSnapshot(paths: DataWatchPaths, datasetId: DatasetId, revision: string): Promise<void> {
+  const root = join(paths.vaultRoot, 'Evidence', 'datasets', datasetId, revision);
+  let assets: Array<{ path?: string }> = [];
+  try {
+    const registry = JSON.parse(await readFile(join(paths.vaultRoot, '.datawatch-assets.json'), 'utf8')) as { generated_by?: string; files?: Array<{ path?: string }> };
+    if (registry.generated_by === 'datawatch-data') assets = registry.files ?? [];
+  } catch { /* no generated registry means no raw files are safe to remove */ }
+  const prefix = 'Evidence/datasets/' + datasetId + '/' + revision + '/raw/';
+  for (const asset of assets) if (asset.path?.startsWith(prefix)) await rm(resolveOwnedPath(paths.vaultRoot, asset.path), { force: true });
+  const card = join(root, 'dataset.md');
+  let generatedCard = false;
+  try { generatedCard = (await readFile(card, 'utf8')).startsWith('---\ngenerated_by: datawatch-data\n'); } catch { /* absent */ }
+  if (generatedCard) {
+    await rm(card, { force: true });
+    await rm(join(root, 'manifest.json'), { force: true });
+  }
+  for (const directory of [join(root, 'raw'), root]) {
+    await rmdir(directory).catch(error => {
+      if (!(error && typeof error === 'object' && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTEMPTY'))) throw error;
+    });
   }
 }
 
@@ -217,7 +261,7 @@ export async function migrateLegacyStorage(paths: DataWatchPaths, wanted?: Datas
     await rm(join(paths.dataRoot, 'datasets', datasetId), { recursive: true, force: true });
     for (const revision of revisions) {
       await rm(join(paths.originalRoot, datasetId, revision), { recursive: true, force: true });
-      await rm(join(paths.vaultRoot, 'Evidence', 'datasets', datasetId, revision), { recursive: true, force: true });
+      await cleanLegacyGeneratedSnapshot(paths, datasetId, revision);
     }
     datasets += 1;
   }
@@ -225,9 +269,6 @@ export async function migrateLegacyStorage(paths: DataWatchPaths, wanted?: Datas
   try {
     if ((await readFile(legacyOverview, 'utf8')).startsWith('---\ngenerated_by: datawatch-data\n')) {
       await rm(legacyOverview);
-      await rm(join(paths.vaultRoot, 'Evidence', 'indexes'), { recursive: true, force: true });
-      await rm(join(paths.vaultRoot, 'Evidence', 'datasets'), { recursive: true, force: true });
-      await rm(join(paths.vaultRoot, 'Evidence'), { recursive: true, force: true });
     }
   } catch (error) {
     if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
@@ -316,7 +357,7 @@ export async function runDataWatchTask(options: TaskOptions): Promise<TaskResult
       if (!revision) continue;
       const source = sourceMap.get(datasetId)!;
       try {
-        const manifest = manifests.get(datasetId) ?? await loadManifest(options.paths, datasetId, revision);
+        const manifest = manifests.get(datasetId) ?? await readJson<DatasetManifest>(stageManifestPath(options.paths, datasetId, revision));
         manifests.set(datasetId, manifest);
         const result = await acquireDataset({ ...options, run }, source, manifest);
         results.push({ dataset_id: datasetId, revision, ...result });
@@ -327,18 +368,37 @@ export async function runDataWatchTask(options: TaskOptions): Promise<TaskResult
     }
     run.stages.acquire = run.errors?.length ? 'failed' : 'completed';
     await saveRun(options.paths, run);
+    const complete = [...manifests.values()].filter(manifest => manifest.files.every(file => file.sha256));
+    if (!run.errors?.length && complete.length === datasetIds.length) {
+      try {
+        if (options.workbench.publish_snapshot) await validateCatalogTargets(options.paths, complete);
+        for (const manifest of complete) await activateDataset(options.paths, manifest);
+      } catch (error) {
+        addError(run, undefined, undefined, error);
+      }
+    }
     run.stages.catalog = 'running';
     await saveRun(options.paths, run);
-    if (options.workbench.publish_snapshot) {
+    if (options.workbench.publish_snapshot && !run.errors?.length) {
       try {
-        await buildCatalog(options.paths, [...manifests.values()].filter(manifest => manifest.files.every(file => file.sha256)));
+        await buildCatalog(options.paths, complete);
+        for (const manifest of complete) {
+          await saveManifest(options.paths, manifest);
+          await rm(stageRoot(options.paths, manifest.dataset_id, manifest.revision), { recursive: true, force: true });
+        }
         run.stages.catalog = 'completed';
       } catch (error) {
         addError(run, undefined, undefined, error);
         run.stages.catalog = 'failed';
       }
-    } else {
+    } else if (!run.errors?.length) {
+      for (const manifest of complete) {
+        await saveManifest(options.paths, manifest);
+        await rm(stageRoot(options.paths, manifest.dataset_id, manifest.revision), { recursive: true, force: true });
+      }
       run.stages.catalog = 'completed';
+    } else {
+      run.stages.catalog = 'failed';
     }
     await saveRun(options.paths, run);
     run.stages.verify = 'running';
