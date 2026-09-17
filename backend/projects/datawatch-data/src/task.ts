@@ -42,6 +42,7 @@ function stageRawRoot(paths: DataWatchPaths, manifest: DatasetManifest): string 
 function stageManifestPath(paths: DataWatchPaths, datasetId: DatasetId, revision: string): string { return join(stageRoot(paths, datasetId, revision), 'manifest.json'); }
 function activationJournalPath(paths: DataWatchPaths, datasetId: DatasetId): string { return join(paths.dataRoot, 'work', 'activation', datasetId + '.json'); }
 function batchRoot(paths: DataWatchPaths, runId: string): string { return join(paths.dataRoot, 'work', 'transactions', runId); }
+function batchJournalPath(paths: DataWatchPaths, runId: string): string { return join(paths.dataRoot, 'work', 'batch-activation', runId + '.json'); }
 function initialStages(): Record<TaskStage, TaskStageStatus> {
   return { probe: 'pending', acquire: 'pending', catalog: 'pending', verify: 'pending' };
 }
@@ -272,6 +273,88 @@ async function copyTree(source: string, destination: string): Promise<void> {
   }
 }
 
+interface BatchEntry { dataset_id: DatasetId; revision: string; had_original: boolean; had_vault: boolean; had_manifest: boolean; }
+interface BatchJournal { run_id: string; batch: string; publish: boolean; phase: 'prepared' | 'swapping' | 'shared-swapping' | 'committed'; previous_ready: boolean; entries: BatchEntry[]; original_started: DatasetId[]; original_moved: DatasetId[]; vault_started: DatasetId[]; vault_moved: DatasetId[]; had_versions: boolean; had_assets: boolean; had_overview: boolean; }
+async function saveBatchJournal(paths: DataWatchPaths, journal: BatchJournal): Promise<void> { await writeCanonicalJson(batchJournalPath(paths, journal.run_id), journal); }
+async function recoverBatchActivations(paths: DataWatchPaths): Promise<void> {
+  const directory = join(paths.dataRoot, 'work', 'batch-activation');
+  for (const name of await readdir(directory).catch(() => [] as string[])) {
+    let journal: BatchJournal;
+    try { journal = await readJson<BatchJournal>(join(directory, name)); } catch { continue; }
+    if (journal.phase !== 'committed' && journal.previous_ready) {
+      const previous = join(journal.batch, 'previous');
+      for (const entry of journal.entries) {
+        const id = entry.dataset_id;
+        const restore = async (current: string, saved: string, had: boolean, started: DatasetId[]): Promise<void> => {
+          if (await pathExists(saved)) { if (await pathExists(current)) await rm(current, { recursive: true, force: true }); await mkdir(join(current, '..'), { recursive: true }); await rename(saved, current); }
+          else if (!had && started.includes(id)) await rm(current, { recursive: true, force: true });
+        };
+        await restore(originalRoot(paths, id), join(previous, 'original', id), entry.had_original, journal.original_started);
+        if (journal.publish) await restore(join(paths.vaultRoot, id), join(previous, 'vault', id), entry.had_vault, journal.vault_started);
+        const manifest = join(datasetRoot(paths, id), 'manifest.json');
+        const savedManifest = join(previous, 'state', id, 'manifest.json');
+        if (await pathExists(savedManifest)) { await mkdir(join(manifest, '..'), { recursive: true }); await copyFile(savedManifest, manifest); }
+        else if (!entry.had_manifest && journal.phase === 'shared-swapping') await rm(manifest, { force: true });
+      }
+      const restoreShared = async (current: string, saved: string, had: boolean): Promise<void> => {
+        if (await pathExists(saved)) { await mkdir(join(current, '..'), { recursive: true }); await copyFile(saved, current); }
+        else if (!had && journal.phase === 'shared-swapping') await rm(current, { force: true });
+      };
+      await restoreShared(join(paths.dataRoot, 'versions.json'), join(previous, 'versions.json'), journal.had_versions);
+      if (journal.publish) {
+        await restoreShared(join(paths.vaultRoot, '.datawatch-assets.json'), join(previous, '.datawatch-assets.json'), journal.had_assets);
+        await restoreShared(join(paths.vaultRoot, 'indexes', 'overview.md'), join(previous, 'indexes', 'overview.md'), journal.had_overview);
+      }
+    }
+    await rm(batchJournalPath(paths, journal.run_id), { force: true });
+  }
+}
+async function activateBatch(options: TaskOptions, runId: string, manifests: DatasetManifest[], batch: string): Promise<void> {
+  const paths = options.paths;
+  const previous = join(batch, 'previous');
+  const journal: BatchJournal = {
+    run_id: runId, batch, publish: options.workbench.publish_snapshot, phase: 'prepared', previous_ready: false,
+    entries: await Promise.all(manifests.map(async manifest => ({ dataset_id: manifest.dataset_id, revision: manifest.revision, had_original: await pathExists(originalRoot(paths, manifest.dataset_id)), had_vault: await pathExists(join(paths.vaultRoot, manifest.dataset_id)), had_manifest: await pathExists(join(datasetRoot(paths, manifest.dataset_id), 'manifest.json')) }))),
+    original_started: [], original_moved: [], vault_started: [], vault_moved: [], had_versions: await pathExists(join(paths.dataRoot, 'versions.json')), had_assets: await pathExists(join(paths.vaultRoot, '.datawatch-assets.json')), had_overview: await pathExists(join(paths.vaultRoot, 'indexes', 'overview.md')),
+  };
+  await saveBatchJournal(paths, journal);
+  for (const entry of journal.entries) {
+    if (entry.had_manifest) { const source = join(datasetRoot(paths, entry.dataset_id), 'manifest.json'); const target = join(previous, 'state', entry.dataset_id, 'manifest.json'); await mkdir(join(target, '..'), { recursive: true }); await copyFile(source, target); }
+    if (entry.had_original) await copyTree(originalRoot(paths, entry.dataset_id), join(previous, 'verify-original', entry.dataset_id));
+    if (journal.publish && entry.had_vault) await copyTree(join(paths.vaultRoot, entry.dataset_id), join(previous, 'verify-vault', entry.dataset_id));
+  }
+  const capture = async (source: string, target: string, exists: boolean): Promise<void> => { if (exists) { await mkdir(join(target, '..'), { recursive: true }); await copyFile(source, target); } };
+  await capture(join(paths.dataRoot, 'versions.json'), join(previous, 'versions.json'), journal.had_versions);
+  if (journal.publish) { await capture(join(paths.vaultRoot, '.datawatch-assets.json'), join(previous, '.datawatch-assets.json'), journal.had_assets); await capture(join(paths.vaultRoot, 'indexes', 'overview.md'), join(previous, 'indexes', 'overview.md'), journal.had_overview); }
+  journal.previous_ready = true; await saveBatchJournal(paths, journal); await options.activationHook?.('prepared');
+  journal.phase = 'swapping'; await saveBatchJournal(paths, journal);
+  for (const entry of journal.entries) {
+    const id = entry.dataset_id; const current = originalRoot(paths, id); const staged = join(batch, 'original', id); const saved = join(previous, 'original', id);
+    journal.original_started.push(id); await saveBatchJournal(paths, journal);
+    if (entry.had_original) { await mkdir(join(saved, '..'), { recursive: true }); await rename(current, saved); }
+    await mkdir(join(current, '..'), { recursive: true }); await rename(staged, current);
+    journal.original_moved.push(id); await saveBatchJournal(paths, journal); await options.activationHook?.('original-active');
+  }
+  if (journal.publish) for (const entry of journal.entries) {
+    const id = entry.dataset_id; const current = join(paths.vaultRoot, id); const staged = join(batch, 'vault', id); const saved = join(previous, 'vault', id);
+    journal.vault_started.push(id); await saveBatchJournal(paths, journal);
+    if (entry.had_vault) { await mkdir(join(saved, '..'), { recursive: true }); await rename(current, saved); }
+    await mkdir(join(current, '..'), { recursive: true }); await rename(staged, current);
+    journal.vault_moved.push(id); await saveBatchJournal(paths, journal); await options.activationHook?.('vault-active');
+  }
+  journal.phase = 'shared-swapping'; await saveBatchJournal(paths, journal);
+  const stagedState = join(batch, 'state-data');
+  for (const entry of journal.entries) await writeAtomic(join(datasetRoot(paths, entry.dataset_id), 'manifest.json'), await readFile(join(stagedState, entry.dataset_id, 'manifest.json')));
+  await writeAtomic(join(paths.dataRoot, 'versions.json'), await readFile(join(stagedState, 'versions.json')));
+  if (journal.publish) {
+    await writeAtomic(join(paths.vaultRoot, '.datawatch-assets.json'), await readFile(join(batch, 'vault', '.datawatch-assets.json')));
+    await writeAtomic(join(paths.vaultRoot, 'indexes', 'overview.md'), await readFile(join(batch, 'vault', 'indexes', 'overview.md')));
+  }
+  await options.activationHook?.('state-swapped');
+  journal.phase = 'committed'; await saveBatchJournal(paths, journal);
+  await rm(batchJournalPath(paths, runId), { force: true });
+}
+
 function lockPath(paths: DataWatchPaths): string {
   return resolveOwnedPath(paths.dataRoot, 'work/run.lock');
 }
@@ -378,6 +461,7 @@ export async function runDataWatchTask(options: TaskOptions): Promise<TaskResult
     sources: datasetIds.map(id => sourceMap.get(id)),
   });
   return withRunLock(lockPath(options.paths), async () => {
+    await recoverBatchActivations(options.paths);
     await recoverActivation(options.paths);
     await migrateLegacyStorage(options.paths, datasetIds);
     await mkdir(runRoot(options.paths), { recursive: true });
@@ -468,12 +552,11 @@ export async function runDataWatchTask(options: TaskOptions): Promise<TaskResult
           if (await pathExists(activeAssets)) { await mkdir(join(batch, 'vault'), { recursive: true }); await copyFile(activeAssets, join(batch, 'vault', '.datawatch-assets.json')); }
           await buildCatalog({ ...options.paths, originalRoot: join(batch, 'original'), vaultRoot: join(batch, 'vault') }, complete);
         }
-        for (const manifest of complete) {
-          await activateDataset(options, manifest, batch, options.workbench.publish_snapshot);
-        }
+        await activateBatch(options, run.run_id, complete, batch);
         await rm(batch, { recursive: true, force: true });
         for (const manifest of complete) await rm(stageRoot(options.paths, manifest.dataset_id, manifest.revision), { recursive: true, force: true });
       } catch (error) {
+        await recoverBatchActivations(options.paths);
         addError(run, undefined, undefined, error);
       }
     }

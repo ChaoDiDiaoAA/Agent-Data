@@ -179,7 +179,7 @@ test('recovers a journaled activation failure to one consistent revision on retr
     } }),
   });
   expect((await run('a'.repeat(40), 'old')).status).toBe('completed');
-  expect((await run('c'.repeat(40), 'new', async phase => { if (phase === 'original-moved') throw new Error('inject'); })).status).toBe('failed');
+  expect((await run('c'.repeat(40), 'new', async phase => { if (phase === 'original-active') throw new Error('inject'); })).status).toBe('failed');
   const recovered = await run('c'.repeat(40), 'new');
   expect(recovered.status).toBe('completed');
   expect(await readFile(join(dataPaths.originalRoot, 'fda-recalls', 'README.md'), 'utf8')).toBe('new');
@@ -258,4 +258,35 @@ test('builds one multi-dataset overview and preserves dataset user notes', async
   expect(overview).toContain('fda-recalls');
   expect(overview).toContain('hospital-resources');
   expect(await readFile(join(dataPaths.vaultRoot, 'fda-recalls', 'my-note.md'), 'utf8')).toBe('keep');
+});
+
+test('rolls back a first-run failure after original activation without leaving a snapshot', async () => {
+  const dataPaths = await paths();
+  const run = (hook?: Parameters<typeof runDataWatchTask>[0]['activationHook']) => runDataWatchTask({
+    paths: dataPaths, sources: [source], datasetIds: ['fda-recalls'], workbench, activationHook: hook,
+    httpFactory: () => ({ async get(url: string): Promise<HttpResult> { const body = url.includes('/api/datasets/') ? (url.includes('/tree/') ? JSON.stringify([{ type: 'file', path: 'README.md', size: 3 }]) : JSON.stringify({ sha: 'c'.repeat(40) })) : 'new'; return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(body) }; } }),
+  });
+  expect((await run(async phase => { if (phase === 'original-active') throw new Error('first-run-stop'); })).status).toBe('failed');
+  await expect(readFile(join(dataPaths.originalRoot, 'fda-recalls', 'README.md'), 'utf8')).rejects.toThrow();
+  await expect(readFile(join(dataPaths.dataRoot, 'fda-recalls', 'manifest.json'), 'utf8')).rejects.toThrow();
+  expect((await run()).status).toBe('completed');
+  expect(await readFile(join(dataPaths.originalRoot, 'fda-recalls', 'README.md'), 'utf8')).toBe('new');
+});
+
+test('rolls back every dataset when batch activation fails after its first swap', async () => {
+  const dataPaths = await paths();
+  const hospital = { ...source, dataset_id: 'hospital-resources' as const, source_id: 'hospital-resources', repository: 'example/hospital' };
+  const run = async (revision: string, body: string, hook?: Parameters<typeof runDataWatchTask>[0]['activationHook']) => runDataWatchTask({
+    paths: dataPaths, sources: [source, hospital], datasetIds: ['fda-recalls', 'hospital-resources'], workbench: { ...workbench, enabled_dataset_ids: ['fda-recalls', 'hospital-resources'] }, activationHook: hook,
+    httpFactory: () => ({ async get(url: string): Promise<HttpResult> { const response = url.includes('/api/datasets/') ? (url.includes('/tree/') ? JSON.stringify([{ type: 'file', path: 'README.md', size: 3 }]) : JSON.stringify({ sha: revision })) : body; return { url, status: 200, headers: new Headers(), bytes: new TextEncoder().encode(response) }; } }),
+  });
+  expect((await run('a'.repeat(40), 'old')).status).toBe('completed');
+  let swaps = 0;
+  expect((await run('c'.repeat(40), 'new', async phase => { if (phase === 'original-active' && ++swaps === 2) throw new Error('dataset-two-stop'); })).status).toBe('failed');
+  for (const id of ['fda-recalls', 'hospital-resources']) {
+    expect(await readFile(join(dataPaths.originalRoot, id, 'README.md'), 'utf8')).toBe('old');
+    expect(await readFile(join(dataPaths.vaultRoot, id, 'raw', 'README.md'), 'utf8')).toBe('old');
+    expect(await readFile(join(dataPaths.dataRoot, id, 'manifest.json'), 'utf8')).toContain('a'.repeat(40));
+  }
+  expect((await run('c'.repeat(40), 'new')).status).toBe('completed');
 });
