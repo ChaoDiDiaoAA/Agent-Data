@@ -1,20 +1,20 @@
 library_kind: paper
 library_id: fsd
 display_name: FSD 论文知识库
-start_date: 2026-01-01
+start_date: 2025-06-01
 overlap_hours: 48
 download_after_hard_filter: true
 current_task:
-  max_papers: 51
+  max_papers: 277
   track_limits:
-    AI-FSD: 5
-    LLM-Wiki: 6
-    AI-TDD: 5
-    AI-DDD: 5
-    AI-Program-Analysis-AST: 5
-    Code-Translation: 15
-    Verification: 5
-    Evaluation: 5
+    AI-FSD: 30
+    LLM-Wiki: 30
+    AI-TDD: 57
+    AI-DDD: 40
+    AI-Program-Analysis-AST: 30
+    Code-Translation: 30
+    Verification: 30
+    Evaluation: 30
 weekly_schedule:
   enabled: true
   task_name: paper-knowledge-engine-fsd-weekly
