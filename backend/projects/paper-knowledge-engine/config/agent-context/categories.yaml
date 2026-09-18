@@ -1,0 +1,20 @@
+tracks:
+  ctx-foundations: {pdf: 01-Context-Foundations}
+  ctx-assembly-budget: {pdf: 02-Context-Assembly-Budget}
+  ctx-retrieval: {pdf: 03-Context-Retrieval}
+  ctx-compression: {pdf: 04-Context-Compression}
+  ctx-long-horizon: {pdf: 05-Context-Long-Horizon}
+  ctx-memory: {pdf: 06-Context-Memory}
+  ctx-tool-context: {pdf: 07-Tool-Context}
+  ctx-isolation-security: {pdf: 08-Context-Isolation-Security}
+  ctx-evaluation: {pdf: 09-Context-Evaluation}
+  ctx-rsi-reflection: {pdf: 10-RSI-Reflection}
+  ctx-rsi-experience: {pdf: 11-RSI-Experience}
+  ctx-rsi-evolution: {pdf: 12-RSI-Evolution}
+  ctx-pt-long-context: {pdf: 13-PT-Long-Context}
+  ctx-pt-retrieval-grounding: {pdf: 14-PT-Retrieval-Grounding}
+  ctx-pt-memory-policy: {pdf: 15-PT-Memory-Policy}
+  ctx-pt-context-distillation: {pdf: 16-PT-Context-Distillation}
+  ctx-pt-context-data: {pdf: 17-PT-Context-Data}
+  ctx-pt-context-evaluation: {pdf: 18-PT-Context-Evaluation}
+fallback_pdf: 99-Unclassified

@@ -1,0 +1,101 @@
+start_date: 2026-01-01
+excluded_domains: []
+ai_technique_terms:
+  - language model
+  - large language model
+  - llm
+  - agent
+  - autonomous agent
+  - tool-using agent
+  - self-improving agent
+  - self-evolving agent
+program_structure_terms:
+  - tool use
+  - tool calling
+  - function calling
+  - tool protocol
+  - tool library
+  - agent runtime
+  - agent loop
+  - self-improvement
+  - self-modification
+  - recursive self-improvement
+engineering_task_terms:
+  - tool use
+  - tool calling
+  - function calling
+  - tool selection
+  - tool retrieval
+  - tool routing
+  - tool discovery
+  - tool planning
+  - tool composition
+  - tool execution
+  - tool protocol
+  - mcp
+  - tool generation
+  - tool making
+  - tool maker
+  - tool library
+  - skill library
+  - tool reuse
+  - tool evaluation
+  - tool benchmark
+  - tool security
+  - tool misuse
+  - tool injection
+  - tool-use trajectory
+  - unseen tools
+  - tool repair
+  - self-repairing
+  - self-improvement
+  - self-evolving
+  - self-modifying
+  - agent evolution
+  - open-ended evolution
+  - recursive self-improvement
+  - self-referential agent
+  - meta-improvement
+term_variants:
+  language model: [language models]
+  large language model: [large language models]
+  llm: [llms]
+  agent: [agents]
+  tool use: [tool usage, tool-use]
+  tool calling: [tool-calling]
+  function calling: [function-calling]
+  tool selection: [tool selections]
+  tool generation: [tool generations]
+  tool library: [tool libraries]
+  skill library: [skill libraries]
+  tool benchmark: [tool benchmarks]
+  training data: [training dataset, training datasets]
+  trajectory data: [trajectory dataset, trajectory datasets]
+  supervised fine-tuning: [supervised finetuning, supervised fine tuning]
+  instruction tuning: [instruction-tuning]
+  preference optimization: [preference optimisation]
+  reinforcement learning: [reinforcement-learning]
+  continual learning: [continual-learning]
+  self-improvement: [self improvement]
+  self-evolving: [self evolving]
+  self-modifying: [self modifying]
+  recursive self-improvement: [recursive self improvement]
+track_priority:
+  - tool-foundations
+  - tool-selection
+  - tool-composition
+  - tool-protocol
+  - tool-generation
+  - tool-library
+  - tool-evaluation
+  - tool-security
+  - tool-pt-data
+  - tool-pt-sft
+  - tool-pt-reward
+  - tool-pt-preference
+  - tool-pt-rl
+  - tool-pt-transfer
+  - tool-pt-evaluation
+  - rsi-tool-repair
+  - rsi-agent-evolution
+  - rsi-meta-improvement

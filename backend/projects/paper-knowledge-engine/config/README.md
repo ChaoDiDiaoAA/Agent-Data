@@ -21,8 +21,24 @@
 | 后训练论文检索配置 | `llm-post-training/query-matrix.yaml` | 18 个后训练 Track、查询、arXiv 分类和日期模式 |
 | 后训练筛选配置 | `llm-post-training/paper-policy.yaml` | 模型对象词、后训练信号、排除条件和分类优先级 |
 | 后训练分类配置 | `llm-post-training/categories.yaml` | 18 个 Track 的 PDF 分类目录映射 |
+| Agent Tool 方向配置 | `agent-tool/library.yaml` | Agent Tool、LLM 工具后训练和 RSI 身份、日期、配额与调度 |
+| Agent Tool 检索配置 | `agent-tool/query-matrix.yaml` | 18 个工具/后训练/RSI Track、查询、arXiv 分类和日期模式 |
+| Agent Tool 筛选配置 | `agent-tool/paper-policy.yaml` | 工具能力、后训练和 RSI 纳入规则与分类优先级 |
+| Agent Tool 分类配置 | `agent-tool/categories.yaml` | 18 个 Track 的 PDF 分类目录映射 |
+| Agent Context 方向配置 | `agent-context/library.yaml` | Agent Context、RSI Context 和 LLM 后训练 Context 身份、日期、配额与调度 |
+| Agent Context 检索配置 | `agent-context/query-matrix.yaml` | 18 个上下文、RSI 和后训练 Context Track、查询、arXiv 分类和日期模式 |
+| Agent Context 筛选配置 | `agent-context/paper-policy.yaml` | 上下文主题、RSI 与后训练 Context 纳入规则和分类优先级 |
+| Agent Context 分类配置 | `agent-context/categories.yaml` | 18 个 Track 的 PDF 分类目录映射 |
+| Agent Memory 方向配置 | `agent-memory/library.yaml` | Agent Memory 身份、名称、日期、配额与调度 |
+| Agent Memory 检索配置 | `agent-memory/query-matrix.yaml` | 20 个记忆、RSI 和后训练记忆 Track、查询、arXiv 分类和日期模式 |
+| Agent Memory 筛选配置 | `agent-memory/paper-policy.yaml` | 记忆机制、RSI 与后训练记忆纳入规则和分类优先级 |
+| Agent Memory 分类配置 | `agent-memory/categories.yaml` | 20 个 Track 的 PDF 分类目录映射 |
+| Skill & Prompt 方向配置 | `skill-prompt-engineering/library.yaml` | Prompt/Skill 身份、日期、配额与手动周任务描述 |
+| Skill & Prompt 检索配置 | `skill-prompt-engineering/query-matrix.yaml` | 10 个 Prompt、9 个 Skill Track、查询、arXiv 分类和日期模式 |
+| Skill & Prompt 筛选配置 | `skill-prompt-engineering/paper-policy.yaml` | Prompt、Skill 与 RSI 纳入规则和分类优先级 |
+| Skill & Prompt 分类配置 | `skill-prompt-engineering/categories.yaml` | 19 个 Track 的 PDF 分类目录映射 |
 
-`bun src/cli.ts` 先显示方向选择，不默认选择 `fsd`；`bun src/cli.ts --library fsd` 显式选库。当前四个 paper 方向的任务菜单 `10` 准备或修复 OpenCLI，`11` 切换方向；Research 菜单仍以 `10` 切换方向。直接执行方向命令必须指定 `--library`。方向列表读取 `config/<libraryId>/library.yaml`，`display_name` 用于选库和任务菜单，状态由 `library_id` 隔离。新增方向提供与 `library_kind` 对应的四文件契约。旧版配置已移至 `tests/fixtures/legacy-config/`，只供兼容测试，不参与活动配置的覆盖或合并。
+`bun src/cli.ts` 先显示方向选择，不默认选择 `fsd`；`bun src/cli.ts --library fsd` 显式选库。paper 方向的任务菜单 `10` 准备或修复 OpenCLI，`11` 切换方向；Research 菜单仍以 `10` 切换方向。直接执行方向命令必须指定 `--library`。方向列表读取 `config/<libraryId>/library.yaml`，`display_name` 用于选库和任务菜单，状态由 `library_id` 隔离。新增方向提供与 `library_kind` 对应的四文件契约。旧版配置已移至 `tests/fixtures/legacy-config/`，只供兼容测试，不参与活动配置的覆盖或合并。
 
 FSD 当前启用 8 个检索方向，各包含 submitted、updated 两种日期模式，共 16 个分片；PDF 映射为 12 类加未分类兜底，分类映射不等于独立检索任务。
 
@@ -30,7 +46,7 @@ FSD 当前启用 8 个检索方向，各包含 submitted、updated 两种日期�
 
 `engine.yaml` 的 `engine_name` 固定为 `paper-knowledge-engine`。
 
-- `arxiv`：分页、请求间隔、超时、重试和容量冷却。生产请求间隔为 10 秒；四个 paper 方向库的正式发现任务共享机器级 arXiv 请求锁（位于 `data_libraries_root/.arxiv/`），串行发送 API 请求。当前 `capacity_cooldown_seconds: 0` 关闭本地额外冷却，旧检查点和共享本地冷却不再阻止恢复；仍保留检查点及服务端明确给出的数值 `Retry-After` 等待。429 立即结束当前任务，不自动循环，可手动重新执行同一任务。设为正整数可恢复按基础值 1、2、4 倍递增的本地冷却。独立网络探针和外部程序不在此门控范围内；取消冷却不保证上游可用。
+- `arxiv`：分页、请求间隔、超时、重试和容量冷却。生产请求间隔为 10 秒；所有 paper 方向库的正式发现任务共享机器级 arXiv 请求锁（位于 `data_libraries_root/.arxiv/`），串行发送 API 请求。当前 `capacity_cooldown_seconds: 0` 关闭本地额外冷却，旧检查点和共享本地冷却不再阻止恢复；仍保留检查点及服务端明确给出的数值 `Retry-After` 等待。429 立即结束当前任务，不自动循环，可手动重新执行同一任务。设为正整数可恢复按基础值 1、2、4 倍递增的本地冷却。独立网络探针和外部程序不在此门控范围内；取消冷却不保证上游可用。
 - `runtime`：进程清理、诊断超时和输出大小上限。
 - `mineru`：后端、请求并发、处理窗口、推理批量、API 和本地导入边界。
 - `evidence`：固定 v3 发布契约。
@@ -200,6 +216,88 @@ D:/obsidian/data/paper-knowledge-engine/llm-post-training
 
 ```powershell
 bun test --timeout 30000 tests/llm-post-training-paper-library.test.ts tests/llm-post-training-integration.test.ts tests/multi-agent-paper-library.test.ts tests/research-library-config.test.ts tests/cli-menu.test.ts tests/configured-task-limits.test.ts tests/research-fsd-isolation.test.ts
+```
+
+### Agent Tool & RSI 方向库
+
+`agent-tool` 是 `library_kind: paper`，显示名为 `Agent Tool & RSI（含 LLM 工具后训练）`。它复用四个 paper 配置文件，从 `2026-01-01` 起通过 OpenCLI/arXiv 自动发现。18 个 Track 分为 8 个 Agent Tool、7 个 LLM 工具后训练和 3 个 RSI 方向，每个 Track 同时配置 `submitted`、`updated`，共 36 个分片。
+
+Current 总上限为 270，每个 Track 各 15；Weekly 增量上限为 12，`weekly_schedule.enabled: false` 表示首期手动运行。后训练 Track 要求工具能力与训练证据同时出现，RSI Track 要求明确的改进对象与迭代机制，不把裸 `RSI`、普通 SFT/DPO/RL 或普通工具调用作为充分证据。本库的 SQLite、Archive、runs、operations、水位、锁、PDF、Vault 和发布回执全部由机器根加 `agent-tool` 派生：
+
+```text
+D:/agent-data/data/paper-libraries/agent-tool
+D:/agent-data/backups/paper-libraries/agent-tool
+D:/paper/paper-knowledge-engine/agent-tool
+D:/obsidian/data/paper-knowledge-engine/agent-tool
+```
+
+操作顺序和边界见 [Agent Tool & RSI 操作说明](../docs/agent-tool/operations.md)，定向回归命令为：
+
+```powershell
+bun test --timeout 30000 tests/agent-tool-paper-library.test.ts tests/agent-tool-integration.test.ts
+```
+
+### Agent Memory 方向库
+
+`agent-memory` 是 `library_kind: paper`，显示名为 `Agent Memory（智能体记忆知识库）`。它从 `2026-01-01` 起通过 OpenCLI/arXiv 自动发现，固定覆盖 20 个 Track，并为每个 Track 配置 `submitted`、`updated` 两种日期模式，共 40 个分片。16 个 Track 研究运行时记忆与 RSI 记忆，4 个 Track 研究 LLM 后训练记忆：记忆 SFT、记忆 RL、记忆蒸馏和参数化记忆。
+
+后训练记忆 Track 不要求论文出现 Agent，但标题或摘要必须同时提供语言模型对象证据和具体记忆/知识保持/遗忘或记忆操作证据；普通 SFT、RL、蒸馏、GPU 显存优化和普通 RAG 不会仅凭宽泛词进入本库。`mem-rsi` 需要同时出现累积经验、记忆或技能与改进循环证据，普通一次性反思不自动归为 RSI。
+
+Current 总上限为 200，各 Track 配置 10；Weekly 上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。四个配置文件共同约束身份、查询、筛选和 PDF 分类，运行根、PDF 根与 Vault 根按 `agent-memory` 派生，历史论文仍通过显式本地 PDF 入口补充。
+
+```powershell
+bun src/cli.ts --library agent-memory harvest-plan --mode current --format json
+bun src/cli.ts --library agent-memory schedule-config --format json
+bun src/cli.ts --library agent-memory run-task --mode current --limit 5 --format json
+bun src/cli.ts --library agent-memory run-task --mode weekly --format json
+bun src/cli.ts --library agent-memory reconcile
+```
+
+方向回归测试：
+
+```powershell
+bun test --timeout 30000 tests/agent-memory-paper-library.test.ts tests/llm-post-training-integration.test.ts
+```
+
+### Agent & LLM Context 方向库
+
+`agent-context` 是 `library_kind: paper`，显示名为 `Agent & LLM Context（上下文知识库）`。它从 `2026-01-01` 起通过 OpenCLI/arXiv 自动发现，固定覆盖 18 个 Track，并为每个 Track 配置 `submitted`、`updated` 两种日期模式，共 36 个分片。主题分为 Agent Context 工程、RSI Context，以及 LLM 后训练 Context 六类：长上下文、检索 grounding、记忆策略、上下文蒸馏、上下文数据和上下文评测。
+
+后训练 Context Track 不要求论文出现 Agent，但标题或摘要必须同时提供语言模型对象、上下文主题和后训练方法/数据/评估证据；普通 SFT、DPO、RL、纯 KV cache 优化和金融 RSI 不会仅凭宽泛词进入本库。RSI Track 要求上下文或记忆与反思、经验反馈或递归演化同时出现。
+
+Current 总上限为 180，各 Track 配置 10；Weekly 上限为 18，`weekly_schedule.enabled: true` 仅表示保留手动增量入口，本次不安装系统调度。四个配置文件共同约束身份、查询、筛选和 PDF 分类，运行根、PDF 根与 Vault 根按 `agent-context` 派生。
+
+```powershell
+bun src/cli.ts --library agent-context harvest-plan --mode current --format json
+bun src/cli.ts --library agent-context schedule-config --format json
+bun src/cli.ts --library agent-context run-task --mode current --limit 5 --format json
+bun src/cli.ts --library agent-context run-task --mode weekly --format json
+bun src/cli.ts --library agent-context reconcile
+```
+
+方向回归测试：
+
+```powershell
+bun test --timeout 30000 tests/agent-context-paper-library.test.ts
+```
+
+### Skill & Prompt Engineering 方向库
+
+`skill-prompt-engineering` 是 `library_kind: paper`，显示名为 `Skill & Prompt Engineering（技能与提示词工程知识库）`。它从 `2025-01-01` 起通过 OpenCLI/arXiv 自动发现，固定覆盖 19 个 Track，并为每个 Track 配置 `submitted`、`updated` 两种日期模式，共 38 个分片。前 10 个 `pe-*` Track 只归入 Prompt Engineering；后 9 个 `se-*` Track 只归入 Skill Engineering，包含技能获取、组合、迁移、自我演化（自进化）和评测，`se-rsi` 负责 Skill 的递归自我改进。
+
+Current 总上限为 200（前 18 个 Track 各 10，`se-rsi` 为 20）；Weekly 上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。Prompt 论文需要提示词或上下文策略证据；Skill 论文需要可复用能力的表示、获取、检索、组合、程序性记忆、迁移或演化证据；RSI 论文还需要明确被改进对象和递归迭代、评估或选择机制。金融技术分析中的 RSI、普通 SFT/DPO/RL 和一次性反思不会仅凭宽泛词进入本库。四个配置文件共同约束身份、查询、筛选和 PDF 分类，运行根、PDF 根与 Vault 根按 `skill-prompt-engineering` 派生：
+
+```text
+D:/agent-data/data/paper-libraries/skill-prompt-engineering
+D:/agent-data/backups/paper-libraries/skill-prompt-engineering
+D:/paper/paper-knowledge-engine/skill-prompt-engineering
+D:/obsidian/data/paper-knowledge-engine/skill-prompt-engineering
+```
+
+只读检查和实际操作顺序见 [Skill & Prompt Engineering 操作说明](../docs/skill-prompt-engineering/operations.md)。定向回归命令为：
+
+```powershell
+bun test --timeout 30000 tests/skill-prompt-engineering-paper-library.test.ts
 ```
 
 FSD 继续是 `library_kind: paper`，并始终使用四个论文文件：`library.yaml`、`query-matrix.yaml`、`paper-policy.yaml`、`categories.yaml`。论文执行、MinerU、本地 PDF 导入与现有 Evidence v3 只接受此 paper 配置分支。

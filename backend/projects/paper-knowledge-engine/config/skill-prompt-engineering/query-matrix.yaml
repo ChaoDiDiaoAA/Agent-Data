@@ -1,0 +1,115 @@
+tracks:
+  - id: pe-foundations
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"prompt engineering" OR abs:"prompt engineering" OR ti:prompting OR abs:prompting)
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: pe-instruction-design
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"instruction prompting" OR abs:"instruction prompting" OR ti:"system prompt" OR abs:"system prompt" OR ti:"instruction design" OR abs:"instruction design")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: pe-in-context-learning
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"in-context learning" OR abs:"in-context learning" OR ti:"few-shot prompting" OR abs:"few-shot prompting" OR ti:demonstration OR abs:demonstration)
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: pe-reasoning
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"chain-of-thought" OR abs:"chain-of-thought" OR ti:"reasoning prompt" OR abs:"reasoning prompt" OR ti:"least-to-most" OR abs:"least-to-most")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: pe-self-refinement
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"self-refinement" OR abs:"self-refinement" OR ti:"self-critique" OR abs:"self-critique" OR ti:"reflection prompting" OR abs:"reflection prompting")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: pe-optimization
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"automatic prompt optimization" OR abs:"automatic prompt optimization" OR ti:"prompt search" OR abs:"prompt search" OR ti:"prompt refinement" OR abs:"prompt refinement")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: pe-structured-output
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"structured output" OR abs:"structured output" OR ti:"schema prompting" OR abs:"schema prompting" OR ti:"format constraint" OR abs:"format constraint")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: pe-grounded-tool-prompting
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"retrieval-augmented prompting" OR abs:"retrieval-augmented prompting" OR ti:"tool-use prompting" OR abs:"tool-use prompting" OR ti:"grounded generation" OR abs:"grounded generation")
+    categories: [cs.AI, cs.CL, cs.LG, cs.IR]
+    date_modes: [submitted, updated]
+  - id: pe-safety
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"prompt injection" OR abs:"prompt injection" OR ti:"instruction hierarchy" OR abs:"instruction hierarchy" OR ti:"prompt security" OR abs:"prompt security")
+    categories: [cs.AI, cs.CL, cs.CR]
+    date_modes: [submitted, updated]
+  - id: pe-evaluation
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)
+      AND (ti:"prompt evaluation" OR abs:"prompt evaluation" OR ti:"prompt sensitivity" OR abs:"prompt sensitivity" OR ti:"prompt robustness" OR abs:"prompt robustness")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: se-representation
+    query: >-
+      (ti:"language agent" OR abs:"language agent" OR ti:agent OR abs:agent)
+      AND (ti:"agent skill" OR abs:"agent skill" OR ti:"skill representation" OR abs:"skill representation" OR ti:"reusable skill" OR abs:"reusable skill")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: se-acquisition
+    query: >-
+      (ti:"language agent" OR abs:"language agent" OR ti:agent OR abs:agent)
+      AND (ti:"skill acquisition" OR abs:"skill acquisition" OR ti:"skill generation" OR abs:"skill generation" OR ti:"skill extraction" OR abs:"skill extraction")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: se-retrieval
+    query: >-
+      (ti:"language agent" OR abs:"language agent" OR ti:agent OR abs:agent)
+      AND (ti:"skill retrieval" OR abs:"skill retrieval" OR ti:"skill library" OR abs:"skill library" OR ti:"skill selection" OR abs:"skill selection")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: se-composition
+    query: >-
+      (ti:"language agent" OR abs:"language agent" OR ti:agent OR abs:agent)
+      AND (ti:"skill composition" OR abs:"skill composition" OR ti:"skill decomposition" OR abs:"skill decomposition" OR ti:"skill workflow" OR abs:"skill workflow")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: se-procedural-memory
+    query: >-
+      (ti:"language agent" OR abs:"language agent" OR ti:agent OR abs:agent)
+      AND (ti:"procedural memory" OR abs:"procedural memory" OR ti:"experience memory" OR abs:"experience memory" OR ti:"memory skill" OR abs:"memory skill")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: se-transfer
+    query: >-
+      (ti:"language agent" OR abs:"language agent" OR ti:agent OR abs:agent)
+      AND (ti:"skill transfer" OR abs:"skill transfer" OR ti:"transferable skill" OR abs:"transferable skill" OR ti:"cross-task skill" OR abs:"cross-task skill")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: se-self-evolution
+    query: >-
+      (ti:"language agent" OR abs:"language agent" OR ti:agent OR abs:agent)
+      AND (ti:"skill evolution" OR abs:"skill evolution" OR ti:"self-evolving skill" OR abs:"self-evolving skill" OR ti:"skill refinement" OR abs:"skill refinement")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: se-evolution-evaluation
+    query: >-
+      (ti:"language agent" OR abs:"language agent" OR ti:agent OR abs:agent)
+      AND (ti:"skill evaluation" OR abs:"skill evaluation" OR ti:"skill benchmark" OR abs:"skill benchmark" OR ti:"skill validation" OR abs:"skill validation")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: se-rsi
+    query: >-
+      (ti:"language agent" OR abs:"language agent" OR ti:agent OR abs:agent)
+      AND (ti:"recursive self-improvement" OR abs:"recursive self-improvement" OR ti:"meta-skill evolution" OR abs:"meta-skill evolution" OR ti:"self-improving optimizer" OR abs:"self-improving optimizer")
+    categories: [cs.AI, cs.CL, cs.LG, cs.NE]
+    date_modes: [submitted, updated]

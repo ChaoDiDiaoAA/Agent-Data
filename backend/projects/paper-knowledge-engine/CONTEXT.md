@@ -113,6 +113,34 @@ _Avoid_: 单 Agent 的多个 Tool、简单并行请求、没有协作关系的�
 大模型后训练方向库研究预训练之后的学习方法及其数据、奖励、系统与评测；稳定标识 `llm-post-training`；与 Agent 运行时工程和 Multi-Agent 编排分开，允许交叉论文各库独立保存。
 _Avoid_: 通用预训练语料/架构研究、仅做推理加速的部署工作、把 Tool 或 Multi-Agent 编排本身当作后训练方法
 
+**Agent Tool & RSI 方向库**:
+稳定标识 `agent-tool` 的独立 paper 方向库，覆盖 Agent 工具使用、发现选择、组合规划、协议、生成、工具/技能库、工具安全与评测；同时覆盖 LLM 工具后训练的数据、SFT、奖励验证、偏好优化、交互式 RL、能力迁移和后训练评测，以及工具修复、Agent 演化和递归自我改进。后训练主题必须同时出现工具能力与训练证据，RSI 主题必须明确改进对象和迭代机制。
+_Avoid_: 把普通工具调用、通用 SFT/DPO/RL、裸 `RSI` 或一次性反思自动当作工具后训练或递归自我改进
+
+**Agent & LLM Context 方向库**:
+稳定标识 `agent-context` 的独立 paper 方向库，覆盖 Agent Context 工程、通过反思/经验/反馈改进上下文的 RSI Context，以及通过后训练改善长上下文、检索 grounding、记忆策略、上下文蒸馏、上下文数据和上下文评测。后训练 Context 不要求论文出现 Agent，但必须同时有上下文主题和后训练方法、数据或评估证据；普通 SFT/DPO/RL、纯 KV cache 优化和金融 RSI 不属于本库。
+_Avoid_: 把运行时 Context、永久 Memory、完整 LLM Post-Training 或纯推理优化混为一类
+
+**Agent Memory 方向库**:
+围绕 Agent 运行时记忆、递归自我改进中的经验/技能记忆，以及通过 LLM 后训练获得、保持、更新和遗忘记忆能力的独立 paper 方向库；稳定标识 `agent-memory`；自动来源限定为 2026-01-01 起的 arXiv 论文，允许与 Agent Engineering 和 LLM Post-Training 独立重复收录。
+_Avoid_: 把当前 Run 的 Context/State、普通 RAG、GPU 显存、无记忆机制的通用 SFT/RL 或一次性自我纠错当作 Agent Memory
+
+**Skill & Prompt Engineering 方向库**:
+只收录 arXiv 论文的独立 paper 方向库，稳定标识 `skill-prompt-engineering`，从 `2025-01-01` 起研究 Prompt Engineering 与 Skill Engineering。`pe-*` Track 只表示提示词及其工程化生命周期；`se-*` Track 只表示可复用技能的表示、获取、检索、组合、程序性记忆、迁移与演化；`se-rsi` 进一步要求 Skill 是递归自我改进的对象，并出现迭代、评估或选择机制。两类 Track 都要求标题或摘要提供语言模型/Agent 对象证据和对应工程信号。
+_Avoid_: 把 Prompt 主题与 Skill 主题混成一个分类、把普通工具调用或一次性反思当成 Skill 自我演化、把金融技术分析中的 RSI 当成递归自我改进
+
+**Prompt Engineering**:
+围绕提示词、指令、上下文示例、推理提示、结构化输出、检索/工具增强、注入防护、提示词优化和提示词评测的设计、运行与验证方法；在 `skill-prompt-engineering` 中由 `pe-*` Track 表示。
+_Avoid_: 仅有模型架构、预训练或普通 SFT/DPO/RL 而没有 Prompt 工程证据
+
+**Skill Engineering**:
+围绕 Agent 可复用技能的表示、获取、检索、选择、组合、程序性记忆、跨任务迁移、自我演化与演化评测；在 `skill-prompt-engineering` 中由 `se-*` Track 表示。
+_Avoid_: 把静态工具清单、单次反思或没有可复用能力边界的通用 Agent 论文直接归为 Skill
+
+**Skill RSI（Recursive Self-Improvement）**:
+Skill Engineering 的严格子主题，要求被改进对象是 Skill、Meta-Skill 或 Skill 优化器，并明确递归迭代、反馈评估、选择或新旧版本更新机制；稳定 Track 标识为 `se-rsi`。
+_Avoid_: 金融 Relative Strength Index、裸 `RSI`、没有改进对象的自我改进口号、一次性 prompt refinement
+
 **Agent 方向论文来源**:
 Agent Engineering 与 Multi-Agent Engineering 的活动自动来源都限定为 2026-01-01 起的 arXiv 论文。`import-local`/`parse-local` 是用户显式提供本地 PDF 的共享维护入口，不属于自动来源发现；官方文档、规范、仓库、Release、博客和网页不进入这两个方向的自动任务。
 _Avoid_: 多来源 Research 方向、自动网页抓取、把本地导入计入 arXiv 水位
@@ -144,6 +172,10 @@ _Avoid_: 永久 Memory、完整 Session 历史、Prompt 模板本身
 **Agent Memory**:
 经过选择、保留和治理、可影响未来 Run 的信息；它不等同于当前 Run 的权威 State。
 _Avoid_: 全量日志、Trace、临时 Context
+
+**后训练记忆**:
+通过监督微调、偏好/强化学习、蒸馏、知识编辑或持续学习，使语言模型获得、内化、保持、更新或遗忘记忆能力的研究对象；可以没有完整 Agent 运行时。
+_Avoid_: 仅使用训练算法名称、仅优化 GPU 显存或只研究普通检索而没有记忆能力证据
 
 **Agent Trace**:
 描述 Agent 执行因果链、模型调用、工具调用、审批、耗时、成本和错误的观测记录。

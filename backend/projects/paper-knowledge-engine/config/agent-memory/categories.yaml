@@ -1,0 +1,22 @@
+tracks:
+  mem-foundations: {pdf: 01-Memory-Foundations}
+  mem-working-context: {pdf: 02-Working-Context-Memory}
+  mem-episodic: {pdf: 03-Episodic-Memory}
+  mem-semantic: {pdf: 04-Semantic-Memory}
+  mem-procedural-skills: {pdf: 05-Procedural-Skills}
+  mem-writing: {pdf: 06-Memory-Writing}
+  mem-organization: {pdf: 07-Memory-Organization}
+  mem-retrieval: {pdf: 08-Memory-Retrieval}
+  mem-consolidation: {pdf: 09-Memory-Consolidation}
+  mem-personalization: {pdf: 10-Memory-Personalization}
+  mem-shared: {pdf: 11-Shared-Memory}
+  mem-reflection: {pdf: 12-Memory-Reflection}
+  mem-rsi: {pdf: 13-Memory-RSI}
+  mem-transfer: {pdf: 14-Memory-Transfer}
+  mem-security: {pdf: 15-Memory-Security}
+  mem-evaluation: {pdf: 16-Memory-Evaluation}
+  mem-posttrain-sft: {pdf: 17-Memory-PostTraining-SFT}
+  mem-posttrain-rl: {pdf: 18-Memory-PostTraining-RL}
+  mem-posttrain-distillation: {pdf: 19-Memory-PostTraining-Distillation}
+  mem-posttrain-parametric: {pdf: 20-Memory-PostTraining-Parametric}
+fallback_pdf: 99-Unclassified

@@ -143,7 +143,7 @@ test('keeps active files, library listing, paths, and Evidence policies isolated
     const paper = loadEngineContext({ root, libraryId: 'fsd' });
     assert.equal(paper.library.kind, 'paper');
     assert.deepEqual(listLibraries(root).map(library => library.libraryId), [
-      'agent-engineering', 'fsd', 'llm-post-training', 'multi-agent-engineering', researchFixtureId,
+      'agent-context', 'agent-engineering', 'agent-memory', 'agent-tool', 'fsd', 'llm-post-training', 'multi-agent-engineering', researchFixtureId, 'skill-prompt-engineering',
     ]);
     assert.deepEqual(configurationFiles(researchFixtureId, 'research').slice(-4), [
       join(researchFixtureId, 'library.yaml'), join(researchFixtureId, 'query-matrix.yaml'),

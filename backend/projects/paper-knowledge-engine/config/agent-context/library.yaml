@@ -1,0 +1,36 @@
+library_kind: paper
+library_id: agent-context
+display_name: Agent & LLM Context（上下文知识库）
+start_date: 2026-01-01
+overlap_hours: 48
+download_after_hard_filter: true
+current_task:
+  max_papers: 450
+  track_limits:
+    ctx-foundations: 25
+    ctx-assembly-budget: 25
+    ctx-retrieval: 25
+    ctx-compression: 25
+    ctx-long-horizon: 25
+    ctx-memory: 25
+    ctx-tool-context: 25
+    ctx-isolation-security: 25
+    ctx-evaluation: 25
+    ctx-rsi-reflection: 25
+    ctx-rsi-experience: 25
+    ctx-rsi-evolution: 25
+    ctx-pt-long-context: 25
+    ctx-pt-retrieval-grounding: 25
+    ctx-pt-memory-policy: 25
+    ctx-pt-context-distillation: 25
+    ctx-pt-context-data: 25
+    ctx-pt-context-evaluation: 25
+weekly_schedule:
+  enabled: true
+  task_name: paper-knowledge-engine-agent-context-weekly
+  day_of_week: monday
+  interval_weeks: 4
+  start_date: 2026-09-21
+  local_time: '23:30'
+  timezone: Asia/Shanghai
+  max_papers: 18

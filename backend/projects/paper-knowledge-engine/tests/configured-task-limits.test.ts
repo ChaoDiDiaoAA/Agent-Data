@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { loadEngineContext } from '../src/shared/engine-context.ts';
 import { asLibraryId } from '../src/shared/identity.ts';
 
-for (const id of ['fsd','agent-engineering','multi-agent-engineering','llm-post-training']) {
+for (const id of ['fsd','agent-engineering','multi-agent-engineering','llm-post-training','agent-tool','agent-context','agent-memory','skill-prompt-engineering']) {
   test(`${id} configured task bypasses an old local cooldown without discarding its run`, async () => {
     let observed = false;
     let runId = '';

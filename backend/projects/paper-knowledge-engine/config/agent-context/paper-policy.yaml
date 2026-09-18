@@ -1,0 +1,177 @@
+start_date: 2026-01-01
+excluded_domains:
+  - relative strength index
+  - stock market
+  - financial trading
+  - gpu memory
+  - kv cache
+  - cache optimization
+ai_technique_terms:
+  - agent
+  - autonomous agent
+  - language model
+  - large language model
+  - llm
+  - foundation model
+program_structure_terms: []
+engineering_task_terms:
+  - context engineering
+  - context management
+  - context architecture
+  - context assembly
+  - context budget
+  - token budget
+  - context selection
+  - context retrieval
+  - agentic retrieval
+  - memory retrieval
+  - retrieval augmented generation
+  - context compression
+  - prompt compression
+  - history compression
+  - context summarization
+  - long context
+  - long-horizon agent
+  - working context
+  - episodic memory
+  - semantic memory
+  - working memory
+  - long-term memory
+  - tool context
+  - tool result
+  - tool description
+  - execution context
+  - context injection
+  - prompt injection
+  - memory poisoning
+  - context isolation
+  - context evaluation
+  - memory benchmark
+  - context benchmark
+  - long-context evaluation
+  - reflective memory
+  - experience memory
+  - skill memory
+  - experience replay
+  - memory evolution
+  - context evolution
+  - recursive self-improvement
+  - self-improving
+  - self-evolving agent
+  - context window
+  - retrieval augmented
+  - context grounding
+  - grounded generation
+  - evidence selection
+  - retrieval training
+  - learned memory
+  - memory policy
+  - parametric memory
+  - context distillation
+  - prompt distillation
+  - trajectory distillation
+  - long-context distillation
+  - knowledge distillation
+  - context training data
+  - long-context data
+  - long document
+  - trajectory data
+  - synthetic data
+  - data curation
+  - instruction data
+  - context utilization
+  - context faithfulness
+  - evidence attribution
+  - post-training evaluation
+term_variants:
+  agent: [agents]
+  language model: [language models]
+  large language model: [large language models]
+  llm: [llms]
+  context engineering: [context-engineering]
+  context management: [context-management]
+  context architecture: [context architectures]
+  context assembly: [context-assembly]
+  context budget: [context budgets]
+  token budget: [token budgets]
+  context selection: [context selections]
+  context retrieval: [context-retrieval]
+  agentic retrieval: [agentic-retrieval]
+  memory retrieval: [memory-retrieval]
+  retrieval augmented generation: [retrieval-augmented generation]
+  context compression: [context-compression]
+  prompt compression: [prompt-compression]
+  history compression: [history-compression]
+  context summarization: [context summarisation]
+  long context: [long-context]
+  long-horizon agent: [long horizon agent]
+  working context: [working-context]
+  episodic memory: [episodic memories]
+  semantic memory: [semantic memories]
+  working memory: [working memories]
+  long-term memory: [long term memory]
+  tool context: [tool-context]
+  tool result: [tool results]
+  tool description: [tool descriptions]
+  execution context: [execution-context]
+  context injection: [context-injection]
+  prompt injection: [prompt-injection]
+  memory poisoning: [memory-poisoning]
+  context isolation: [context-isolation]
+  context evaluation: [context evaluations]
+  memory benchmark: [memory benchmarks]
+  context benchmark: [context benchmarks]
+  long-context evaluation: [long context evaluation]
+  reflective memory: [reflective memories]
+  experience memory: [experience memories]
+  skill memory: [skill memories]
+  experience replay: [experience replays]
+  memory evolution: [evolving memory]
+  context evolution: [evolving context]
+  recursive self-improvement: [recursive self improvement]
+  self-improving: [self improving]
+  self-evolving agent: [self evolving agent]
+  context window: [context windows]
+  retrieval augmented: [retrieval-augmented]
+  context grounding: [context-grounding]
+  grounded generation: [grounded-generation]
+  evidence selection: [evidence-selection]
+  retrieval training: [retrieval-training]
+  learned memory: [learned memories]
+  memory policy: [memory policies]
+  parametric memory: [parametric memories]
+  context distillation: [context-distillation]
+  prompt distillation: [prompt-distillation]
+  trajectory distillation: [trajectory-distillation]
+  long-context distillation: [long context distillation]
+  knowledge distillation: [knowledge distillations]
+  context training data: [context training dataset]
+  long-context data: [long context data]
+  long document: [long documents]
+  trajectory data: [trajectory dataset]
+  synthetic data: [synthetic datasets]
+  data curation: [data curating]
+  instruction data: [instruction dataset]
+  context utilization: [context use]
+  context faithfulness: [context faithful]
+  evidence attribution: [evidence attributions]
+  post-training evaluation: [post training evaluation]
+track_priority:
+  - ctx-rsi-reflection
+  - ctx-rsi-experience
+  - ctx-rsi-evolution
+  - ctx-pt-long-context
+  - ctx-pt-retrieval-grounding
+  - ctx-pt-memory-policy
+  - ctx-pt-context-distillation
+  - ctx-pt-context-data
+  - ctx-pt-context-evaluation
+  - ctx-assembly-budget
+  - ctx-retrieval
+  - ctx-compression
+  - ctx-long-horizon
+  - ctx-memory
+  - ctx-tool-context
+  - ctx-isolation-security
+  - ctx-evaluation
+  - ctx-foundations

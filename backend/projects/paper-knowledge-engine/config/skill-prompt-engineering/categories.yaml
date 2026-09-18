@@ -1,0 +1,21 @@
+tracks:
+  pe-foundations: {pdf: 01-Prompt-Foundations}
+  pe-instruction-design: {pdf: 02-Prompt-Instruction-Design}
+  pe-in-context-learning: {pdf: 03-Prompt-In-Context-Learning}
+  pe-reasoning: {pdf: 04-Prompt-Reasoning}
+  pe-self-refinement: {pdf: 05-Prompt-Self-Refinement}
+  pe-optimization: {pdf: 06-Prompt-Optimization}
+  pe-structured-output: {pdf: 07-Prompt-Structured-Output}
+  pe-grounded-tool-prompting: {pdf: 08-Prompt-Grounded-Tool-Prompting}
+  pe-safety: {pdf: 09-Prompt-Safety}
+  pe-evaluation: {pdf: 10-Prompt-Evaluation}
+  se-representation: {pdf: 11-Skill-Representation}
+  se-acquisition: {pdf: 12-Skill-Acquisition}
+  se-retrieval: {pdf: 13-Skill-Retrieval}
+  se-composition: {pdf: 14-Skill-Composition}
+  se-procedural-memory: {pdf: 15-Skill-Procedural-Memory}
+  se-transfer: {pdf: 16-Skill-Transfer}
+  se-self-evolution: {pdf: 17-Skill-Self-Evolution}
+  se-evolution-evaluation: {pdf: 18-Skill-Evolution-Evaluation}
+  se-rsi: {pdf: 19-Skill-RSI}
+fallback_pdf: 99-Unclassified

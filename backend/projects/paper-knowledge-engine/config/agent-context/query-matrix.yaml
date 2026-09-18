@@ -1,0 +1,118 @@
+tracks:
+  - id: ctx-foundations
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"context engineering" OR abs:"context engineering" OR ti:"context management" OR abs:"context management" OR ti:"context architecture" OR abs:"context architecture")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: ctx-assembly-budget
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"context assembly" OR abs:"context assembly" OR ti:"context budget" OR abs:"context budget" OR ti:"token budget" OR abs:"token budget" OR ti:"context selection" OR abs:"context selection")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: ctx-retrieval
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"agentic retrieval" OR abs:"agentic retrieval" OR ti:"context retrieval" OR abs:"context retrieval" OR ti:"memory retrieval" OR abs:"memory retrieval" OR ti:"retrieval augmented generation" OR abs:"retrieval augmented generation")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: ctx-compression
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"context compression" OR abs:"context compression" OR ti:"prompt compression" OR abs:"prompt compression" OR ti:"history compression" OR abs:"history compression" OR ti:"context summarization" OR abs:"context summarization")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: ctx-long-horizon
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"long-horizon agent" OR abs:"long-horizon agent" OR ti:"long horizon" OR abs:"long horizon" OR ti:"long context" OR abs:"long context" OR ti:"working context" OR abs:"working context")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: ctx-memory
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"episodic memory" OR abs:"episodic memory" OR ti:"semantic memory" OR abs:"semantic memory" OR ti:"working memory" OR abs:"working memory" OR ti:"long-term memory" OR abs:"long-term memory")
+    categories: [cs.AI, cs.CL, cs.LG, cs.MA]
+    date_modes: [submitted, updated]
+  - id: ctx-tool-context
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"tool context" OR abs:"tool context" OR ti:"tool result" OR abs:"tool result" OR ti:"tool description" OR abs:"tool description" OR ti:"execution context" OR abs:"execution context")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: ctx-isolation-security
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"context injection" OR abs:"context injection" OR ti:"prompt injection" OR abs:"prompt injection" OR ti:"memory poisoning" OR abs:"memory poisoning" OR ti:"context isolation" OR abs:"context isolation")
+    categories: [cs.AI, cs.CL, cs.CR, cs.SE]
+    date_modes: [submitted, updated]
+  - id: ctx-evaluation
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"context evaluation" OR abs:"context evaluation" OR ti:"memory benchmark" OR abs:"memory benchmark" OR ti:"context benchmark" OR abs:"context benchmark" OR ti:"long-context evaluation" OR abs:"long-context evaluation")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: ctx-rsi-reflection
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:reflection OR abs:reflection OR ti:reflexion OR abs:reflexion OR ti:"reflective memory" OR abs:"reflective memory")
+      AND (ti:memory OR abs:memory OR ti:context OR abs:context OR ti:experience OR abs:experience)
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: ctx-rsi-experience
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"experience memory" OR abs:"experience memory" OR ti:"skill memory" OR abs:"skill memory" OR ti:"experience replay" OR abs:"experience replay")
+      AND (ti:"self-improving" OR abs:"self-improving" OR ti:feedback OR abs:feedback OR ti:"self-evolving" OR abs:"self-evolving")
+    categories: [cs.AI, cs.CL, cs.LG, cs.MA]
+    date_modes: [submitted, updated]
+  - id: ctx-rsi-evolution
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"recursive self-improvement" OR abs:"recursive self-improvement" OR ti:"self-evolving agent" OR abs:"self-evolving agent" OR ti:"memory evolution" OR abs:"memory evolution" OR ti:"context evolution" OR abs:"context evolution")
+      AND (ti:memory OR abs:memory OR ti:context OR abs:context OR ti:experience OR abs:experience)
+    categories: [cs.AI, cs.CL, cs.LG, cs.MA]
+    date_modes: [submitted, updated]
+  - id: ctx-pt-long-context
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"large language model" OR abs:"large language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"long context" OR abs:"long context" OR ti:"long-context" OR abs:"long-context" OR ti:"context window" OR abs:"context window")
+      AND (ti:"supervised fine-tuning" OR abs:"supervised fine-tuning" OR ti:"instruction tuning" OR abs:"instruction tuning" OR ti:"reinforcement learning" OR abs:"reinforcement learning" OR ti:"preference optimization" OR abs:"preference optimization")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: ctx-pt-retrieval-grounding
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"large language model" OR abs:"large language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"retrieval augmented" OR abs:"retrieval augmented" OR ti:"context grounding" OR abs:"context grounding" OR ti:"grounded generation" OR abs:"grounded generation" OR ti:"evidence selection" OR abs:"evidence selection")
+      AND (ti:"retrieval training" OR abs:"retrieval training" OR ti:"contrastive learning" OR abs:"contrastive learning" OR ti:"post-training" OR abs:"post-training")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: ctx-pt-memory-policy
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"large language model" OR abs:"large language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"memory policy" OR abs:"memory policy" OR ti:"learned memory" OR abs:"learned memory" OR ti:"parametric memory" OR abs:"parametric memory" OR ti:"context management" OR abs:"context management")
+      AND (ti:"fine-tuning" OR abs:"fine-tuning" OR ti:"reinforcement learning" OR abs:"reinforcement learning" OR ti:"continual learning" OR abs:"continual learning")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: ctx-pt-context-distillation
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"large language model" OR abs:"large language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"context distillation" OR abs:"context distillation" OR ti:"prompt distillation" OR abs:"prompt distillation" OR ti:"trajectory distillation" OR abs:"trajectory distillation" OR ti:"long-context distillation" OR abs:"long-context distillation")
+      AND (ti:distillation OR abs:distillation OR ti:"knowledge distillation" OR abs:"knowledge distillation")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: ctx-pt-context-data
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"large language model" OR abs:"large language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"context training data" OR abs:"context training data" OR ti:"long-context data" OR abs:"long-context data" OR ti:"long document" OR abs:"long document" OR ti:"trajectory data" OR abs:"trajectory data")
+      AND (ti:"synthetic data" OR abs:"synthetic data" OR ti:"data curation" OR abs:"data curation" OR ti:"instruction data" OR abs:"instruction data")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: ctx-pt-context-evaluation
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"large language model" OR abs:"large language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"context utilization" OR abs:"context utilization" OR ti:"long-context evaluation" OR abs:"long-context evaluation" OR ti:"context faithfulness" OR abs:"context faithfulness" OR ti:"evidence attribution" OR abs:"evidence attribution")
+      AND (ti:"post-training evaluation" OR abs:"post-training evaluation" OR ti:"generalization" OR abs:"generalization" OR ti:benchmark OR abs:benchmark)
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]

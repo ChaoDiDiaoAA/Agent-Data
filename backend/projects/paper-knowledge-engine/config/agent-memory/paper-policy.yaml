@@ -1,0 +1,144 @@
+start_date: 2026-01-01
+excluded_domains: [gpu memory, video memory, memory bandwidth, memory allocator, memory footprint, without memory, no memory, memoryless]
+ai_technique_terms:
+  - agent
+  - agents
+  - autonomous agent
+  - language model
+  - large language model
+  - llm
+  - foundation model
+program_structure_terms: []
+engineering_task_terms:
+  - agent memory
+  - memory system
+  - memory architecture
+  - memory mechanism
+  - memory module
+  - memory augmented
+  - memory-augmented
+  - persistent memory
+  - long-term memory
+  - working memory
+  - episodic memory
+  - semantic memory
+  - procedural memory
+  - experience memory
+  - interaction memory
+  - trajectory memory
+  - external memory
+  - parametric memory
+  - memory retrieval
+  - memory writing
+  - memory read
+  - memory update
+  - memory consolidation
+  - memory evolution
+  - memory compression
+  - memory organization
+  - memory storage
+  - skill library
+  - experience replay
+  - knowledge retention
+  - knowledge editing
+  - knowledge edit
+  - continual learning
+  - catastrophic forgetting
+  - supervised fine-tuning
+  - instruction tuning
+  - preference optimization
+  - reinforcement learning
+  - agent reinforcement learning
+  - trajectory distillation
+  - experience distillation
+  - knowledge distillation
+  - recursive self-improvement
+  - self-improving
+  - self-evolving
+term_variants:
+  agent:
+    - agents
+  language model:
+    - language models
+  large language model:
+    - large language models
+  llm:
+    - llms
+  memory system:
+    - memory systems
+  memory mechanism:
+    - memory mechanisms
+  memory module:
+    - memory modules
+  persistent memory:
+    - persistent memories
+  long-term memory:
+    - long term memory
+  episodic memory:
+    - episodic memories
+  semantic memory:
+    - semantic memories
+  procedural memory:
+    - procedural memories
+  experience memory:
+    - experience memories
+  external memory:
+    - external memories
+  memory retrieval:
+    - memory retriever
+    - memory retrievals
+  memory writing:
+    - memory write
+    - memory writes
+  memory update:
+    - memory updates
+  memory consolidation:
+    - memory consolidating
+  memory evolution:
+    - evolving memory
+  memory organization:
+    - memory organisations
+  knowledge retention:
+    - retaining knowledge
+  knowledge editing:
+    - knowledge edit
+  continual learning:
+    - continual adaptation
+  catastrophic forgetting:
+    - catastrophic forgetfulness
+  supervised fine-tuning:
+    - supervised finetuning
+    - supervised fine tuning
+  instruction tuning:
+    - instruction finetuning
+  preference optimization:
+    - preference optimisation
+  reinforcement learning:
+    - reinforcement-learning
+  recursive self-improvement:
+    - recursive self improvement
+  self-improving:
+    - self improving
+  self-evolving:
+    - self evolving
+track_priority:
+  - mem-foundations
+  - mem-working-context
+  - mem-episodic
+  - mem-semantic
+  - mem-procedural-skills
+  - mem-writing
+  - mem-organization
+  - mem-retrieval
+  - mem-consolidation
+  - mem-personalization
+  - mem-shared
+  - mem-reflection
+  - mem-rsi
+  - mem-transfer
+  - mem-security
+  - mem-evaluation
+  - mem-posttrain-sft
+  - mem-posttrain-rl
+  - mem-posttrain-distillation
+  - mem-posttrain-parametric

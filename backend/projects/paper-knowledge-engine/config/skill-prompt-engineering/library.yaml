@@ -1,0 +1,37 @@
+library_kind: paper
+library_id: skill-prompt-engineering
+display_name: Skill & Prompt Engineering（技能与提示词工程知识库）
+start_date: 2026-01-01
+overlap_hours: 48
+download_after_hard_filter: true
+current_task:
+  max_papers: 475
+  track_limits:
+    pe-foundations: 25
+    pe-instruction-design: 25
+    pe-in-context-learning: 25
+    pe-reasoning: 25
+    pe-self-refinement: 25
+    pe-optimization: 25
+    pe-structured-output: 25
+    pe-grounded-tool-prompting: 25
+    pe-safety: 25
+    pe-evaluation: 25
+    se-representation: 25
+    se-acquisition: 25
+    se-retrieval: 25
+    se-composition: 25
+    se-procedural-memory: 25
+    se-transfer: 25
+    se-self-evolution: 25
+    se-evolution-evaluation: 25
+    se-rsi: 25
+weekly_schedule:
+  enabled: false
+  task_name: paper-knowledge-engine-skill-prompt-engineering-weekly
+  day_of_week: monday
+  interval_weeks: 4
+  start_date: 2026-09-21
+  local_time: '23:30'
+  timezone: Asia/Shanghai
+  max_papers: 20

@@ -1,0 +1,20 @@
+tracks:
+  tool-foundations: {pdf: 01-Tool-Foundations}
+  tool-selection: {pdf: 02-Tool-Selection}
+  tool-composition: {pdf: 03-Tool-Composition}
+  tool-protocol: {pdf: 04-Tool-Protocol}
+  tool-generation: {pdf: 05-Tool-Generation}
+  tool-library: {pdf: 06-Tool-Library}
+  tool-evaluation: {pdf: 07-Tool-Evaluation}
+  tool-security: {pdf: 08-Tool-Security}
+  tool-pt-data: {pdf: 09-Tool-PT-Data}
+  tool-pt-sft: {pdf: 10-Tool-PT-SFT}
+  tool-pt-reward: {pdf: 11-Tool-PT-Reward}
+  tool-pt-preference: {pdf: 12-Tool-PT-Preference}
+  tool-pt-rl: {pdf: 13-Tool-PT-RL}
+  tool-pt-transfer: {pdf: 14-Tool-PT-Transfer}
+  tool-pt-evaluation: {pdf: 15-Tool-PT-Evaluation}
+  rsi-tool-repair: {pdf: 16-RSI-Tool-Repair}
+  rsi-agent-evolution: {pdf: 17-RSI-Agent-Evolution}
+  rsi-meta-improvement: {pdf: 18-RSI-Meta-Improvement}
+fallback_pdf: 99-Unclassified

@@ -5,26 +5,26 @@ start_date: 2025-06-01
 overlap_hours: 48
 download_after_hard_filter: true
 current_task:
-  max_papers: 630
+  max_papers: 540
   track_limits:
-    mas-foundations: 35
-    mas-topology: 35
-    mas-roles-capabilities: 35
-    mas-lifecycle-composition: 35
-    mas-task-decomposition: 35
-    mas-delegation-handoff: 35
-    mas-planning-scheduling: 35
-    mas-communication: 35
-    mas-shared-state-memory: 35
-    mas-coordination-consensus: 35
-    mas-conflict-negotiation: 35
-    mas-synthesis-verification: 35
-    mas-security-governance: 35
-    mas-fault-tolerance: 35
-    mas-resource-governance: 35
-    mas-observability: 35
-    mas-human-oversight: 35
-    mas-evaluation-methodology: 35
+    mas-foundations: 30
+    mas-topology: 30
+    mas-roles-capabilities: 30
+    mas-lifecycle-composition: 30
+    mas-task-decomposition: 30
+    mas-delegation-handoff: 30
+    mas-planning-scheduling: 30
+    mas-communication: 30
+    mas-shared-state-memory: 30
+    mas-coordination-consensus: 30
+    mas-conflict-negotiation: 30
+    mas-synthesis-verification: 30
+    mas-security-governance: 30
+    mas-fault-tolerance: 30
+    mas-resource-governance: 30
+    mas-observability: 30
+    mas-human-oversight: 30
+    mas-evaluation-methodology: 30
 weekly_schedule:
   enabled: true
   task_name: paper-knowledge-engine-multi-agent-engineering-weekly

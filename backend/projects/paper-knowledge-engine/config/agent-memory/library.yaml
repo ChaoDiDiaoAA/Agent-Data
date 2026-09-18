@@ -1,0 +1,38 @@
+library_kind: paper
+library_id: agent-memory
+display_name: Agent Memory（智能体记忆知识库）
+start_date: 2026-01-01
+overlap_hours: 48
+download_after_hard_filter: true
+current_task:
+  max_papers: 500
+  track_limits:
+    mem-foundations: 25
+    mem-working-context: 25
+    mem-episodic: 25
+    mem-semantic: 25
+    mem-procedural-skills: 25
+    mem-writing: 25
+    mem-organization: 25
+    mem-retrieval: 25
+    mem-consolidation: 25
+    mem-personalization: 25
+    mem-shared: 25
+    mem-reflection: 25
+    mem-rsi: 25
+    mem-transfer: 25
+    mem-security: 25
+    mem-evaluation: 25
+    mem-posttrain-sft: 25
+    mem-posttrain-rl: 25
+    mem-posttrain-distillation: 25
+    mem-posttrain-parametric: 25
+weekly_schedule:
+  enabled: false
+  task_name: paper-knowledge-engine-agent-memory-weekly
+  day_of_week: tuesday
+  interval_weeks: 1
+  start_date: 2026-09-22
+  local_time: '22:30'
+  timezone: Asia/Shanghai
+  max_papers: 20

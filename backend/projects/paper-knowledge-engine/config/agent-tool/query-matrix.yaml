@@ -1,0 +1,116 @@
+tracks:
+  - id: tool-foundations
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM" OR ti:"agent" OR abs:"agent")
+      AND (ti:"tool use" OR abs:"tool use" OR ti:"tool calling" OR abs:"tool calling" OR ti:"function calling" OR abs:"function calling")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: tool-selection
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM" OR ti:"agent" OR abs:"agent")
+      AND (ti:"tool selection" OR abs:"tool selection" OR ti:"tool retrieval" OR abs:"tool retrieval" OR ti:"tool routing" OR abs:"tool routing" OR ti:"tool discovery" OR abs:"tool discovery")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: tool-composition
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM" OR ti:"agent" OR abs:"agent")
+      AND (ti:"tool composition" OR abs:"tool composition" OR ti:"tool planning" OR abs:"tool planning" OR ti:"multi-step tool" OR abs:"multi-step tool" OR ti:"tool execution" OR abs:"tool execution")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: tool-protocol
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM" OR ti:"agent" OR abs:"agent")
+      AND (ti:"tool protocol" OR abs:"tool protocol" OR ti:"function calling" OR abs:"function calling" OR ti:"Model Context Protocol" OR abs:"Model Context Protocol" OR ti:"MCP" OR abs:"MCP")
+    categories: [cs.AI, cs.CL, cs.SE, cs.DC]
+    date_modes: [submitted, updated]
+  - id: tool-generation
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM" OR ti:"agent" OR abs:"agent")
+      AND (ti:"tool generation" OR abs:"tool generation" OR ti:"tool making" OR abs:"tool making" OR ti:"tool maker" OR abs:"tool maker" OR ti:"program synthesis" OR abs:"program synthesis")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: tool-library
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM" OR ti:"agent" OR abs:"agent")
+      AND (ti:"tool library" OR abs:"tool library" OR ti:"skill library" OR abs:"skill library" OR ti:"reusable tools" OR abs:"reusable tools" OR ti:"tool reuse" OR abs:"tool reuse")
+    categories: [cs.AI, cs.CL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: tool-evaluation
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM" OR ti:"agent" OR abs:"agent")
+      AND (ti:"tool use evaluation" OR abs:"tool use evaluation" OR ti:"tool calling benchmark" OR abs:"tool calling benchmark" OR ti:"tool use benchmark" OR abs:"tool use benchmark")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: tool-security
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM" OR ti:"agent" OR abs:"agent")
+      AND (ti:"tool security" OR abs:"tool security" OR ti:"tool misuse" OR abs:"tool misuse" OR ti:"tool injection" OR abs:"tool injection" OR ti:"secure tool use" OR abs:"secure tool use")
+    categories: [cs.AI, cs.CL, cs.CR, cs.SE]
+    date_modes: [submitted, updated]
+  - id: tool-pt-data
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"tool use" OR abs:"tool use" OR ti:"tool calling" OR abs:"tool calling")
+      AND (ti:"training data" OR abs:"training data" OR ti:"trajectory data" OR abs:"trajectory data" OR ti:"tool-use trajectories" OR abs:"tool-use trajectories")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: tool-pt-sft
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"tool use" OR abs:"tool use" OR ti:"tool calling" OR abs:"tool calling" OR ti:"function calling" OR abs:"function calling")
+      AND (ti:"supervised fine-tuning" OR abs:"supervised fine-tuning" OR ti:"instruction tuning" OR abs:"instruction tuning" OR ti:"SFT" OR abs:"SFT")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: tool-pt-reward
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"tool use" OR abs:"tool use" OR ti:"tool calling" OR abs:"tool calling")
+      AND (ti:"reward" OR abs:"reward" OR ti:"verifier" OR abs:"verifier" OR ti:"execution feedback" OR abs:"execution feedback")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: tool-pt-preference
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"tool use" OR abs:"tool use" OR ti:"tool calling" OR abs:"tool calling")
+      AND (ti:"preference optimization" OR abs:"preference optimization" OR ti:"preference learning" OR abs:"preference learning" OR ti:"DPO" OR abs:"DPO")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: tool-pt-rl
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"tool use" OR abs:"tool use" OR ti:"tool calling" OR abs:"tool calling" OR ti:"agent" OR abs:"agent")
+      AND (ti:"reinforcement learning" OR abs:"reinforcement learning" OR ti:"agent reinforcement learning" OR abs:"agent reinforcement learning" OR ti:"interactive learning" OR abs:"interactive learning")
+    categories: [cs.AI, cs.CL, cs.LG, cs.MA]
+    date_modes: [submitted, updated]
+  - id: tool-pt-transfer
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"tool use" OR abs:"tool use" OR ti:"tool calling" OR abs:"tool calling")
+      AND (ti:"distillation" OR abs:"distillation" OR ti:"transfer" OR abs:"transfer" OR ti:"generalization" OR abs:"generalization" OR ti:"continual learning" OR abs:"continual learning")
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: tool-pt-evaluation
+    query: >-
+      (ti:"language model" OR abs:"language model" OR ti:"LLM" OR abs:"LLM")
+      AND (ti:"tool use" OR abs:"tool use" OR ti:"tool calling" OR abs:"tool calling")
+      AND (ti:"post-training evaluation" OR abs:"post-training evaluation" OR ti:"tool use benchmark" OR abs:"tool use benchmark" OR ti:"unseen tools" OR abs:"unseen tools")
+    categories: [cs.AI, cs.CL, cs.LG, cs.SE]
+    date_modes: [submitted, updated]
+  - id: rsi-tool-repair
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model")
+      AND (ti:"self-improving" OR abs:"self-improving" OR ti:"self-improvement" OR abs:"self-improvement" OR ti:"tool repair" OR abs:"tool repair" OR ti:"self-repairing" OR abs:"self-repairing")
+    categories: [cs.AI, cs.CL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: rsi-agent-evolution
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model")
+      AND (ti:"self-evolving agent" OR abs:"self-evolving agent" OR ti:"self-modifying agent" OR abs:"self-modifying agent" OR ti:"agent evolution" OR abs:"agent evolution" OR ti:"open-ended evolution" OR abs:"open-ended evolution")
+    categories: [cs.AI, cs.CL, cs.SE]
+    date_modes: [submitted, updated]
+  - id: rsi-meta-improvement
+    query: >-
+      (ti:"agent" OR abs:"agent" OR ti:"language model" OR abs:"language model")
+      AND (ti:"recursive self-improvement" OR abs:"recursive self-improvement" OR ti:"self-referential agent" OR abs:"self-referential agent" OR ti:"improving the agent" OR abs:"improving the agent" OR ti:"meta-improvement" OR abs:"meta-improvement")
+    categories: [cs.AI, cs.CL, cs.SE]
+    date_modes: [submitted, updated]

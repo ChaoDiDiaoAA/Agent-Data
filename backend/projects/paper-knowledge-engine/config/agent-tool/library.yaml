@@ -1,0 +1,36 @@
+library_kind: paper
+library_id: agent-tool
+display_name: Agent Tool & RSI（含 LLM 工具后训练）
+start_date: 2026-01-01
+overlap_hours: 48
+download_after_hard_filter: true
+current_task:
+  max_papers: 450
+  track_limits:
+    tool-foundations: 25
+    tool-selection: 25
+    tool-composition: 25
+    tool-protocol: 25
+    tool-generation: 25
+    tool-library: 25
+    tool-evaluation: 25
+    tool-security: 25
+    tool-pt-data: 25
+    tool-pt-sft: 25
+    tool-pt-reward: 25
+    tool-pt-preference: 25
+    tool-pt-rl: 25
+    tool-pt-transfer: 25
+    tool-pt-evaluation: 25
+    rsi-tool-repair: 25
+    rsi-agent-evolution: 25
+    rsi-meta-improvement: 25
+weekly_schedule:
+  enabled: false
+  task_name: paper-knowledge-engine-agent-tool-weekly
+  day_of_week: monday
+  interval_weeks: 4
+  start_date: 2026-09-07
+  local_time: '23:30'
+  timezone: Asia/Shanghai
+  max_papers: 12

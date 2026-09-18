@@ -1,0 +1,132 @@
+start_date: 2025-01-01
+excluded_domains:
+  - relative strength index
+  - stock market
+  - financial trading
+  - technical analysis
+  - momentum strategy
+ai_technique_terms: [language model, large language model, llm, language agent, llm agent, agent]
+program_structure_terms: []
+engineering_task_terms:
+  - prompt engineering
+  - prompting
+  - instruction prompting
+  - system prompt
+  - in-context learning
+  - few-shot prompting
+  - chain-of-thought
+  - reasoning prompt
+  - self-refinement
+  - self-critique
+  - prompt optimization
+  - automatic prompt optimization
+  - prompt search
+  - prompt refinement
+  - structured output
+  - schema prompting
+  - format constraint
+  - retrieval-augmented prompting
+  - tool-use prompting
+  - grounded generation
+  - prompt injection
+  - instruction hierarchy
+  - prompt security
+  - prompt evaluation
+  - prompt sensitivity
+  - prompt robustness
+  - agent skill
+  - skill representation
+  - reusable skill
+  - skill acquisition
+  - skill generation
+  - skill extraction
+  - skill retrieval
+  - skill library
+  - skill selection
+  - skill composition
+  - skill decomposition
+  - skill workflow
+  - procedural memory
+  - experience memory
+  - memory skill
+  - skill transfer
+  - transferable skill
+  - cross-task skill
+  - skill evolution
+  - self-evolving skill
+  - skill refinement
+  - skill evaluation
+  - skill benchmark
+  - skill validation
+  - recursive self-improvement
+  - meta-skill evolution
+  - self-improving optimizer
+  - meta-skill
+  - self-improvement
+term_variants:
+  language model: [language models]
+  large language model: [large language models]
+  llm: [llms]
+  language agent: [language agents]
+  llm agent: [llm agents]
+  prompt engineering: [prompt-engineering]
+  in-context learning: [in context learning]
+  few-shot prompting: [few shot prompting]
+  chain-of-thought: [chain of thought]
+  self-refinement: [self refinement]
+  self-critique: [self critique]
+  prompt optimization: [prompt optimisation]
+  automatic prompt optimization: [automatic prompt optimisation]
+  prompt refinement: [prompt refinement]
+  structured output: [structured outputs]
+  format constraint: [format constraints]
+  retrieval-augmented prompting: [retrieval augmented prompting]
+  tool-use prompting: [tool use prompting]
+  prompt injection: [prompt injections]
+  prompt robustness: [prompt robustnesses]
+  agent skill: [agent skills]
+  reusable skill: [reusable skills]
+  skill acquisition: [skill acquisitions]
+  skill generation: [skill generations]
+  skill extraction: [skill extractions]
+  skill retrieval: [skill retrievals]
+  skill library: [skill libraries]
+  skill selection: [skill selections]
+  skill composition: [skill compositions]
+  skill decomposition: [skill decompositions]
+  skill workflow: [skill workflows]
+  procedural memory: [procedural memories]
+  memory skill: [memory skills]
+  skill transfer: [skill transfers]
+  transferable skill: [transferable skills]
+  skill evolution: [skill evolutions]
+  self-evolving skill: [self evolving skill, self-evolving skills]
+  skill refinement: [skill refinements]
+  skill evaluation: [skill evaluations]
+  skill benchmark: [skill benchmarks]
+  skill validation: [skill validations]
+  recursive self-improvement: [recursive self improvement]
+  meta-skill evolution: [meta skill evolution]
+  self-improving optimizer: [self improving optimizer]
+  meta-skill: [meta skill, meta-skills]
+  self-improvement: [self improvement]
+track_priority:
+  - pe-foundations
+  - pe-instruction-design
+  - pe-in-context-learning
+  - pe-reasoning
+  - pe-self-refinement
+  - pe-optimization
+  - pe-structured-output
+  - pe-grounded-tool-prompting
+  - pe-safety
+  - pe-evaluation
+  - se-representation
+  - se-acquisition
+  - se-retrieval
+  - se-composition
+  - se-procedural-memory
+  - se-transfer
+  - se-self-evolution
+  - se-evolution-evaluation
+  - se-rsi

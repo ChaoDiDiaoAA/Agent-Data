@@ -18,6 +18,10 @@ const libraryMenuOptions = new Map([
   ['agent-engineering', { order: 1, label: 'Agent Engineering' }],
   ['multi-agent-engineering', { order: 2, label: 'Multi-Agent Engineering' }],
   ['llm-post-training', { order: 3, label: 'LLM Post-Training' }],
+  ['agent-tool', { order: 4, label: 'Agent Tool & RSI' }],
+  ['agent-context', { order: 5, label: 'Agent & LLM Context' }],
+  ['skill-prompt-engineering', { order: 6, label: 'Skill & Prompt Engineering' }],
+  ['agent-memory', { order: 7, label: 'Agent Memory' }],
 ]);
 
 const menu = [

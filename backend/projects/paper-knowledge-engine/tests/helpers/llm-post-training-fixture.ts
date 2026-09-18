@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { writeLayeredConfigFixture } from '../fixtures/layered-config.ts';
 import { removeOwnedTestDirectory } from '../fixtures/runtime-fixtures.ts';
 
-export const paperLibraryIds = ['fsd', 'agent-engineering', 'multi-agent-engineering', 'llm-post-training'] as const;
+export const paperLibraryIds = ['fsd', 'agent-engineering', 'multi-agent-engineering', 'llm-post-training', 'agent-memory', 'skill-prompt-engineering'] as const;
 
 export async function withPostTrainingFixture<T>(run: (root: string) => Promise<T>): Promise<T> {
   const testRoot = process.env.FSD_TEST_ROOT;

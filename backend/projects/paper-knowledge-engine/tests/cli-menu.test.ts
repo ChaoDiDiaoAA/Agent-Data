@@ -78,6 +78,57 @@ test('Multi-Agent Engineering uses the same paper menu as FSD and Agent Engineer
   ]);
 });
 
+test('Agent Tool & RSI uses the shared paper menu', async () => {
+  const lines: string[] = [];
+  await main(['--library', 'agent-tool'], {
+    root: projectRoot,
+    interactive: true,
+    readLine: async () => '0',
+    writeLine: line => { lines.push(line); },
+  });
+  assert.equal(lines[1], '当前方向库：Agent Tool & RSI（含 LLM 工具后训练）（agent-tool）');
+  assert.deepEqual(lines.slice(3), [
+    '1. 查看 MinerU 配置', '2. 运行当前任务', '3. 运行周任务',
+    '4. 导入并解析本地 PDF', '5. 解析指定论文', '6. 发布或恢复 Evidence',
+    '7. 对账 PDF 与 Evidence', '8. 查看任务配置', '9. 检查 arXiv 网络',
+    '10. 准备或修复 OpenCLI', '11. 切换方向库', '0. 退出',
+  ]);
+});
+
+test('Agent Memory uses the shared paper menu', async () => {
+  const lines: string[] = [];
+  await main(['--library', 'agent-memory'], {
+    root: projectRoot,
+    interactive: true,
+    readLine: async () => '0',
+    writeLine: line => { lines.push(line); },
+  });
+  assert.equal(lines[1], '当前方向库：Agent Memory（智能体记忆知识库）（agent-memory）');
+  assert.deepEqual(lines.slice(3), [
+    '1. 查看 MinerU 配置', '2. 运行当前任务', '3. 运行周任务',
+    '4. 导入并解析本地 PDF', '5. 解析指定论文', '6. 发布或恢复 Evidence',
+    '7. 对账 PDF 与 Evidence', '8. 查看任务配置', '9. 检查 arXiv 网络',
+    '10. 准备或修复 OpenCLI', '11. 切换方向库', '0. 退出',
+  ]);
+});
+
+test('Agent & LLM Context uses the shared paper menu', async () => {
+  const lines: string[] = [];
+  await main(['--library', 'agent-context'], {
+    root: projectRoot,
+    interactive: true,
+    readLine: async () => '0',
+    writeLine: line => { lines.push(line); },
+  });
+  assert.equal(lines[1], '当前方向库：Agent & LLM Context（上下文知识库）（agent-context）');
+  assert.deepEqual(lines.slice(3), [
+    '1. 查看 MinerU 配置', '2. 运行当前任务', '3. 运行周任务',
+    '4. 导入并解析本地 PDF', '5. 解析指定论文', '6. 发布或恢复 Evidence',
+    '7. 对账 PDF 与 Evidence', '8. 查看任务配置', '9. 检查 arXiv 网络',
+    '10. 准备或修复 OpenCLI', '11. 切换方向库', '0. 退出',
+  ]);
+});
+
 test('terminal operation summaries stay concise for success and recovery failures', () => {
   assert.equal(formatCliOperationSummary('run-task', { status: 'completed', runId: 'run-1' }, { status: 'completed', paperCount: 79 }),
     '[任务] 成功：已处理 79 篇论文');

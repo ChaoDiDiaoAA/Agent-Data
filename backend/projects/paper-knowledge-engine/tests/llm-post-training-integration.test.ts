@@ -10,14 +10,14 @@ import { paperLibraryIds, withPostTrainingFixture } from './helpers/llm-post-tra
 
 const libraryId = asLibraryId('llm-post-training');
 
-test('all four paper libraries have separate paths and opening a menu creates no state', () =>
+test('all six paper libraries have separate paths and opening a menu creates no state', () =>
   withPostTrainingFixture(async root => {
     const contexts = paperLibraryIds.map(id => loadEngineContext({ root, libraryId: id }));
     for (const key of ['dataRoot', 'databasePath', 'archiveRoot', 'runsRoot',
       'operationsRoot', 'workRoot', 'backupRoot', 'pdfRoot', 'vaultRoot'] as const) {
       const paths = contexts.map(context => context.paths[key]);
       assert.ok(paths.every(path => typeof path === 'string'));
-      assert.equal(new Set(paths).size, 4, key);
+      assert.equal(new Set(paths).size, 6, key);
     }
 
     const lines: string[] = [];

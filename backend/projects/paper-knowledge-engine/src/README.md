@@ -17,9 +17,9 @@
 
 ## 数据与配置边界
 
-配置入口 `shared/engine-context.ts` 加载 `config/engine.yaml`、`config/machine.local.yaml` 和方向配置。paper 方向从 `config/<libraryId>/` 加载 `library.yaml`、`query-matrix.yaml`、`paper-policy.yaml`、`categories.yaml`；Research 方向使用其独立的四文件契约。当前 paper 方向值为 `fsd`、`agent-engineering` 和 `multi-agent-engineering`。完整配置文件集合由 `shared/config-files.ts` 定义，操作策略快照绑定全部六个文件。所选 `libraryId` 从 CLI 传到操作和状态层。
+配置入口 `shared/engine-context.ts` 加载 `config/engine.yaml`、`config/machine.local.yaml` 和方向配置。paper 方向从 `config/<libraryId>/` 加载 `library.yaml`、`query-matrix.yaml`、`paper-policy.yaml`、`categories.yaml`；Research 方向使用其独立的四文件契约。当前 paper 方向包括 `fsd`、`agent-engineering`、`multi-agent-engineering`、`llm-post-training`、`agent-tool`、`agent-context`、`skill-prompt-engineering` 和 `agent-memory`。完整配置文件集合由 `shared/config-files.ts` 定义，操作策略快照绑定所选方向的四个文件。所选 `libraryId` 从 CLI 传到操作和状态层。
 
-三个 paper 方向共用发现检查点、选篇、PDF 下载、任务级 MinerU 会话、Archive v2 和 Evidence v3 实现。Multi-Agent 的领域差异位于方向 YAML 中：`library/selection/paper-policy.ts` 从标题和摘要匹配配置词表，Multi-Agent 仅提供明确的多 Agent 或 Agent 间关系技术词，并将通用程序结构词列表置空。扩展此方向应通过配置及共享接口完成。
+所有 paper 方向共用发现检查点、选篇、PDF 下载、任务级 MinerU 会话、Archive v2 和 Evidence v3 实现。Multi-Agent、Agent Tool、Agent Context、Agent Memory 和 Skill & Prompt 的领域差异位于方向 YAML 中：`library/selection/paper-policy.ts` 从标题和摘要匹配配置词表；Agent Tool 的后训练方向要求工具能力词与训练主题查询同时命中，Agent Context 的后训练方向要求上下文主题与后训练证据同时出现，Agent Memory 的后训练方向要求记忆主题与语言模型对象证据同时出现，Skill & Prompt 的 `pe-*` 与 `se-*` 分别约束 Prompt 和 Skill 证据，`se-rsi` 要求明确改进对象和迭代词。扩展这些方向应通过配置及共享接口完成。
 
 当前 Archive 路径为 `archive/<baseId>-v<version>/`，与 Vault 的 `Evidence/papers/<baseId>-v<version>/` 分别维护。修改归档路径必须同步检查写入、任务清单、发布读取、对账、迁移目标和 Vault 重建；历史输入格式不随当前目标变化。
 

@@ -1,0 +1,81 @@
+tracks:
+  - id: mem-foundations
+    query: '(ti:"agent memory" OR abs:"agent memory" OR ti:"memory system" OR abs:"memory system") AND (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-working-context
+    query: '(ti:"working memory" OR abs:"working memory" OR ti:"context memory" OR abs:"context memory" OR ti:"long-term context" OR abs:"long-term context") AND (ti:agent OR abs:agent OR ti:LLM OR abs:LLM)'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-episodic
+    query: '(ti:"episodic memory" OR abs:"episodic memory" OR ti:"experience memory" OR abs:"experience memory" OR ti:"interaction memory" OR abs:"interaction memory") AND (ti:agent OR abs:agent OR ti:"language model" OR abs:"language model")'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-semantic
+    query: '(ti:"semantic memory" OR abs:"semantic memory" OR ti:"knowledge memory" OR abs:"knowledge memory" OR ti:"memory augmented" OR abs:"memory augmented") AND (ti:agent OR abs:agent OR ti:LLM OR abs:LLM)'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-procedural-skills
+    query: '(ti:"procedural memory" OR abs:"procedural memory" OR ti:"skill library" OR abs:"skill library" OR ti:"experience replay" OR abs:"experience replay") AND (ti:agent OR abs:agent OR ti:"language model" OR abs:"language model")'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-writing
+    query: '(ti:"memory writing" OR abs:"memory writing" OR ti:"memory update" OR abs:"memory update" OR ti:"memory extraction" OR abs:"memory extraction") AND (ti:agent OR abs:agent OR ti:LLM OR abs:LLM)'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-organization
+    query: '(ti:"memory organization" OR abs:"memory organization" OR ti:"memory graph" OR abs:"memory graph" OR ti:"memory architecture" OR abs:"memory architecture") AND (ti:agent OR abs:agent OR ti:LLM OR abs:LLM)'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-retrieval
+    query: '(ti:"memory retrieval" OR abs:"memory retrieval" OR ti:"memory augmented retrieval" OR abs:"memory augmented retrieval" OR ti:"retrieval memory" OR abs:"retrieval memory") AND (ti:agent OR abs:agent OR ti:LLM OR abs:LLM)'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-consolidation
+    query: '(ti:"memory consolidation" OR abs:"memory consolidation" OR ti:"memory compression" OR abs:"memory compression" OR ti:"memory evolution" OR abs:"memory evolution") AND (ti:agent OR abs:agent OR ti:LLM OR abs:LLM)'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-personalization
+    query: '(ti:"personalized memory" OR abs:"personalized memory" OR ti:"personalized agent" OR abs:"personalized agent" OR ti:"user memory" OR abs:"user memory") AND (ti:agent OR abs:agent OR ti:"language model" OR abs:"language model")'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-shared
+    query: '(ti:"shared memory" OR abs:"shared memory" OR ti:"multi-agent memory" OR abs:"multi-agent memory" OR ti:"memory consistency" OR abs:"memory consistency") AND (ti:agent OR abs:agent OR ti:"language model" OR abs:"language model")'
+    categories: [cs.MA, cs.AI, cs.CL]
+    date_modes: [submitted, updated]
+  - id: mem-reflection
+    query: '(ti:reflection OR abs:reflection OR ti:reflexion OR abs:reflexion OR ti:"reflective memory" OR abs:"reflective memory") AND (ti:agent OR abs:agent OR ti:"language model" OR abs:"language model")'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-rsi
+    query: '((ti:"recursive self-improvement" OR abs:"recursive self-improvement" OR ti:"self-improving agent" OR abs:"self-improving agent" OR ti:"self-evolving agent" OR abs:"self-evolving agent") AND (ti:memory OR abs:memory OR ti:experience OR abs:experience OR ti:"skill library" OR abs:"skill library"))'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-transfer
+    query: '(ti:"memory transfer" OR abs:"memory transfer" OR ti:"continual memory" OR abs:"continual memory" OR ti:"continual learning" OR abs:"continual learning") AND (ti:agent OR abs:agent OR ti:"language model" OR abs:"language model")'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-security
+    query: '(ti:"memory poisoning" OR abs:"memory poisoning" OR ti:"memory injection" OR abs:"memory injection" OR ti:"memory privacy" OR abs:"memory privacy") AND (ti:agent OR abs:agent OR ti:LLM OR abs:LLM)'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-evaluation
+    query: '(ti:"memory evaluation" OR abs:"memory evaluation" OR ti:"long-term memory" OR abs:"long-term memory" OR ti:"memory benchmark" OR abs:"memory benchmark") AND (ti:agent OR abs:agent OR ti:LLM OR abs:LLM)'
+    categories: [cs.AI, cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-posttrain-sft
+    query: '((ti:"memory" OR abs:"memory" OR ti:"knowledge retention" OR abs:"knowledge retention") AND (ti:"instruction tuning" OR abs:"instruction tuning" OR ti:"supervised fine-tuning" OR abs:"supervised fine-tuning")) AND (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)'
+    categories: [cs.CL, cs.LG, cs.AI]
+    date_modes: [submitted, updated]
+  - id: mem-posttrain-rl
+    query: '((ti:"memory" OR abs:"memory" OR ti:"experience replay" OR abs:"experience replay") AND (ti:"reinforcement learning" OR abs:"reinforcement learning" OR ti:"preference optimization" OR abs:"preference optimization")) AND (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)'
+    categories: [cs.CL, cs.LG, stat.ML]
+    date_modes: [submitted, updated]
+  - id: mem-posttrain-distillation
+    query: '((ti:"memory" OR abs:"memory" OR ti:"experience distillation" OR abs:"experience distillation" OR ti:"trajectory distillation" OR abs:"trajectory distillation") AND (ti:distillation OR abs:distillation)) AND (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM)'
+    categories: [cs.CL, cs.LG]
+    date_modes: [submitted, updated]
+  - id: mem-posttrain-parametric
+    query: '((ti:"parametric memory" OR abs:"parametric memory" OR ti:"knowledge editing" OR abs:"knowledge editing" OR ti:"continual learning" OR abs:"continual learning" OR ti:"catastrophic forgetting" OR abs:"catastrophic forgetting") AND (ti:"language model" OR abs:"language model" OR ti:LLM OR abs:LLM))'
+    categories: [cs.CL, cs.LG, cs.AI]
+    date_modes: [submitted, updated]
