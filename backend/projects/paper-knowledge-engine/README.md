@@ -1,6 +1,6 @@
 # Paper Knowledge Engine
 
-论文知识引擎是基于 Bun 1.4 / TypeScript 的确定性资料库工具，当前包含多个业务数据与任务状态隔离的 paper 方向库，包括 **Skill & Prompt Engineering（skill-prompt-engineering）**。它们复用引擎，并共享机器级 arXiv 请求节流与 MinerU 资源锁。
+论文知识引擎是基于 Bun 1.4 / TypeScript 的确定性资料库工具。当前配置了 8 个业务数据与任务状态相互隔离的 paper 方向库；它们复用同一引擎，并共享机器级 arXiv 请求节流与 MinerU 资源锁。
 
 ```text
 FSD：OpenCLI / arXiv → 规则筛选 → PDF 下载 → 本地 MinerU → Archive v2 → Evidence v3
@@ -14,6 +14,19 @@ Skill & Prompt Engineering：OpenCLI / arXiv → 规则筛选 → PDF 下载 →
 ```
 
 本阶段建设可追溯的 L2 资料库，保留 MinerU Markdown、页级文本、来源 PDF 和资源，不调用 LLM。L3 人工知识层在 L2 稳定后实施。
+
+当前活动配置以各目录的 `config/<library-id>/library.yaml` 为准：
+
+| 方向库 | `library_id` | 起始日期 | Track | Current 上限 | Weekly 上限 | 调度 |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| FSD 论文知识库 | `fsd` | 2025-06-01 | 8 | 277 | 20 | 启用，每 4 周 |
+| Agent Engineering | `agent-engineering` | 2026-01-01 | 15 | 174 | 15 | 启用，每 4 周 |
+| Multi-Agent Engineering | `multi-agent-engineering` | 2025-06-01 | 18 | 540 | 18 | 启用，每 4 周 |
+| LLM Post-Training | `llm-post-training` | 2025-06-01 | 18 | 630 | 18 | 启用，每 4 周 |
+| Agent Tool & RSI | `agent-tool` | 2026-01-01 | 18 | 450 | 12 | 关闭 |
+| Agent & LLM Context | `agent-context` | 2026-01-01 | 18 | 450 | 18 | 启用，每 4 周 |
+| Skill & Prompt Engineering | `skill-prompt-engineering` | 2026-01-01 | 19 | 475 | 20 | 关闭 |
+| Agent Memory | `agent-memory` | 2026-01-01 | 20 | 500 | 20 | 关闭 |
 
 ## 纯 Bun 入口
 
@@ -96,7 +109,7 @@ bun src/cli.ts --library llm-post-training run-task --mode weekly --format json
 bun src/cli.ts --library llm-post-training reconcile
 ```
 
-Agent Tool & RSI 的稳定标识为 `agent-tool`，覆盖工具使用、工具生成、LLM 工具后训练和递归自我改进；自动来源仅为 OpenCLI/arXiv。首期从 `2026-01-01` 开始，18 个 Track 各 15 篇、Current 总上限 270，Weekly 增量上限 12，默认不安装自动调度。后训练 Track 必须同时有工具能力和训练证据；RSI Track 必须明确改进对象与迭代机制。
+Agent Tool & RSI 的稳定标识为 `agent-tool`，覆盖工具使用、工具生成、LLM 工具后训练和递归自我改进；自动来源仅为 OpenCLI/arXiv。从 `2026-01-01` 开始，18 个 Track 各 25 篇、Current 总上限 450，Weekly 增量上限 12，默认不安装自动调度。后训练 Track 必须同时有工具能力和训练证据；RSI Track 必须明确改进对象与迭代机制。
 
 ```powershell
 bun src/cli.ts --library agent-tool harvest-plan --mode current --format json
@@ -106,7 +119,7 @@ bun src/cli.ts --library agent-tool run-task --mode weekly --format json
 bun src/cli.ts --library agent-tool reconcile
 ```
 
-Agent Memory 的稳定标识为 `agent-memory`，覆盖运行时记忆、RSI 记忆和 LLM 后训练记忆。20 个 Track 分别覆盖记忆基础、工作/情景/语义/程序性记忆、写入、组织、检索、巩固、共享、安全、评测，以及记忆 SFT、记忆 RL、记忆蒸馏和参数化记忆。自动来源仅为 OpenCLI/arXiv，从 `2026-01-01` 起检索；Current 总上限为 200，每个 Track 的初始分配为 10，Weekly 上限为 20，默认关闭调度。
+Agent Memory 的稳定标识为 `agent-memory`，覆盖运行时记忆、RSI 记忆和 LLM 后训练记忆。20 个 Track 分别覆盖记忆基础、工作/情景/语义/程序性记忆、写入、组织、检索、巩固、共享、安全、评测，以及记忆 SFT、记忆 RL、记忆蒸馏和参数化记忆。自动来源仅为 OpenCLI/arXiv，从 `2026-01-01` 起检索；Current 总上限为 500，每个 Track 的初始分配为 25，Weekly 上限为 20，默认关闭调度。
 
 完整操作边界见 [Agent Memory 操作说明](docs/agent-memory/operations.md)，历史阅读入口见 [基础论文候选](docs/agent-memory/foundational-papers.md)。
 
@@ -119,7 +132,7 @@ bun src/cli.ts --library agent-memory run-task --mode weekly --format json
 bun src/cli.ts --library agent-memory reconcile
 ```
 
-Agent & LLM Context 的稳定标识为 `agent-context`，把 Agent Context、RSI Context 和 LLM 后训练 Context 放在同一个独立论文库中。18 个 Track 覆盖上下文组装、检索、压缩、长任务、记忆、工具上下文、隔离安全、反思/经验/递归演化，以及长上下文后训练、检索 grounding、记忆策略、上下文蒸馏、上下文数据和上下文评测。自动来源仅为 OpenCLI/arXiv，从 `2026-01-01` 起检索；Current 总上限为 180，每个 Track 初始分配 10，Weekly 上限为 18。后训练 Track 不要求论文出现 Agent，但必须同时出现上下文主题和后训练方法、数据或评估证据；普通 SFT/DPO/RL、纯 KV cache 优化和金融 RSI 不纳入。本次只完成配置与离线验证，不执行真实采集、PDF 下载、MinerU 或调度安装。
+Agent & LLM Context 的稳定标识为 `agent-context`，把 Agent Context、RSI Context 和 LLM 后训练 Context 放在同一个独立论文库中。18 个 Track 覆盖上下文组装、检索、压缩、长任务、记忆、工具上下文、隔离安全、反思/经验/递归演化，以及长上下文后训练、检索 grounding、记忆策略、上下文蒸馏、上下文数据和上下文评测。自动来源仅为 OpenCLI/arXiv，从 `2026-01-01` 起检索；Current 总上限为 450，每个 Track 初始分配 25，Weekly 上限为 18。后训练 Track 不要求论文出现 Agent，但必须同时出现上下文主题和后训练方法、数据或评估证据；普通 SFT/DPO/RL、纯 KV cache 优化和金融 RSI 不纳入。
 
 ```powershell
 bun src/cli.ts --library agent-context harvest-plan --mode current --format json
@@ -129,7 +142,7 @@ bun src/cli.ts --library agent-context run-task --mode weekly --format json
 bun src/cli.ts --library agent-context reconcile
 ```
 
-Skill & Prompt Engineering 的稳定标识为 `skill-prompt-engineering`，只从 OpenCLI/arXiv 获取 `2025-01-01` 以来的论文，Current 总上限 200，Weekly 增量上限 20，默认关闭调度。`pe-*` 是 Prompt Engineering 主题，覆盖提示词设计、上下文学习、推理、优化、安全和评测；`se-*` 是 Skill Engineering 主题，覆盖技能表示、获取、检索、组合、程序性记忆、迁移、自我演化（自进化）和演化评测；`se-rsi` 专门要求 Skill 的递归自我改进对象与迭代机制。
+Skill & Prompt Engineering 的稳定标识为 `skill-prompt-engineering`，只从 OpenCLI/arXiv 获取 `2026-01-01` 以来的论文，19 个 Track 各 25 篇、Current 总上限 475，Weekly 增量上限 20，默认关闭调度。`pe-*` 是 Prompt Engineering 主题，覆盖提示词设计、上下文学习、推理、优化、安全和评测；`se-*` 是 Skill Engineering 主题，覆盖技能表示、获取、检索、组合、程序性记忆、迁移、自我演化（自进化）和演化评测；`se-rsi` 专门要求 Skill 的递归自我改进对象与迭代机制。
 
 ```powershell
 bun src/cli.ts --library skill-prompt-engineering harvest-plan --mode current --format json
@@ -184,30 +197,30 @@ D:\agent-data\backend\projects\paper-knowledge-engine\config\
 │  ├─ paper-policy.yaml       论文纳入、排除和 Track 优先级
 │  └─ categories.yaml         PDF 分类目录映射
 ├─ llm-post-training\
-   ├─ library.yaml            LLM Post-Training 身份、日期、配额、调度
-   ├─ query-matrix.yaml       18 个后训练 Track 的 arXiv 查询
-   ├─ paper-policy.yaml       后训练论文纳入、排除和 Track 优先级
-   └─ categories.yaml         18 个 Track 的 PDF 分类目录映射
-└─ agent-tool\
-   ├─ library.yaml            Agent Tool & RSI 身份、日期、配额、调度
-   ├─ query-matrix.yaml       18 个工具/后训练/RSI Track 的 arXiv 查询
-   ├─ paper-policy.yaml       工具能力、后训练和 RSI 纳入规则
-   └─ categories.yaml         18 个 Track 的 PDF 分类目录映射
+│  ├─ library.yaml            LLM Post-Training 身份、日期、配额、调度
+│  ├─ query-matrix.yaml       18 个后训练 Track 的 arXiv 查询
+│  ├─ paper-policy.yaml       后训练论文纳入、排除和 Track 优先级
+│  └─ categories.yaml         18 个 Track 的 PDF 分类目录映射
+├─ agent-tool\
+│  ├─ library.yaml            Agent Tool & RSI 身份、日期、配额、调度
+│  ├─ query-matrix.yaml       18 个工具/后训练/RSI Track 的 arXiv 查询
+│  ├─ paper-policy.yaml       工具能力、后训练和 RSI 纳入规则
+│  └─ categories.yaml         18 个 Track 的 PDF 分类目录映射
+├─ agent-context\
+│  ├─ library.yaml            Agent Context 身份、日期、配额、调度
+│  ├─ query-matrix.yaml       Context/RSI/后训练 Context Track 的 arXiv 查询
+│  ├─ paper-policy.yaml       Context、RSI 与后训练 Context 纳入规则
+│  └─ categories.yaml         Track 的 PDF 分类目录映射
+├─ skill-prompt-engineering\
+│  ├─ library.yaml            Prompt/Skill 身份、日期、配额、调度
+│  ├─ query-matrix.yaml       10 个 Prompt、9 个 Skill Track 的 arXiv 查询
+│  ├─ paper-policy.yaml       Prompt、Skill 与 RSI 纳入规则
+│  └─ categories.yaml         19 个 Track 的 PDF 分类目录映射
 └─ agent-memory\
    ├─ library.yaml            Agent Memory 身份、日期、配额、调度
    ├─ query-matrix.yaml       20 个记忆/RSI/后训练记忆 Track 的 arXiv 查询
    ├─ paper-policy.yaml       记忆机制、RSI 与后训练记忆纳入规则
    └─ categories.yaml         20 个 Track 的 PDF 分类目录映射
-├─ agent-context\
-   ├─ library.yaml            Agent Context 身份、日期、配额、调度
-   ├─ query-matrix.yaml       Context/RSI/后训练 Context Track 的 arXiv 查询
-   ├─ paper-policy.yaml       Context、RSI 与后训练 Context 纳入规则
-   └─ categories.yaml         Track 的 PDF 分类目录映射
-└─ skill-prompt-engineering\
-   ├─ library.yaml            Prompt/Skill 身份、日期、配额、调度
-   ├─ query-matrix.yaml       10 个 Prompt、9 个 Skill Track 的 arXiv 查询
-   ├─ paper-policy.yaml       Prompt、Skill 与 RSI 纳入规则
-   └─ categories.yaml         19 个 Track 的 PDF 分类目录映射
 ```
 
 | 配置 | 职责 |
@@ -278,9 +291,9 @@ Agent Engineering 的 15 个 Track 全部通过 OpenCLI 查询 arXiv，`query-ma
 
 ### Multi-Agent Engineering 当前检索范围与边界
 
-Multi-Agent Engineering 从 `2026-01-01` 开始检索，固定覆盖 18 个 Track；每个 Track 分别查询 submitted 与 updated，共 36 个分片。自动发现只通过 OpenCLI/arXiv；`import-local` / `parse-local` 仅处理用户显式提供的本地 PDF，是唯一非-arXiv 摄入路径。
+Multi-Agent Engineering 从 `2025-06-01` 开始检索，固定覆盖 18 个 Track；每个 Track 分别查询 submitted 与 updated，共 36 个分片。自动发现只通过 OpenCLI/arXiv；`import-local` / `parse-local` 仅处理用户显式提供的本地 PDF，是唯一非-arXiv 摄入路径。
 
-`current` 总上限为 180 篇，各 Track 配额为 10；`weekly` 总上限为 18 篇，按本方向成功水位回溯 48 小时。配额通过共用选篇器执行，去重后计数。调度描述当前以 `2026-08-31` 为锚点，每 4 周的周一 22:30（Asia/Shanghai）运行一次；`weekly` 是增量任务模式名，实际周期以 `schedule-config` 输出为准。
+`current` 总上限为 540 篇，各 Track 配额为 30；`weekly` 总上限为 18 篇，按本方向成功水位回溯 48 小时。配额通过共用选篇器执行，去重后计数。调度描述当前以 `2026-08-31` 为锚点，每 4 周的周一 22:30（Asia/Shanghai）运行一次；`weekly` 是增量任务模式名，实际周期以 `schedule-config` 输出为准。
 
 本方向研究多个具有独立 Context、State 或决策边界的 Agent，以及它们之间的委派、通信、共享状态和协调。自动硬筛选从标题与摘要匹配明确的多 Agent 或 Agent 间关系词（如 `multi-agent`、`multiple agents`、`agent-to-agent`），同时要求工程任务词、有效 arXiv 身份与日期，以及已启用的 Track。仅有单 Agent 工具调用、`shared memory` 或普通并行程序术语不足以通过筛选；Track 标签本身也不能替代来源文本证据。该筛选是确定性词法规则，未显式表述多 Agent 的相关论文可能被漏选。
 
@@ -307,21 +320,21 @@ Multi-Agent Engineering 从 `2026-01-01` 开始检索，固定覆盖 18 个 Trac
 
 ### LLM Post-Training 当前检索范围与边界
 
-`LLM Post-Training（大模型后训练知识库）` 的稳定标识为 `llm-post-training`，从 `2026-01-01` 开始检索。18 个 Track 为：`pt-foundations`、`pt-sft`、`pt-data-curation`、`pt-synthetic-data`、`pt-reward-modeling`、`pt-preference-optimization`、`pt-policy-optimization`、`pt-verifiable-rewards`、`pt-reasoning`、`pt-distillation`、`pt-tool-agent`、`pt-multimodal`、`pt-safety-alignment`、`pt-adaptation`、`pt-efficient-tuning`、`pt-training-systems`、`pt-stability`、`pt-evaluation`。每个 Track 同时查询 submitted 与 updated，共 36 个分片。
+`LLM Post-Training（大模型后训练知识库）` 的稳定标识为 `llm-post-training`，从 `2025-06-01` 开始检索。18 个 Track 为：`pt-foundations`、`pt-sft`、`pt-data-curation`、`pt-synthetic-data`、`pt-reward-modeling`、`pt-preference-optimization`、`pt-policy-optimization`、`pt-verifiable-rewards`、`pt-reasoning`、`pt-distillation`、`pt-tool-agent`、`pt-multimodal`、`pt-safety-alignment`、`pt-adaptation`、`pt-efficient-tuning`、`pt-training-systems`、`pt-stability`、`pt-evaluation`。每个 Track 同时查询 submitted 与 updated，共 36 个分片。
 
-`current` 总上限为 180，每个 Track 的 10 是共享选篇器的初始分配目标，空额允许外溢，并非每类硬上限；`weekly` 总上限为 18，使用本库成功水位和 48 小时重叠窗口。自动来源仅为 OpenCLI/arXiv。本地 PDF 只能通过显式 `import-local` / `parse-local` 进入，且不会恢复完整 arXiv 元数据、自动归入上述 18 个 Track 或推进自动发现水位。
+`current` 总上限为 630，每个 Track 的 35 是共享选篇器的初始分配目标，空额允许外溢，并非每类硬上限；`weekly` 总上限为 18，使用本库成功水位和 48 小时重叠窗口。自动来源仅为 OpenCLI/arXiv。本地 PDF 只能通过显式 `import-local` / `parse-local` 进入，且不会恢复完整 arXiv 元数据、自动归入上述 18 个 Track 或推进自动发现水位。
 
 ### Agent Tool & RSI 当前检索范围与边界
 
 `Agent Tool & RSI（含 LLM 工具后训练）` 的稳定标识为 `agent-tool`，从 `2026-01-01` 开始检索，18 个 Track 同时查询 submitted 与 updated，共 36 个分片。8 个 Agent Tool Track 覆盖工具基础、发现选择、组合规划、协议、生成、工具/技能库、系统评测和安全；7 个 LLM 工具后训练 Track 覆盖训练数据、工具调用 SFT、奖励验证、偏好优化、交互式 RL、蒸馏迁移和后训练评测；3 个 RSI Track 覆盖工具修复、Agent 演化和改进机制的递归优化。
 
-Current 总上限为 270，每个 Track 配置 15；Weekly 增量上限为 12，`weekly_schedule.enabled: false` 表示首期只手动运行。后训练论文必须同时有工具能力和训练证据；RSI 论文必须明确改进对象与迭代机制，不把裸 `RSI`、普通 SFT/DPO/RL 或普通工具调用作为充分证据。自动来源仅为 OpenCLI/arXiv，本地 PDF 仍通过显式 `import-local` / `parse-local` 进入。
+Current 总上限为 450，每个 Track 配置 25；Weekly 增量上限为 12，`weekly_schedule.enabled: false` 表示首期只手动运行。后训练论文必须同时有工具能力和训练证据；RSI 论文必须明确改进对象与迭代机制，不把裸 `RSI`、普通 SFT/DPO/RL 或普通工具调用作为充分证据。自动来源仅为 OpenCLI/arXiv，本地 PDF 仍通过显式 `import-local` / `parse-local` 进入。
 
 ### Agent Memory 当前检索范围与边界
 
 `agent-memory` 是 `library_kind: paper`，显示名为 `Agent Memory（智能体记忆知识库）`，从 `2026-01-01` 起通过 OpenCLI/arXiv 自动发现。20 个 Track 同时查询 submitted 和 updated，共 40 个分片：16 个运行时/RSI 记忆主题，以及 4 个 LLM 后训练记忆主题（记忆 SFT、记忆 RL、记忆蒸馏、参数化记忆）。后训练记忆论文不要求出现 Agent，只要标题或摘要明确研究 LLM 的记忆能力、知识保持、记忆操作训练、经验内化、知识编辑或遗忘控制即可。
 
-Current 总上限为 200，每个 Track 各配置 10；Weekly 增量上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。`mem-rsi` 要求记忆、经验或技能积累与改进循环同时出现，普通一次性反思不自动视为 RSI。GPU 显存、普通 RAG、无记忆机制的通用 SFT/RL 和一次性自我纠错不会仅凭宽泛术语进入本库。自动来源仅为 OpenCLI/arXiv；历史基础论文通过显式 `import-local` / `parse-local` 导入，不推进自动发现水位。
+Current 总上限为 500，每个 Track 各配置 25；Weekly 增量上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。`mem-rsi` 要求记忆、经验或技能积累与改进循环同时出现，普通一次性反思不自动视为 RSI。GPU 显存、普通 RAG、无记忆机制的通用 SFT/RL 和一次性自我纠错不会仅凭宽泛术语进入本库。自动来源仅为 OpenCLI/arXiv；历史基础论文通过显式 `import-local` / `parse-local` 导入，不推进自动发现水位。
 
 ```text
 D:/agent-data/data/paper-libraries/agent-memory
@@ -332,9 +345,9 @@ D:/obsidian/data/paper-knowledge-engine/agent-memory
 
 ### Skill & Prompt Engineering 当前检索范围与边界
 
-`skill-prompt-engineering` 是 `library_kind: paper`，显示名为 `Skill & Prompt Engineering（技能与提示词工程知识库）`，从 `2025-01-01` 起通过 OpenCLI/arXiv 自动发现。19 个 Track 同时查询 submitted 和 updated，共 38 个分片；10 个 `pe-*` Track 明确归入 Prompt Engineering，9 个 `se-*` Track 明确归入 Skill Engineering，其中 `se-rsi` 专门研究 Skill 的递归自我改进。
+`skill-prompt-engineering` 是 `library_kind: paper`，显示名为 `Skill & Prompt Engineering（技能与提示词工程知识库）`，从 `2026-01-01` 起通过 OpenCLI/arXiv 自动发现。19 个 Track 同时查询 submitted 和 updated，共 38 个分片；10 个 `pe-*` Track 明确归入 Prompt Engineering，9 个 `se-*` Track 明确归入 Skill Engineering，其中 `se-rsi` 专门研究 Skill 的递归自我改进。
 
-Current 总上限为 200（前 18 个 Track 各 10，`se-rsi` 为 20）；Weekly 增量上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。Prompt 论文必须有提示词或上下文策略证据；Skill 论文必须有可复用能力的表示、获取、检索、组合、记忆、迁移或演化（自进化）证据；RSI 论文还必须明确被改进对象和递归迭代、评估或选择机制。金融技术分析中的 RSI、普通 SFT/DPO/RL 和只有一次反思的论文不会仅凭关键词进入本库。自动来源仅为 OpenCLI/arXiv，历史论文通过显式 `import-local` / `parse-local` 导入，不推进自动发现水位。
+Current 总上限为 475（19 个 Track 各 25）；Weekly 增量上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。Prompt 论文必须有提示词或上下文策略证据；Skill 论文必须有可复用能力的表示、获取、检索、组合、记忆、迁移或演化（自进化）证据；RSI 论文还必须明确被改进对象和递归迭代、评估或选择机制。金融技术分析中的 RSI、普通 SFT/DPO/RL 和只有一次反思的论文不会仅凭关键词进入本库。自动来源仅为 OpenCLI/arXiv，历史论文通过显式 `import-local` / `parse-local` 导入，不推进自动发现水位。
 
 ```text
 D:/agent-data/data/paper-libraries/skill-prompt-engineering

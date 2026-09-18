@@ -171,7 +171,7 @@ Agent 任务的 JSON 结果固定包含论文任务的 `runId`、`mode`、`resum
 
 ### Multi-Agent Engineering 方向库
 
-`multi-agent-engineering` 是 `library_kind: paper`，与 FSD/Agent 使用相同的四个论文文件：`library.yaml`、`query-matrix.yaml`、`paper-policy.yaml` 与 `categories.yaml`。它固定从 `2026-01-01` 起通过 OpenCLI/arXiv 自动发现论文；Current 上限为 180、每个 Track 上限为 10、Weekly 上限为 18、增量重叠窗口为 48 小时。
+`multi-agent-engineering` 是 `library_kind: paper`，与 FSD/Agent 使用相同的四个论文文件：`library.yaml`、`query-matrix.yaml`、`paper-policy.yaml` 与 `categories.yaml`。它固定从 `2025-06-01` 起通过 OpenCLI/arXiv 自动发现论文；Current 上限为 540、每个 Track 初始配额为 30、Weekly 上限为 18、增量重叠窗口为 48 小时。
 
 `weekly_schedule` 当前以 `2026-08-31` 为锚点，`interval_weeks: 4`，周一 22:30（Asia/Shanghai）执行。`weekly` 表示增量模式，实际调度周期由配置决定；查看 `schedule-config` 不会安装或触发计划任务。
 
@@ -199,11 +199,11 @@ Multi-Agent 任务使用相同的五个唯一论文计数：`candidates`、`acce
 
 ### LLM Post-Training 方向库
 
-`llm-post-training` 是 `library_kind: paper`，显示名为 `LLM Post-Training（大模型后训练知识库）`，复用同一组 `library.yaml`、`query-matrix.yaml`、`paper-policy.yaml` 和 `categories.yaml`。自动起点为 `2026-01-01`，增量重叠窗口为 48 小时；自动发现只通过 OpenCLI/arXiv。
+`llm-post-training` 是 `library_kind: paper`，显示名为 `LLM Post-Training（大模型后训练知识库）`，复用同一组 `library.yaml`、`query-matrix.yaml`、`paper-policy.yaml` 和 `categories.yaml`。自动起点为 `2025-06-01`，增量重叠窗口为 48 小时；自动发现只通过 OpenCLI/arXiv。
 
 固定的 18 个 Track 是：`pt-foundations`、`pt-sft`、`pt-data-curation`、`pt-synthetic-data`、`pt-reward-modeling`、`pt-preference-optimization`、`pt-policy-optimization`、`pt-verifiable-rewards`、`pt-reasoning`、`pt-distillation`、`pt-tool-agent`、`pt-multimodal`、`pt-safety-alignment`、`pt-adaptation`、`pt-efficient-tuning`、`pt-training-systems`、`pt-stability`、`pt-evaluation`。每个 Track 配置 `date_modes: [submitted, updated]`，共 36 个分片。
 
-Current 总上限为 180，18 个 Track 各配置 10；这 10 是共享选篇器的初始分配目标，去重后的空额可以外溢，不是每类硬上限。Weekly 总上限为 18。`weekly_schedule.enabled: true` 保留手动增量入口，但本期未注册 scheduler，因此不存在自动执行。本库的 SQLite、Archive、runs、operations、水位、锁、PDF、Vault 和发布回执全部由机器根加 `llm-post-training` 派生，与其他方向隔离：
+Current 总上限为 630，18 个 Track 各配置 35；这 35 是共享选篇器的初始分配目标，去重后的空额可以外溢，不是每类硬上限。Weekly 总上限为 18。`weekly_schedule.enabled: true` 保留增量调度描述。本库的 SQLite、Archive、runs、operations、水位、锁、PDF、Vault 和发布回执全部由机器根加 `llm-post-training` 派生，与其他方向隔离：
 
 ```text
 D:/agent-data/data/paper-libraries/llm-post-training
@@ -222,7 +222,7 @@ bun test --timeout 30000 tests/llm-post-training-paper-library.test.ts tests/llm
 
 `agent-tool` 是 `library_kind: paper`，显示名为 `Agent Tool & RSI（含 LLM 工具后训练）`。它复用四个 paper 配置文件，从 `2026-01-01` 起通过 OpenCLI/arXiv 自动发现。18 个 Track 分为 8 个 Agent Tool、7 个 LLM 工具后训练和 3 个 RSI 方向，每个 Track 同时配置 `submitted`、`updated`，共 36 个分片。
 
-Current 总上限为 270，每个 Track 各 15；Weekly 增量上限为 12，`weekly_schedule.enabled: false` 表示首期手动运行。后训练 Track 要求工具能力与训练证据同时出现，RSI Track 要求明确的改进对象与迭代机制，不把裸 `RSI`、普通 SFT/DPO/RL 或普通工具调用作为充分证据。本库的 SQLite、Archive、runs、operations、水位、锁、PDF、Vault 和发布回执全部由机器根加 `agent-tool` 派生：
+Current 总上限为 450，每个 Track 各 25；Weekly 增量上限为 12，`weekly_schedule.enabled: false` 表示首期手动运行。后训练 Track 要求工具能力与训练证据同时出现，RSI Track 要求明确的改进对象与迭代机制，不把裸 `RSI`、普通 SFT/DPO/RL 或普通工具调用作为充分证据。本库的 SQLite、Archive、runs、operations、水位、锁、PDF、Vault 和发布回执全部由机器根加 `agent-tool` 派生：
 
 ```text
 D:/agent-data/data/paper-libraries/agent-tool
@@ -243,7 +243,7 @@ bun test --timeout 30000 tests/agent-tool-paper-library.test.ts tests/agent-tool
 
 后训练记忆 Track 不要求论文出现 Agent，但标题或摘要必须同时提供语言模型对象证据和具体记忆/知识保持/遗忘或记忆操作证据；普通 SFT、RL、蒸馏、GPU 显存优化和普通 RAG 不会仅凭宽泛词进入本库。`mem-rsi` 需要同时出现累积经验、记忆或技能与改进循环证据，普通一次性反思不自动归为 RSI。
 
-Current 总上限为 200，各 Track 配置 10；Weekly 上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。四个配置文件共同约束身份、查询、筛选和 PDF 分类，运行根、PDF 根与 Vault 根按 `agent-memory` 派生，历史论文仍通过显式本地 PDF 入口补充。
+Current 总上限为 500，各 Track 配置 25；Weekly 上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。四个配置文件共同约束身份、查询、筛选和 PDF 分类，运行根、PDF 根与 Vault 根按 `agent-memory` 派生，历史论文仍通过显式本地 PDF 入口补充。
 
 ```powershell
 bun src/cli.ts --library agent-memory harvest-plan --mode current --format json
@@ -265,7 +265,7 @@ bun test --timeout 30000 tests/agent-memory-paper-library.test.ts tests/llm-post
 
 后训练 Context Track 不要求论文出现 Agent，但标题或摘要必须同时提供语言模型对象、上下文主题和后训练方法/数据/评估证据；普通 SFT、DPO、RL、纯 KV cache 优化和金融 RSI 不会仅凭宽泛词进入本库。RSI Track 要求上下文或记忆与反思、经验反馈或递归演化同时出现。
 
-Current 总上限为 180，各 Track 配置 10；Weekly 上限为 18，`weekly_schedule.enabled: true` 仅表示保留手动增量入口，本次不安装系统调度。四个配置文件共同约束身份、查询、筛选和 PDF 分类，运行根、PDF 根与 Vault 根按 `agent-context` 派生。
+Current 总上限为 450，各 Track 配置 25；Weekly 上限为 18，`weekly_schedule.enabled: true` 保留增量调度描述。四个配置文件共同约束身份、查询、筛选和 PDF 分类，运行根、PDF 根与 Vault 根按 `agent-context` 派生。
 
 ```powershell
 bun src/cli.ts --library agent-context harvest-plan --mode current --format json
@@ -283,9 +283,9 @@ bun test --timeout 30000 tests/agent-context-paper-library.test.ts
 
 ### Skill & Prompt Engineering 方向库
 
-`skill-prompt-engineering` 是 `library_kind: paper`，显示名为 `Skill & Prompt Engineering（技能与提示词工程知识库）`。它从 `2025-01-01` 起通过 OpenCLI/arXiv 自动发现，固定覆盖 19 个 Track，并为每个 Track 配置 `submitted`、`updated` 两种日期模式，共 38 个分片。前 10 个 `pe-*` Track 只归入 Prompt Engineering；后 9 个 `se-*` Track 只归入 Skill Engineering，包含技能获取、组合、迁移、自我演化（自进化）和评测，`se-rsi` 负责 Skill 的递归自我改进。
+`skill-prompt-engineering` 是 `library_kind: paper`，显示名为 `Skill & Prompt Engineering（技能与提示词工程知识库）`。它从 `2026-01-01` 起通过 OpenCLI/arXiv 自动发现，固定覆盖 19 个 Track，并为每个 Track 配置 `submitted`、`updated` 两种日期模式，共 38 个分片。前 10 个 `pe-*` Track 只归入 Prompt Engineering；后 9 个 `se-*` Track 只归入 Skill Engineering，包含技能获取、组合、迁移、自我演化（自进化）和评测，`se-rsi` 负责 Skill 的递归自我改进。
 
-Current 总上限为 200（前 18 个 Track 各 10，`se-rsi` 为 20）；Weekly 上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。Prompt 论文需要提示词或上下文策略证据；Skill 论文需要可复用能力的表示、获取、检索、组合、程序性记忆、迁移或演化证据；RSI 论文还需要明确被改进对象和递归迭代、评估或选择机制。金融技术分析中的 RSI、普通 SFT/DPO/RL 和一次性反思不会仅凭宽泛词进入本库。四个配置文件共同约束身份、查询、筛选和 PDF 分类，运行根、PDF 根与 Vault 根按 `skill-prompt-engineering` 派生：
+Current 总上限为 475（19 个 Track 各 25）；Weekly 上限为 20，`weekly_schedule.enabled: false` 表示首期只手动运行。Prompt 论文需要提示词或上下文策略证据；Skill 论文需要可复用能力的表示、获取、检索、组合、程序性记忆、迁移或演化证据；RSI 论文还需要明确被改进对象和递归迭代、评估或选择机制。金融技术分析中的 RSI、普通 SFT/DPO/RL 和一次性反思不会仅凭宽泛词进入本库。四个配置文件共同约束身份、查询、筛选和 PDF 分类，运行根、PDF 根与 Vault 根按 `skill-prompt-engineering` 派生：
 
 ```text
 D:/agent-data/data/paper-libraries/skill-prompt-engineering
