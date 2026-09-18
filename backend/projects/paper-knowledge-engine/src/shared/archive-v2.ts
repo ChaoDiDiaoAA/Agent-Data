@@ -294,6 +294,23 @@ export function isLikelyChemicalNotation(text: string, matchIndex: number, desti
   return /[A-Za-z0-9)\]=#-]/.test(previous) || /[A-Za-z0-9[\]=#-]/.test(after);
 }
 
+/** Return true for bracketed mathematical expressions followed by a numeric
+ * parenthesis, such as `[40 -5c_x/7](0)`.  MinerU emits this syntax for
+ * ordinary prose/math, but the Markdown link scanner would otherwise resolve
+ * the number as a file in the output directory. */
+function isLikelyMathematicalNotation(text: string, matchIndex: number, destination: string): boolean {
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(destination.trim())) return false;
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open < 0) return false;
+  const label = text.slice(open + 1, matchIndex);
+  return /[\\_=+\-*/^]|(?:\d\s*[A-Za-z])|(?:[A-Za-z]\s*\d)/.test(label);
+}
+
+function isLikelyNonResourceNotation(text: string, matchIndex: number, destination: string): boolean {
+  return isLikelyChemicalNotation(text, matchIndex, destination)
+    || isLikelyMathematicalNotation(text, matchIndex, destination);
+}
+
 function normalizeMarkdownReferenceLabel(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
@@ -334,7 +351,7 @@ function mapTextResourcesSegment(text: string, visit: (value: string) => string)
     const isActiveDefinition = pattern === definitionPattern && !activeLabels.has(normalizeMarkdownReferenceLabel(match[2]!));
     const destination = match[2] ?? match[3];
     if (match[2] !== undefined && !isActiveDefinition && destination !== undefined
-      && !isLikelyChemicalNotation(text, match.index, destination)) {
+      && !isLikelyNonResourceNotation(text, match.index, destination)) {
       destinations.push({ start: match.index + match[1].length, end: match.index + match[0].length });
     }
   }
@@ -342,7 +359,7 @@ function mapTextResourcesSegment(text: string, visit: (value: string) => string)
   const inline = html.replace(inlinePattern,
     (all: string, prefix: string, bracketed: string | undefined, bare: string, suffix: string, offset: number) => {
       const destination = bracketed ?? bare;
-      if (isLikelyChemicalNotation(html, offset, destination)) return all;
+      if (isLikelyNonResourceNotation(html, offset, destination)) return all;
       return prefix + (bracketed !== undefined ? `<${visit(bracketed)}>` : visit(bare)) + suffix;
     });
   return inline.replace(definitionPattern,

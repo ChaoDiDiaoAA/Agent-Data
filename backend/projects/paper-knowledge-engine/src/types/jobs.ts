@@ -98,6 +98,7 @@ export interface ParseArtifacts {
   sourcePath?: string | null; fileSource?: string | null; outputDir?: string | null;
   markdownPath?: string | null; contentListPath?: string | null; pageTextPath?: string | null;
   pageCount?: number | null; elapsedMs?: number | null; exitCode?: number | null;
+  qualityWarnings?: string[];
 }
 
 export interface MinerUCliJob {

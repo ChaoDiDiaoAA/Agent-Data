@@ -15,3 +15,32 @@ test('OCR retry changes only the OCR flag', () => {
   assert.deepEqual(createOcrRetryJob(job), { ...job, isOcr: true });
   assert.throws(() => createOcrRetryJob({ ...job, isOcr: true }), /already attempted/);
 });
+
+test('accepts a textless page when MinerU preserved its visual asset', () => {
+  const result = assessExtraction([
+    { pageNumber: 1, text: '' },
+    { pageNumber: 2, text: 'body' },
+  ], { pageCount: 2 }, { visualOnlyPages: [1] });
+  assert.equal(result.accepted, true);
+  assert.deepEqual(result.reasons, []);
+  assert.deepEqual(result.visualOnlyPages, [1]);
+});
+
+test('accepts an image-only document when every page has a preserved visual asset', () => {
+  const result = assessExtraction([
+    { pageNumber: 1, text: '' },
+    { pageNumber: 2, text: '' },
+  ], { pageCount: 2 }, { visualOnlyPages: [1, 2] });
+  assert.equal(result.accepted, true);
+  assert.deepEqual(result.reasons, []);
+});
+
+test('requests a table-disabled retry when a visual block has no usable asset', () => {
+  const result = assessExtraction([
+    { pageNumber: 1, text: 'body' },
+    { pageNumber: 2, text: '' },
+  ], { pageCount: 2 }, { visualBlockPages: [2] });
+  assert.equal(result.accepted, false);
+  assert.equal(result.retryWithTableDisabled, true);
+  assert.deepEqual(result.reasons, ['empty_page_ratio']);
+});

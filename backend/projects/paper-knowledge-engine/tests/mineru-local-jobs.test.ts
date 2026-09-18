@@ -437,6 +437,73 @@ test('retries one rejected extraction with the same model using OCR', async () =
   } finally { await removeOwnedTestDirectory(root); }
 });
 
+test('retries a table extraction failure with table recognition disabled', async () => {
+  const tables: (boolean | undefined)[] = [];
+  let assessments = 0;
+  const { root, artifact } = await validTestArtifact('table-fallback');
+  const store = {
+    reserveParseAttempt: () => ({ attemptId: `attempt-table-${assessments + 1}` }),
+    failParseAttempt: () => {},
+    finishParseAttempt: () => {},
+    markParsed: () => {},
+    hasSuccessfulParse: () => false,
+  };
+  try {
+    const report = await runLocalParse({
+      baseId: '2601.table-fallback', version: 1, sha256: 'a'.repeat(64),
+      model: 'pipeline', cliBackend: 'pipeline', pageCount: 1, method: 'auto', table: true,
+    }, {
+      store,
+      runner: async (job) => { tables.push(job.table); return { exitCode: 0, elapsedMs: 1 }; },
+      normalize: async () => artifact,
+      assessExtraction: () => {
+        assessments += 1;
+        return assessments === 1
+          ? { accepted: false, retryWithTableDisabled: true, reasons: ['empty_page_ratio'] }
+          : { accepted: true };
+      },
+    });
+    assert.equal(report.status, 'succeeded');
+    assert.deepEqual(tables, [true, false]);
+  } finally { await removeOwnedTestDirectory(root); }
+});
+
+test('accepts a normalized visual-only table page when its asset is archived', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'local-parse-visual-page-'));
+  const paths = {
+    markdownPath: join(root, 'full.md'),
+    contentListPath: join(root, 'content-list.json'),
+    pageTextPath: join(root, 'page-marked.txt'),
+  };
+  await writeFile(paths.markdownPath, '# Paper\n\n![table](assets/images/table.jpg)');
+  await writeFile(paths.contentListPath, JSON.stringify([
+    { page_idx: 0, type: 'table', img_path: 'assets/images/table.jpg' },
+    { page_idx: 1, type: 'text', text: 'body' },
+  ]));
+  await writeFile(paths.pageTextPath, '--- PAGE 1 ---\n\n--- PAGE 2 ---\nbody\n');
+  const store = {
+    reserveParseAttempt: () => ({ attemptId: 'attempt-visual-page' }),
+    finishParseAttempt: () => {},
+    hasSuccessfulParse: () => false,
+  };
+  try {
+    const report = await runLocalParse({
+      baseId: '2601.visual-page', version: 1, sha256: 'a'.repeat(64),
+      model: 'pipeline', cliBackend: 'pipeline', pageCount: 2,
+    }, {
+      store,
+      runner: async () => ({ exitCode: 0, elapsedMs: 1 }),
+      normalize: async () => ({
+        ...paths,
+        pageCount: 2,
+        pages: [{ pageNumber: 1, text: '', blockCount: 1 }, { pageNumber: 2, text: 'body', blockCount: 1 }],
+      }),
+    });
+    assert.equal(report.status, 'succeeded');
+    assert.deepEqual(report.artifact?.qualityWarnings, ['visual_only_pages:1']);
+  } finally { await removeOwnedTestDirectory(root); }
+});
+
 test('recovers a successful attempt after a result writer crash', async () => {
   let runnerCalls = 0;
   const store = {

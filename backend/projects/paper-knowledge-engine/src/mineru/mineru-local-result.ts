@@ -66,16 +66,55 @@ function pageBlocksFor(contentList: unknown): unknown {
   });
 }
 
-async function filesBelow(root: string, minimumMtime = 0) {
+type ArtifactStat = (path: string) => Promise<{ mtimeMs: number }>;
+const defaultArtifactStat: ArtifactStat = async (path) => {
+  const metadata = await stat(path);
+  if (!metadata) throw new Error(`missing file metadata: ${path}`);
+  return metadata;
+};
+
+export async function collectMinerUFiles(root: string, minimumMtime = 0, statFile: ArtifactStat = defaultArtifactStat) {
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
   const files = [];
   for (const entry of entries.filter((item) => item.isFile() || item.isSymbolicLink())) {
     const path = resolve(entry.parentPath, entry.name);
-    if (minimumMtime > 0 && (await stat(path)).mtimeMs < minimumMtime) continue;
+    if (minimumMtime > 0) {
+      try {
+        const metadata = await statFile(path);
+        if (metadata.mtimeMs < minimumMtime) continue;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+    }
     files.push(path);
   }
   return files;
 }
+
+type MinerUTreeScanner = (root: string) => Promise<unknown>;
+
+/**
+ * MinerU can still be finishing a temporary output entry when the parser
+ * hands control back to us.  Retry only a missing-entry race; all other tree
+ * validation failures remain fail-closed.
+ */
+export async function assertStableMinerUOutputTree(
+  root: string,
+  scan: MinerUTreeScanner = realTree,
+): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await scan(root);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || attempt === 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  throw new Error('unreachable');
+}
+
 async function assertArtifactsInside(root: string, files: string[]) {
   const resolvedRoot = await realpath(root);
   for (const file of files) {
@@ -99,9 +138,9 @@ async function sourcePdfPageCount(fileSource: unknown): Promise<number | undefin
 export async function normalizeLocalMinerUResult(job: Pick<LocalParseJob, 'model' | 'cliBackend' | 'outputDir' | 'attemptStartedAt' | 'pageCount' | 'fileSource'>) {
   if (!job.outputDir) throw new Error('output directory is required');
   const root = resolve(job.outputDir);
-  try { await realTree(root); }
+  try { await assertStableMinerUOutputTree(root); }
   catch (error) { throw new Error('artifact outside output directory or link/reparse point', { cause: error }); }
-  const files = await filesBelow(root, job.attemptStartedAt ?? 0);
+  const files = await collectMinerUFiles(root, job.attemptStartedAt ?? 0);
   await assertArtifactsInside(root, files);
 
   const markdown = files.find((path) => path.toLowerCase().endsWith('.md'));

@@ -35,7 +35,9 @@ export interface ParseDependencies {
   store: ParseStore; config?: Partial<MinerUCliConfig> & { outputRoot?: string }; processContext?: ProcessContext; signal?: AbortSignal;
   runner?: (job: LocalParseJob) => Promise<MinerUExecution>;
   normalize?: (job: LocalParseJob) => Promise<unknown>;
-  assessExtraction?: (pages: PdfPage[], metadata: { pageCount: number }, options: { isOcrAttempt: boolean }) => MaybePromise<{ accepted: boolean; reasons?: string[]; retryWithOcr?: boolean }>;
+  assessExtraction?: (pages: PdfPage[], metadata: { pageCount: number }, options: {
+    isOcrAttempt: boolean; visualOnlyPages?: readonly number[]; visualBlockPages?: readonly number[];
+  }) => MaybePromise<{ accepted: boolean; reasons?: string[]; retryWithOcr?: boolean; retryWithTableDisabled?: boolean; visualOnlyPages?: number[]; warnings?: string[] }>;
   writeNote?: (...args: unknown[]) => unknown;
 }
 export interface ParseReport {
@@ -48,7 +50,8 @@ function processError(error: unknown) {
   const get = (key: string): unknown => error && typeof error === 'object' ? Reflect.get(error, key) : undefined;
   return { message: typeof get('message') === 'string' ? String(get('message')) : String(error), code: typeof get('code') === 'string' ? String(get('code')) : undefined,
     cleanupConfirmed: typeof get('cleanupConfirmed') === 'boolean' ? Boolean(get('cleanupConfirmed')) : undefined,
-    errorClass: typeof get('errorClass') === 'string' ? String(get('errorClass')) : undefined, retryWithOcr: get('retryWithOcr') === true };
+    errorClass: typeof get('errorClass') === 'string' ? String(get('errorClass')) : undefined,
+    retryWithOcr: get('retryWithOcr') === true, retryWithTableDisabled: get('retryWithTableDisabled') === true };
 }
 function assertPages(input: unknown, count: number): asserts input is PdfPage[] {
   if (!Array.isArray(input) || input.length !== count || !input.every((page, index) => page && typeof page === 'object' && page.pageNumber === index + 1 && typeof page.text === 'string')) throw invalidArtifact('invalid normalized page identity or text');
@@ -166,7 +169,47 @@ ${execution?.stdoutSummary ?? ''}`;
 }
 
 function invalidArtifact(message: string) {
-  return Object.assign(new Error(message), { errorClass: 'invalid_artifact', retryWithOcr: false });
+  return Object.assign(new Error(message), { errorClass: 'invalid_artifact', retryWithOcr: false, retryWithTableDisabled: false });
+}
+
+const VISUAL_BLOCK_TYPES = new Set(['image', 'figure', 'table', 'chart', 'diagram']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasVisualAsset(value: unknown, key?: string): boolean {
+  if (typeof value === 'string') {
+    const isAssetKey = key !== undefined
+      && (/^(?:img|image|asset)(?:_|-)?(?:path|source|url)$/i.test(key) || key.toLowerCase() === 'path');
+    if (!isAssetKey) return false;
+    const path = value.trim();
+    return path.length > 0 && !path.endsWith('/') && !/^data:/i.test(path);
+  }
+  if (Array.isArray(value)) return value.some((item) => hasVisualAsset(item, key));
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(([childKey, child]) => hasVisualAsset(child, childKey));
+}
+
+function collectVisualPageEvidence(contentList: unknown) {
+  const visualBlockPages = new Set<number>();
+  const visualOnlyPages = new Set<number>();
+  const inspect = (block: unknown, pageIndex: number) => {
+    if (!isRecord(block) || typeof block.type !== 'string' || !VISUAL_BLOCK_TYPES.has(block.type.toLowerCase())) return;
+    const pageNumber = pageIndex + 1;
+    visualBlockPages.add(pageNumber);
+    if (hasVisualAsset(block)) visualOnlyPages.add(pageNumber);
+  };
+  if (Array.isArray(contentList) && contentList.every(Array.isArray)) {
+    contentList.forEach((pageBlocks, pageIndex) => pageBlocks.forEach((block) => inspect(block, pageIndex)));
+  } else if (Array.isArray(contentList)) {
+    for (const block of contentList) {
+      if (isRecord(block) && Number.isSafeInteger(block.page_idx) && Number(block.page_idx) >= 0) {
+        inspect(block, Number(block.page_idx));
+      }
+    }
+  }
+  return { visualBlockPages: [...visualBlockPages], visualOnlyPages: [...visualOnlyPages] };
 }
 
 async function readArtifactText(path: unknown, label: string) {
@@ -225,14 +268,23 @@ async function validateArtifact(job: LocalParseJob, input: unknown, dependencies
   assertPages(pages, pageCount);
   if (markers.some((marker, index) => Number(marker.match(/\d+/)?.[0]) !== index + 1)) throw invalidArtifact('invalid page marker identity');
   const assess = dependencies.assessExtraction ?? assessExtraction;
-  const assessment = await assess(pages, { pageCount }, { isOcrAttempt: job.isOcr === true });
+  const visualEvidence = collectVisualPageEvidence(contentList);
+  const assessment = await assess(pages, { pageCount }, {
+    isOcrAttempt: job.isOcr === true,
+    visualOnlyPages: visualEvidence.visualOnlyPages,
+    visualBlockPages: visualEvidence.visualBlockPages,
+  });
   if (!assessment?.accepted) {
     const error = invalidArtifact(`extraction validation failed: ${(assessment?.reasons ?? ['rejected']).join(', ')}`);
     error.retryWithOcr = assessment?.retryWithOcr === true;
+    error.retryWithTableDisabled = job.table !== false && assessment?.retryWithTableDisabled === true;
     throw error;
   }
   // Every persisted path and page is checked before returning the normalized contract.
-  return { ...artifact, markdown, contentList, pages, pageText } as NormalizedArtifact;
+  return {
+    ...artifact, markdown, contentList, pages, pageText,
+    ...(assessment?.warnings?.length ? { qualityWarnings: assessment.warnings } : {}),
+  } as NormalizedArtifact;
 }
 
 function failureReport(job: LocalParseJob, attemptId: string, errorClass: string, errorMessage: string): ParseReport {
@@ -369,6 +421,9 @@ export async function runLocalParse(job: LocalParseJob, dependencies: ParseDepen
     const errorMessage = redactErrorMessage(String(error.message ?? error));
     await store.failParseAttempt?.(attempt.attemptId, { errorClass, errorMessage, exitCode: execution?.exitCode ?? 0 });
     if (!(await hasSuccessfulParse(store, job, true))) await store.markParseFailed?.(job.baseId, errorClass);
+    if (error.retryWithTableDisabled === true && job.table !== false) {
+      return runLocalParse({ ...job, table: false, reparse: job.reparse === true }, dependencies);
+    }
     if (error.retryWithOcr === true && job.isOcr !== true && (job.method ?? 'auto') !== 'ocr') {
       return runLocalParse({ ...job, method: 'ocr', retryOfMethod: job.method ?? 'auto', isOcr: true, reparse: job.reparse === true }, dependencies);
     }

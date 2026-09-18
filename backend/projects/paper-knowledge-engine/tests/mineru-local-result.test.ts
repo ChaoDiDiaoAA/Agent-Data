@@ -1,11 +1,11 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PDFDocument } from 'pdf-lib';
-import { normalizeLocalMinerUResult } from '../src/mineru/mineru-local-result.ts';
+import { assertStableMinerUOutputTree, collectMinerUFiles, normalizeLocalMinerUResult } from '../src/mineru/mineru-local-result.ts';
 import { assessExtraction } from '../src/mineru/mineru-quality.ts';
 import { createParseWorkspace, publishParseWorkspace } from '../src/mineru/mineru-workspace.ts';
 import { verifyArchiveV2 } from '../src/shared/archive-v2.ts';
@@ -298,6 +298,33 @@ test('rejects a page count mismatch', async () => {
     { page_idx: 2, type: 'text', text: 'third' },
   ]));
   await assert.rejects(normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 2 }), /page count mismatch/);
+});
+
+test('skips a file that disappears while collecting MinerU output metadata', async () => {
+  const root = await fixtureRoot('vanished-output');
+  const stable = join(root, 'paper.md');
+  const vanished = join(root, '0');
+  await writeFile(stable, '# Paper');
+  await writeFile(vanished, 'temporary');
+
+  const files = await collectMinerUFiles(root, 1, async (path) => {
+    if (path === vanished) throw Object.assign(new Error('file disappeared'), { code: 'ENOENT' });
+    const metadata = await stat(path);
+    assert.ok(metadata);
+    return metadata;
+  });
+
+  assert.deepEqual(files, [stable]);
+});
+
+test('retries a transient missing entry while validating the MinerU output tree', async () => {
+  let attempts = 0;
+  await assertStableMinerUOutputTree('D:/mineru-output', async () => {
+    attempts += 1;
+    if (attempts === 1) throw Object.assign(new Error('file disappeared'), { code: 'ENOENT' });
+    return [];
+  });
+  assert.equal(attempts, 2);
 });
 
 test('recovers the page count for resumed manifests that omitted it', async () => {

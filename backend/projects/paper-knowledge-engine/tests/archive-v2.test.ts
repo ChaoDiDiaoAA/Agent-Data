@@ -38,6 +38,12 @@ test('does not treat chemical SMILES notation as Markdown asset links', () => {
   expect(archiveReferences('[C](assets/chemical.pdf)', [])).toEqual(['assets/chemical.pdf']);
 });
 
+test('does not treat mathematical bracket expressions as Markdown asset links', () => {
+  const prose = 'Term 2: [40 -5c\\_x/7](6) and Term 3: [40 -5c\\_x/7](0).';
+  expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
+});
+
 test('ignores MinerU truncation placeholders without weakening missing-resource checks', () => {
   const prose = '**Paddy Power**: [paddyPower.com](trunc) **Betway**: [betway.com](https://www.betway.com)';
   expect(archiveReferences(prose, [])).toEqual([]);
