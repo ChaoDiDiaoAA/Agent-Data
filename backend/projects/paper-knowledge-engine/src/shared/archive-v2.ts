@@ -306,9 +306,41 @@ function isLikelyMathematicalNotation(text: string, matchIndex: number, destinat
   return /[\\_=+\-*/^]|(?:\d\s*[A-Za-z])|(?:[A-Za-z]\s*\d)/.test(label);
 }
 
+// MinerU can preserve NER examples in code blocks as prose such as
+// `[ Cupertino ]( LOC)` or `[ ENTITY ]( TYPE)`.  These resemble Markdown
+// links, but the destination is an entity label rather than an Archive path.
+// Keep this list explicit and require the padded label form emitted by the
+// parser so a real local link such as `[Logo](assets/logo.svg)` remains strict.
+const ENTITY_ANNOTATION_LABELS = new Set([
+  'CARDINAL', 'DATE', 'EVENT', 'FAC', 'GPE', 'LANGUAGE', 'LAW', 'LOC', 'MONEY',
+  'NORP', 'ORDINAL', 'ORG', 'PERCENT', 'PER', 'PERSON', 'PRODUCT', 'QUANTITY',
+  'TIME', 'TYPE', 'WORK_OF_ART', 'MISC',
+]);
+
+function isLikelyEntityAnnotation(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open < 0 || !ENTITY_ANNOTATION_LABELS.has(destination.trim().toUpperCase())) return false;
+  const label = text.slice(open + 1, matchIndex);
+  const trimmed = label.trim();
+  return trimmed.length > 0 && (trimmed !== label || /\s/.test(trimmed));
+}
+
+// Papers also explain repository conventions with placeholder links such as
+// `[X](refs/x.md)`.  MinerU preserves that sentence as ordinary prose, while
+// the target is illustrative and is not part of the parser output tree.  Keep
+// the exception limited to a one-letter reference placeholder so real links
+// such as `[Guide](refs/guide.md)` remain required resources.
+function isLikelyReferencePlaceholder(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open < 0 || !/^refs\/[a-z]\.md$/i.test(destination.trim().split(/[?#]/, 1)[0] ?? '')) return false;
+  return /^[A-Za-z]$/.test(text.slice(open + 1, matchIndex).trim());
+}
+
 function isLikelyNonResourceNotation(text: string, matchIndex: number, destination: string): boolean {
   return isLikelyChemicalNotation(text, matchIndex, destination)
-    || isLikelyMathematicalNotation(text, matchIndex, destination);
+    || isLikelyMathematicalNotation(text, matchIndex, destination)
+    || isLikelyEntityAnnotation(text, matchIndex, destination)
+    || isLikelyReferencePlaceholder(text, matchIndex, destination);
 }
 
 function normalizeMarkdownReferenceLabel(value: string): string {

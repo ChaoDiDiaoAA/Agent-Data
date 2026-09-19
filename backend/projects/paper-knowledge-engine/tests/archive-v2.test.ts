@@ -22,6 +22,27 @@ test('citation followed by parenthesized prose is not a partial Markdown link', 
   expect(rewriteArchiveReferences('[PDF](assets/a.pdf "source")', [], new Map([['assets/a.pdf', 'source.pdf']])).fullMarkdown).toBe('[PDF](source.pdf "source")');
 });
 
+test('NER label examples in MinerU code text are not treated as Archive assets', () => {
+  const prose = 'Entities : [ ENTITY ]( TYPE ), [ Apple ]( ORG), [ iPhone 15]( PRODUCT ), [ Cupertino ]( LOC)';
+  const content = [{ type: 'code', code_body: prose }];
+  expect(archiveReferences(prose, content)).toEqual([]);
+  expect(rewriteArchiveReferences(prose, content, new Map()).fullMarkdown).toBe(prose);
+});
+
+test('conceptual reference examples in prose are not treated as Archive assets', () => {
+  const prose = 'When the task matches X, read [X](refs/x.md) from the navigation table.';
+  expect(archiveReferences(prose, [])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [], new Map()).fullMarkdown).toBe(prose);
+  expect(archiveReferences('[Guide](refs/guide.md)', [])).toEqual(['refs/guide.md']);
+});
+
+test('truncated external image examples do not become missing Markdown destinations', () => {
+  const prose = '<td>[![Simulator Screen Shot Mar 11, 2017, 11.44.31 PM.png](https://files.gitter.im/patchthecode/JTAppleCalendar/CFRA/thumb/Simulat...</td>';
+  expect(archiveReferences(prose, [])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [], new Map()).fullMarkdown).toBe(prose);
+  expect(() => archiveReferences('![missing image]', [])).toThrow(/no destination/);
+});
+
 test('does not treat chemical SMILES notation as Markdown asset links', () => {
   const prose = [
     '[CH3:19][C:4](=[O:23])[C@@H:13]1[CH2:9][CH2:10]',

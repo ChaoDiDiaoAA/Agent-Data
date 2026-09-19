@@ -178,6 +178,50 @@ test('normalizes pipeline content_list into one-based page text', async () => {
   assert.equal(result.contentHash, expectedHash);
 });
 
+test('normalizes code examples with NER labels without treating labels as assets', async () => {
+  const root = await fixtureRoot('ner-labels');
+  const prose = 'Entities : [ ENTITY ]( TYPE ), [ Apple ]( ORG), [ iPhone 15]( PRODUCT ), [ Cupertino ]( LOC)';
+  await writeFile(join(root, 'paper.md'), '# Paper');
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'code', code_body: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /LOC/);
+  assert.equal(await Bun.file(join(root, 'assets', 'LOC')).exists(), false);
+});
+
+test('normalizes conceptual reference examples without requiring a missing refs file', async () => {
+  const root = await fixtureRoot('reference-example');
+  const prose = 'When the task matches X, read [X](refs/x.md) from the navigation table.';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /refs\/x\.md/);
+  assert.equal(await Bun.file(join(root, 'assets', 'refs', 'x.md')).exists(), false);
+});
+
+test('normalizes truncated external image examples without requiring a destination', async () => {
+  const root = await fixtureRoot('truncated-external-image');
+  const prose = '<td>[![Simulator Screen Shot Mar 11, 2017, 11.44.31 PM.png](https://files.gitter.im/patchthecode/JTAppleCalendar/CFRA/thumb/Simulat...</td>';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /Simulator Screen Shot/);
+});
+
 test('normalizes MinerU Markdown with a truncation placeholder link', async () => {
   const root = await fixtureRoot('truncation-placeholder');
   const markdown = '# Paper\n\n**Paddy Power**: [paddyPower.com](trunc) **Betway**.';

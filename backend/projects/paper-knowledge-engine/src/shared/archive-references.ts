@@ -123,7 +123,10 @@ function markdownAssetPaths(markdown: string): string[] {
     if (inlineRanges.some(range => start >= range.start && start < range.end)) continue;
     const label = normalizeReferenceLabel(match[2] || match[1]);
     const destination = definitions.get(label);
-    if (!destination) throw new Error(`Markdown image reference has no destination: ${label}`);
+    if (!destination) {
+      if (isTruncatedExternalImage(scan, start + match[0].length)) continue;
+      throw new Error(`Markdown image reference has no destination: ${label}`);
+    }
     const path = localAssetPath(destination);
     if (path) paths.push(path);
   }
@@ -164,6 +167,16 @@ function markdownAssetPaths(markdown: string): string[] {
 
 function normalizeReferenceLabel(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * MinerU may truncate an external image embedded in a table cell before the
+ * closing Markdown parenthesis, for example `![shot](https://.../Simulat...</td>`.
+ * It is a prose excerpt, not a local Archive asset. Keep malformed local
+ * image syntax strict; only this external, ellipsis-terminated form is soft.
+ */
+function isTruncatedExternalImage(markdown: string, end: number): boolean {
+  return /^\s*\(\s*https?:\/\/[^\r\n)]*(?:\.\.\.|…)[^\r\n)]*(?:<\/[^>]+>|$)/i.test(markdown.slice(end));
 }
 
 function htmlAttribute(attributes: string, name: 'src' | 'srcset'): string | null {
