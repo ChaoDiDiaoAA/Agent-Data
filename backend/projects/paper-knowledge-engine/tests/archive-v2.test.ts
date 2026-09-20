@@ -65,6 +65,34 @@ test('does not treat mathematical bracket expressions as Markdown asset links', 
   expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
 });
 
+test('does not treat MinerU escaped Python attribute notation as an Archive path', () => {
+  const prose = 'if self.\\_message\\_criteria[self.\\_current\\_msg](self.\\_state):';
+  expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
+  const vlmProse = 'if self._message_criteria[self._current_msg](self._state):';
+  expect(archiveReferences(vlmProse, [{ type: 'text', text: vlmProse }])).toEqual([]);
+  expect(rewriteArchiveReferences(vlmProse, [{ type: 'text', text: vlmProse }], new Map()).fullMarkdown).toBe(vlmProse);
+  expect(() => archiveReferences('[Invalid](assets\\\\figure.jpg)', [])).toThrow(/safe relative/);
+});
+
+test('does not treat required-or-optional parameter notation as an Archive path', () => {
+  const prose = 'Parameters: - {param_name} [{type}](required/optional): {param_description}';
+  expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
+});
+
+test('does not treat template HTML asset placeholders as Archive paths', () => {
+  const prose = '<figure class="flow-asset"><img src="{{layer:...}}"><p>readout</p></figure>';
+  expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toContain('{{layer:...}}');
+});
+
+test('does not treat OCR zero in chemical SMILES bonds as an Archive path', () => {
+  const prose = 'Yield SMILES: [N+:17](=0)[0-]';
+  expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
+});
+
 test('ignores MinerU truncation placeholders without weakening missing-resource checks', () => {
   const prose = '**Paddy Power**: [paddyPower.com](trunc) **Betway**: [betway.com](https://www.betway.com)';
   expect(archiveReferences(prose, [])).toEqual([]);

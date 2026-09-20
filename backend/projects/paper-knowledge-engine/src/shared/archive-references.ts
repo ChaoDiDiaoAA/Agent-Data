@@ -15,6 +15,17 @@ export function isMinerUTruncationPlaceholder(value: string): boolean {
   return destination !== undefined && MINERU_TRUNCATION_PLACEHOLDERS.has(destination);
 }
 
+/**
+ * MinerU can preserve template-driven HTML examples such as
+ * `src="{{layer:...}}"`. These are renderer placeholders, not local files;
+ * only the namespaced double-brace form is ignored so ordinary brace-bearing
+ * paths remain subject to Archive validation.
+ */
+export function isMinerUTemplateAssetPlaceholder(value: string): boolean {
+  const destination = value.trim().replace(/^<|>$/g, '').split(/[?#]/, 1)[0] ?? '';
+  return /^\{\{[A-Za-z][A-Za-z0-9_.-]*:[^{}\r\n]+\}\}$/.test(destination);
+}
+
 interface MarkdownCodeRange { start: number; end: number; }
 
 function isEscapedMarkdownCharacter(markdown: string, index: number): boolean {
@@ -84,7 +95,8 @@ export function mapMarkdownOutsideCode(markdown: string, transform: (segment: st
 function localAssetPath(value: string): string | null {
   const trimmed = value.trim().replace(/^<|>$/g, '');
   if (/^(?:[A-Za-z]:|file:|\\\\|\/\/)/i.test(trimmed)) throw new Error('absolute asset path is forbidden');
-  if (!trimmed || trimmed.startsWith('#') || /^https?:/i.test(trimmed) || isMinerUTruncationPlaceholder(trimmed)) return null;
+  if (!trimmed || trimmed.startsWith('#') || /^https?:/i.test(trimmed)
+    || isMinerUTruncationPlaceholder(trimmed) || isMinerUTemplateAssetPlaceholder(trimmed)) return null;
   return normalizeArchivePath(trimmed.split(/[?#]/, 1)[0] || trimmed);
 }
 
@@ -179,6 +191,29 @@ function isTruncatedExternalImage(markdown: string, end: number): boolean {
   return /^\s*\(\s*https?:\/\/[^\r\n)]*(?:\.\.\.|…)[^\r\n)]*(?:<\/[^>]+>|$)/i.test(markdown.slice(end));
 }
 
+// MinerU may escape underscores inconsistently while flattening Python code
+// into Markdown. A dotted attribute such as
+// `[self.\_criteria[...]](self.\_state)` (or its unescaped VLM equivalent)
+// is code notation, not a local Archive resource. Keep the exception narrow:
+// require an identifier-shaped destination and a matching dotted/subscripted
+// label. A malformed path without that code shape still fails strict Archive
+// path validation.
+const PYTHON_ATTRIBUTE_DESTINATION = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_\\][A-Za-z0-9_\\]*)+$/;
+const PYTHON_ATTRIBUTE_CONTEXT = /(?:^|[\s(])[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_\\][A-Za-z0-9_\\]*$/;
+export function isLikelyPythonAttributeNotation(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open < 0) return false;
+  const label = text.slice(open + 1, matchIndex);
+  const value = destination.trim();
+  if (!PYTHON_ATTRIBUTE_DESTINATION.test(value) || !value.includes('_')) return false;
+  const objectName = value.split('.', 1)[0]!;
+  const trimmedLabel = label.trim();
+  const outerOpen = text.lastIndexOf('[', open - 1);
+  const contextStart = outerOpen >= 0 ? outerOpen + 1 : text.lastIndexOf('\n', open - 1) + 1;
+  const attributeContext = text.slice(contextStart, open).trim();
+  return trimmedLabel.startsWith(`${objectName}.`) && PYTHON_ATTRIBUTE_CONTEXT.test(attributeContext);
+}
+
 function htmlAttribute(attributes: string, name: 'src' | 'srcset'): string | null {
   const pattern = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\\x60]+))`, 'i');
   const match = pattern.exec(attributes);
@@ -266,7 +301,10 @@ function escapeLiteralHtmlImageTag(tag: string, attributes: string): string {
 function rewriteMarkdownAssetPaths(markdown: string, assetPaths: ReadonlyMap<string, string>): string {
   return mapMarkdownOutsideCode(markdown, segment => {
     const inline = segment.replace(/((?:!?\[[^\]\r\n]*\])\(\s*)(<[^>\r\n]+>|[^\s)]+)((?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\))/g,
-      (_all, prefix: string, destination: string, suffix: string) => `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`);
+      (_all, prefix: string, destination: string, suffix: string, offset: number) =>
+        isLikelyPythonAttributeNotation(segment, offset + prefix.length - 2, destination)
+          ? _all
+          : `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`);
     const definitions = inline.replace(/^([ \t]{0,3}\[[^\]\r\n]+\]:[ \t]*)(<[^>\r\n]+>|[^\s\r\n]+)((?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*)$/gm,
       (_all, prefix: string, destination: string, suffix: string) => `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`);
     return definitions.replace(/<(img|source)\b([^>]*)>/gi, (_all, tag: string, attributes: string) => {

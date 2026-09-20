@@ -4,7 +4,7 @@ import { join, resolve, dirname, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { assertLibraryId } from './identity.ts';
 import { canonicalJson, normalizeArchivePath } from './manifest.ts';
-import { discoverArchiveAssetPaths, isMinerUTruncationPlaceholder, mapMarkdownOutsideCode, normalizedArchiveAssetDestination, normalizedArchiveAssetPath, rewriteArchiveAssetReferences } from './archive-references.ts';
+import { discoverArchiveAssetPaths, isLikelyPythonAttributeNotation, isMinerUTruncationPlaceholder, isMinerUTemplateAssetPlaceholder, mapMarkdownOutsideCode, normalizedArchiveAssetDestination, normalizedArchiveAssetPath, rewriteArchiveAssetReferences } from './archive-references.ts';
 import { PDFDocument } from 'pdf-lib';
 
 export function archivePath(path: string): string {
@@ -243,7 +243,7 @@ function isResourceField(key?: string): boolean {
 function referencePath(value: string): string | null {
   if (!value || value.startsWith('#') || /^https?:\/\//i.test(value) || /^mailto:/i.test(value)) return null;
   const destination = decodeURIComponent(value.split(/[?#]/)[0]);
-  if (isMinerUTruncationPlaceholder(destination)) return null;
+  if (isMinerUTruncationPlaceholder(destination) || isMinerUTemplateAssetPlaceholder(destination)) return null;
   return archivePath(destination);
 }
 
@@ -259,6 +259,10 @@ function isSmilesAtomLabel(value: string): boolean {
 }
 function isSmilesAtomDestination(value: string): boolean {
   const destination = value.trim();
+  // MinerU/OCR can render the oxygen atom `O` as the digit `0` in a mapped
+  // SMILES bond such as `[N+:17](=0)`. Accept that token only in the
+  // chemical-notation recognizer; ordinary resource paths remain strict.
+  if (destination === '0') return true;
   if (isSmilesAtomLabel(destination)) return true;
   return /^\[[^\]\r\n]+\]$/.test(destination) && isSmilesAtomLabel(destination.slice(1, -1));
 }
@@ -336,11 +340,23 @@ function isLikelyReferencePlaceholder(text: string, matchIndex: number, destinat
   return /^[A-Za-z]$/.test(text.slice(open + 1, matchIndex).trim());
 }
 
+// Tool schemas often render parameter metadata as `[{type}](required/optional)`.
+// It is explanatory notation, not a file under the MinerU output directory.
+// Require the brace-delimited field label and exact status pair so a real
+// resource named `required/optional` remains subject to normal validation.
+function isLikelyParameterStatusNotation(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open < 0 || !/^required\/optional$/i.test(destination.trim())) return false;
+  return /^\{[^{}\r\n]+\}$/.test(text.slice(open + 1, matchIndex).trim());
+}
+
 function isLikelyNonResourceNotation(text: string, matchIndex: number, destination: string): boolean {
   return isLikelyChemicalNotation(text, matchIndex, destination)
     || isLikelyMathematicalNotation(text, matchIndex, destination)
     || isLikelyEntityAnnotation(text, matchIndex, destination)
-    || isLikelyReferencePlaceholder(text, matchIndex, destination);
+    || isLikelyReferencePlaceholder(text, matchIndex, destination)
+    || isLikelyParameterStatusNotation(text, matchIndex, destination)
+    || isLikelyPythonAttributeNotation(text, matchIndex, destination);
 }
 
 function normalizeMarkdownReferenceLabel(value: string): string {

@@ -208,6 +208,66 @@ test('normalizes conceptual reference examples without requiring a missing refs 
   assert.equal(await Bun.file(join(root, 'assets', 'refs', 'x.md')).exists(), false);
 });
 
+test('normalizes escaped Python attribute notation without treating it as an Archive path', async () => {
+  const root = await fixtureRoot('escaped-python-attribute');
+  const prose = 'if self.\\_message\\_criteria[self.\\_current\\_msg](self.\\_state):';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /self\.\\_state/);
+  assert.equal(await Bun.file(join(root, 'assets', 'self.\\_state')).exists(), false);
+});
+
+test('normalizes parameter required-or-optional notation without treating it as an Archive path', async () => {
+  const root = await fixtureRoot('parameter-status-notation');
+  const prose = 'Parameters: - {param_name} [{type}](required/optional): {param_description}';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /required\/optional/);
+  assert.equal(await Bun.file(join(root, 'assets', 'required', 'optional')).exists(), false);
+});
+
+test('normalizes template HTML asset placeholders without treating them as Archive paths', async () => {
+  const root = await fixtureRoot('template-html-asset');
+  const prose = '<figure class="flow-asset"><img src="{{layer:...}}"><p>readout</p></figure>';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /\{\{layer:\.\.\.\}\}/);
+  assert.equal(await Bun.file(join(root, 'assets', '{{layer:...}}')).exists(), false);
+});
+
+test('normalizes OCR zero in chemical SMILES bonds without treating it as an Archive path', async () => {
+  const root = await fixtureRoot('smiles-ocr-zero');
+  const prose = 'Yield SMILES: [N+:17](=0)[0-]';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /=0/);
+  assert.equal(await Bun.file(join(root, 'assets', '=0')).exists(), false);
+});
+
 test('normalizes truncated external image examples without requiring a destination', async () => {
   const root = await fixtureRoot('truncated-external-image');
   const prose = '<td>[![Simulator Screen Shot Mar 11, 2017, 11.44.31 PM.png](https://files.gitter.im/patchthecode/JTAppleCalendar/CFRA/thumb/Simulat...</td>';
