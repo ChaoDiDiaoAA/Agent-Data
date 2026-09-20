@@ -53,6 +53,21 @@ test('normalizes split chemical SMILES without inventing Archive resources', asy
   assert.deepEqual(JSON.parse(await readFile(result.contentListPath, 'utf8')), contentList);
 });
 
+test('normalizes multi-atom SMILES destinations without treating them as Archive paths', async () => {
+  const root = await fixtureRoot('chemical-smiles-sequence');
+  const prose = 'Molecule: COc1cc1CN1C[C@H](OC)C[C@@H]1C(N)=O';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /\[C@H\]\(OC\)/);
+  assert.equal(await Bun.file(join(root, 'assets', 'OC')).exists(), false);
+});
+
 test('publication freezes strict versioned source metadata and its selected parse attempt', async () => {
   const root = await fixtureRoot('archive-source');
   const pdfPath = join(root, 'source.pdf');
@@ -223,6 +238,21 @@ test('normalizes escaped Python attribute notation without treating it as an Arc
   assert.equal(await Bun.file(join(root, 'assets', 'self.\\_state')).exists(), false);
 });
 
+test('normalizes Python argument unpacking without treating it as an Archive path', async () => {
+  const root = await fixtureRoot('python-argument-unpacking');
+  const prose = 'result ← registry[tc.name](\\*\\*tc.args)';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /\\\*\\\*tc\.args/);
+  assert.equal(await Bun.file(join(root, 'assets', '\\*\\\*tc.args')).exists(), false);
+});
+
 test('normalizes parameter required-or-optional notation without treating it as an Archive path', async () => {
   const root = await fixtureRoot('parameter-status-notation');
   const prose = 'Parameters: - {param_name} [{type}](required/optional): {param_description}';
@@ -268,6 +298,23 @@ test('normalizes OCR zero in chemical SMILES bonds without treating it as an Arc
   assert.equal(await Bun.file(join(root, 'assets', '=0')).exists(), false);
 });
 
+test('normalizes SMARTS examples without treating atom predicates as Archive paths', async () => {
+  const root = await fixtureRoot('smarts-atom-predicates');
+  const prose = 'Functional groups: [CX3](=[OX1]) and [CX3](=O); [OD2]([#6])';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'code', code_body: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /\[CX3\].*\[OD2\]/);
+  for (const path of ['=O', '=[OX1]', '[']) {
+    assert.equal(await Bun.file(join(root, 'assets', path)).exists(), false);
+  }
+});
+
 test('normalizes truncated external image examples without requiring a destination', async () => {
   const root = await fixtureRoot('truncated-external-image');
   const prose = '<td>[![Simulator Screen Shot Mar 11, 2017, 11.44.31 PM.png](https://files.gitter.im/patchthecode/JTAppleCalendar/CFRA/thumb/Simulat...</td>';
@@ -280,6 +327,21 @@ test('normalizes truncated external image examples without requiring a destinati
 
   assert.equal(result.pageCount, 1);
   assert.match(await readFile(result.pageTextPath, 'utf8'), /Simulator Screen Shot/);
+});
+
+test('normalizes generic Markdown image URL placeholders without treating them as assets', async () => {
+  const root = await fixtureRoot('markdown-image-url-placeholder');
+  const prose = 'Images need to be rendered as ![](url)';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.match(await readFile(result.pageTextPath, 'utf8'), /!\[\]\(url\)/);
+  assert.equal(await Bun.file(join(root, 'assets', 'url')).exists(), false);
 });
 
 test('normalizes MinerU Markdown with a truncation placeholder link', async () => {

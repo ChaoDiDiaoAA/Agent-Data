@@ -122,6 +122,8 @@ function markdownAssetPaths(markdown: string): string[] {
   for (const match of scan.matchAll(/!\[[^\]]*\]\(\s*(?:<([^>\r\n]+)>|([^\s)]+))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g)) {
     const start = match.index;
     inlineRanges.push({ start, end: start + match[0].length });
+    const marker = scan.indexOf('](', start);
+    if (marker >= 0 && isLikelyMarkdownImagePlaceholder(scan, marker, match[1] ?? match[2]!)) continue;
     const path = localAssetPath(match[1] ?? match[2]);
     if (path) paths.push(path);
   }
@@ -191,6 +193,21 @@ function isTruncatedExternalImage(markdown: string, end: number): boolean {
   return /^\s*\(\s*https?:\/\/[^\r\n)]*(?:\.\.\.|…)[^\r\n)]*(?:<\/[^>]+>|$)/i.test(markdown.slice(end));
 }
 
+/**
+ * MinerU can preserve prompt examples such as `Images are rendered as
+ * ![](url)`. The empty-alt image and generic `url` token are documentation
+ * syntax, not a file emitted by MinerU. Keep real images strict by requiring
+ * the empty alt form, the exact placeholder token, and an explanatory line.
+ */
+export function isLikelyMarkdownImagePlaceholder(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open <= 0 || text[open - 1] !== '!' || text.slice(open + 1, matchIndex).trim()) return false;
+  const value = destination.trim().replace(/^<|>$/g, '').split(/[?#]/, 1)[0]?.toLowerCase();
+  if (value !== 'url') return false;
+  const lineStart = text.lastIndexOf('\n', open - 1) + 1;
+  return /\b(?:image|images|render|rendered|markdown|figure|display|shown|output)\b/i.test(text.slice(lineStart, open));
+}
+
 // MinerU may escape underscores inconsistently while flattening Python code
 // into Markdown. A dotted attribute such as
 // `[self.\_criteria[...]](self.\_state)` (or its unescaped VLM equivalent)
@@ -212,6 +229,20 @@ export function isLikelyPythonAttributeNotation(text: string, matchIndex: number
   const contextStart = outerOpen >= 0 ? outerOpen + 1 : text.lastIndexOf('\n', open - 1) + 1;
   const attributeContext = text.slice(contextStart, open).trim();
   return trimmedLabel.startsWith(`${objectName}.`) && PYTHON_ATTRIBUTE_CONTEXT.test(attributeContext);
+}
+
+// MinerU also preserves Python argument unpacking as a Markdown-looking link,
+// for example `registry[tc.name](\*\*tc.args)`. The destination is Python
+// syntax, not an Archive path; require the same dotted object on both sides so
+// ordinary starred filenames and real resources remain strict.
+const PYTHON_UNPACK_DESTINATION = /^(?:(?:\\?\*){1,2})([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)$/;
+const PYTHON_DOTTED_LABEL = /^([A-Za-z_][A-Za-z0-9_]*)\.[A-Za-z_][A-Za-z0-9_]*$/;
+export function isLikelyPythonArgumentUnpackingNotation(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open < 0) return false;
+  const destinationMatch = PYTHON_UNPACK_DESTINATION.exec(destination.trim());
+  const labelMatch = PYTHON_DOTTED_LABEL.exec(text.slice(open + 1, matchIndex).trim());
+  return destinationMatch !== null && labelMatch !== null && destinationMatch[1]!.split('.', 1)[0] === labelMatch[1];
 }
 
 function htmlAttribute(attributes: string, name: 'src' | 'srcset'): string | null {
@@ -302,7 +333,8 @@ function rewriteMarkdownAssetPaths(markdown: string, assetPaths: ReadonlyMap<str
   return mapMarkdownOutsideCode(markdown, segment => {
     const inline = segment.replace(/((?:!?\[[^\]\r\n]*\])\(\s*)(<[^>\r\n]+>|[^\s)]+)((?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\))/g,
       (_all, prefix: string, destination: string, suffix: string, offset: number) =>
-        isLikelyPythonAttributeNotation(segment, offset + prefix.length - 2, destination)
+        (isLikelyPythonAttributeNotation(segment, offset + prefix.length - 2, destination)
+          || isLikelyPythonArgumentUnpackingNotation(segment, offset + prefix.length - 2, destination))
           ? _all
           : `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`);
     const definitions = inline.replace(/^([ \t]{0,3}\[[^\]\r\n]+\]:[ \t]*)(<[^>\r\n]+>|[^\s\r\n]+)((?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*)$/gm,

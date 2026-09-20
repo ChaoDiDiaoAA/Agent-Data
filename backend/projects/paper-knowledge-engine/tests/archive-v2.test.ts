@@ -43,11 +43,20 @@ test('truncated external image examples do not become missing Markdown destinati
   expect(() => archiveReferences('![missing image]', [])).toThrow(/no destination/);
 });
 
+test('does not treat generic Markdown image URL placeholders as Archive paths', () => {
+  const prose = 'Images need to be rendered as ![](url)';
+  expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
+  expect(archiveReferences('![Figure](url)', [])).toEqual(['url']);
+  expect(archiveReferences('![](assets/url)', [])).toEqual(['assets/url']);
+});
+
 test('does not treat chemical SMILES notation as Markdown asset links', () => {
   const prose = [
     '[CH3:19][C:4](=[O:23])[C@@H:13]1[CH2:9][CH2:10]',
     '[CH3:19][C\n\n:4](=[O:23])[C@@H:13]1',
     'Starting molecule: COc1ccccc1SCC(=O)N[C@@H](C)c1ccon1',
+    'Mapped molecule: COc1cc2ncnc(Nc3cccc(Cl)c3F)c2cc1CN1C[C@H](OC)C[C@@H]1C(N)=O',
   ].join('\n');
   const content = [
     { type: 'text', text: prose },
@@ -75,6 +84,14 @@ test('does not treat MinerU escaped Python attribute notation as an Archive path
   expect(() => archiveReferences('[Invalid](assets\\\\figure.jpg)', [])).toThrow(/safe relative/);
 });
 
+test('does not treat Python argument unpacking as an Archive path', () => {
+  const prose = 'result ← registry[tc.name](\\*\\*tc.args)';
+  expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
+  expect(archiveReferences('[tc.name](assets/tool.json)', [])).toEqual(['assets/tool.json']);
+  expect(archiveReferences('[CX3](assets/chemical.pdf)', [])).toEqual(['assets/chemical.pdf']);
+});
+
 test('does not treat required-or-optional parameter notation as an Archive path', () => {
   const prose = 'Parameters: - {param_name} [{type}](required/optional): {param_description}';
   expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
@@ -89,6 +106,15 @@ test('does not treat template HTML asset placeholders as Archive paths', () => {
 
 test('does not treat OCR zero in chemical SMILES bonds as an Archive path', () => {
   const prose = 'Yield SMILES: [N+:17](=0)[0-]';
+  expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
+});
+
+test('does not treat SMARTS atom patterns as Archive paths', () => {
+  const prose = [
+    'Functional groups: [CX3](=[OX1]) and [CX3](=[0X1]) and [CX3](=O)',
+    'Other patterns: [SX4](=[OX1]) and [OD2]([#6])',
+  ].join('\n');
   expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
   expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
 });

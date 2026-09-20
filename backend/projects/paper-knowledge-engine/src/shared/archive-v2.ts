@@ -4,7 +4,7 @@ import { join, resolve, dirname, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { assertLibraryId } from './identity.ts';
 import { canonicalJson, normalizeArchivePath } from './manifest.ts';
-import { discoverArchiveAssetPaths, isLikelyPythonAttributeNotation, isMinerUTruncationPlaceholder, isMinerUTemplateAssetPlaceholder, mapMarkdownOutsideCode, normalizedArchiveAssetDestination, normalizedArchiveAssetPath, rewriteArchiveAssetReferences } from './archive-references.ts';
+import { discoverArchiveAssetPaths, isLikelyMarkdownImagePlaceholder, isLikelyPythonArgumentUnpackingNotation, isLikelyPythonAttributeNotation, isMinerUTruncationPlaceholder, isMinerUTemplateAssetPlaceholder, mapMarkdownOutsideCode, normalizedArchiveAssetDestination, normalizedArchiveAssetPath, rewriteArchiveAssetReferences } from './archive-references.ts';
 import { PDFDocument } from 'pdf-lib';
 
 export function archivePath(path: string): string {
@@ -257,14 +257,36 @@ const SMILES_ATOM_LABEL_PATTERN = /^(?:\d{1,3})?(?:[A-Z][a-z]?|[bcnops])(?:@@?|@
 function isSmilesAtomLabel(value: string): boolean {
   return SMILES_ATOM_LABEL_PATTERN.test(value);
 }
+
+// SMARTS extends SMILES atom labels with atom properties and predicates, for
+// example `[CX3]`, `[OD2]`, `[OX1]`, and `[#6]`.  These expressions are common
+// in chemistry code examples and can look exactly like Markdown links when
+// followed by a bond or atom.  Keep the grammar narrow so ordinary prose
+// labels and real resource links remain strict.
+const SMARTS_ATOM_LABEL_PATTERN = /^(?:!?(?:[#*]\d+|\d{1,3}|[A-Z][a-z]?|[bcnops])|(?:[A-Z][a-z]?|[bcnops]))(?:(?:[A-Z][a-z]?|[bcnops]|[DXHhVvRrXx]\d*|[+-]\d*|[#*]\d+|[;,!@.*~&|:$?%()\-]))*$/;
+function isSmartsAtomLabel(value: string): boolean {
+  const normalized = value.replace(/\s+/g, '');
+  // A plain SMILES atom is already handled above.  Requiring one of the
+  // SMARTS-only operators/property tokens prevents `[C](...)` from being
+  // treated as a SMARTS expression and keeps real Markdown links intact.
+  if (!/[#*;,!]|[DXHhVvRrXx]\d*/.test(normalized)) return false;
+  return SMARTS_ATOM_LABEL_PATTERN.test(normalized);
+}
+function isChemicalAtomLabel(value: string): boolean {
+  return isSmilesAtomLabel(value) || isSmartsAtomLabel(value);
+}
+const SMILES_SEQUENCE_DESTINATION_PATTERN = /^(?:(?:[A-Z][a-z]?|[bcnops])(?:@@?|@)?H?\d*(?:[+-]\d*)?(?::\d+)?){2,}$/;
+function isSmilesSequenceDestination(value: string): boolean {
+  return SMILES_SEQUENCE_DESTINATION_PATTERN.test(value.trim().replace(/\s+/g, ''));
+}
 function isSmilesAtomDestination(value: string): boolean {
   const destination = value.trim();
   // MinerU/OCR can render the oxygen atom `O` as the digit `0` in a mapped
   // SMILES bond such as `[N+:17](=0)`. Accept that token only in the
   // chemical-notation recognizer; ordinary resource paths remain strict.
   if (destination === '0') return true;
-  if (isSmilesAtomLabel(destination)) return true;
-  return /^\[[^\]\r\n]+\]$/.test(destination) && isSmilesAtomLabel(destination.slice(1, -1));
+  if (isChemicalAtomLabel(destination)) return true;
+  return /^\[[^\]\r\n]+\]$/.test(destination) && isChemicalAtomLabel(destination.slice(1, -1));
 }
 function isSmilesBondDestination(value: string): boolean {
   const match = /^([=#\\-])(.+)$/.exec(value.trim());
@@ -280,13 +302,15 @@ export function isLikelyChemicalNotation(text: string, matchIndex: number, desti
   // Only suppress that split form when both sides still look chemical.
   if (open < 0) {
     const token = text.slice(0, matchIndex).trim().split(/\s+/).pop()?.replace(/^\[/, '') ?? '';
-    return isSmilesBondDestination(value) && (isSmilesAtomLabel(token) || /^:?\d+$/.test(token));
+    return isSmilesBondDestination(value) && (isChemicalAtomLabel(token) || /^:?\d+$/.test(token));
   }
   const label = text.slice(open + 1, matchIndex);
   const normalizedLabel = label.replace(/\s+/g, '');
-  if (label.includes(']') || !isSmilesAtomLabel(normalizedLabel)) return false;
+  if (label.includes(']') || !isChemicalAtomLabel(normalizedLabel)) return false;
   if (isSmilesBondDestination(value)) return true;
+  if (isSmilesSequenceDestination(value)) return true;
   if (!isSmilesAtomDestination(value)) return false;
+  if (isSmartsAtomLabel(normalizedLabel)) return true;
   // Atom maps, isotope/hydrogen counts, and chirality are strong chemistry
   // signals.  For a bare atom label, require an adjacent SMILES atom/bond so
   // a legitimate Markdown link such as `[C](assets/file.pdf)` stays intact.
@@ -351,12 +375,14 @@ function isLikelyParameterStatusNotation(text: string, matchIndex: number, desti
 }
 
 function isLikelyNonResourceNotation(text: string, matchIndex: number, destination: string): boolean {
-  return isLikelyChemicalNotation(text, matchIndex, destination)
+  return isLikelyMarkdownImagePlaceholder(text, matchIndex, destination)
+    || isLikelyChemicalNotation(text, matchIndex, destination)
     || isLikelyMathematicalNotation(text, matchIndex, destination)
     || isLikelyEntityAnnotation(text, matchIndex, destination)
     || isLikelyReferencePlaceholder(text, matchIndex, destination)
     || isLikelyParameterStatusNotation(text, matchIndex, destination)
-    || isLikelyPythonAttributeNotation(text, matchIndex, destination);
+    || isLikelyPythonAttributeNotation(text, matchIndex, destination)
+    || isLikelyPythonArgumentUnpackingNotation(text, matchIndex, destination);
 }
 
 function normalizeMarkdownReferenceLabel(value: string): string {
