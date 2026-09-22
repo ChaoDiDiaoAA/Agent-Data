@@ -1,5 +1,10 @@
 # Backend storage paths
 
+Related backend contracts:
+
+- [Archive reference contract](archive-reference-contract.md) — shared
+  discovery/rewrite rules for MinerU Markdown and structured resources.
+
 ## Pre-Development Checklist
 
 When changing machine roots, downloads, cleanup or Vault rebuilding, trace the field from `shared/engine-context.ts` through `shared/paths.ts` and `shared/config.ts` to its consumer. Read the contract below before editing those boundaries.

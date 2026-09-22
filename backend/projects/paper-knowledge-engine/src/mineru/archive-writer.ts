@@ -62,7 +62,7 @@ async function installPackage(input: ArchiveWriteInput): Promise<VerifiedArchive
     const contentList = JSON.parse(await readFile(join(input.workspace, 'content-list.json'), 'utf8'));
     const pages = JSON.parse(await readFile(join(input.workspace, 'pages.json'), 'utf8'));
     const payloads = [...new Set(['source.pdf', 'document.md', 'pages.json', 'content-list.json',
-      ...archiveReferences(markdown, contentList), ...archiveReferences('', pages)])].filter(path => path !== 'source.json').sort();
+      ...archiveReferences(markdown, contentList), ...archiveReferences('', pages, markdown)])].filter(path => path !== 'source.json').sort();
     const files: ArchiveSourceV2['files'] = [];
     for (const path of [...payloads, 'source.json'].sort()) {
       const body = path === 'source.json' ? Buffer.from(canonicalJson(input.source)) : await readFile(join(input.workspace, path));

@@ -4,7 +4,7 @@ import { join, resolve, dirname, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { assertLibraryId } from './identity.ts';
 import { canonicalJson, normalizeArchivePath } from './manifest.ts';
-import { discoverArchiveAssetPaths, isLikelyMarkdownImagePlaceholder, isLikelyPythonArgumentUnpackingNotation, isLikelyPythonAttributeNotation, isMinerUTruncationPlaceholder, isMinerUTemplateAssetPlaceholder, mapMarkdownOutsideCode, normalizedArchiveAssetDestination, normalizedArchiveAssetPath, rewriteArchiveAssetReferences } from './archive-references.ts';
+import { discoverArchiveAssetPaths, isFootnoteReferenceLabel, isLikelyCitationParenthesizedProse, isLikelyExtractedImageExample, isLikelyMarkdownImagePlaceholder, isLikelyPythonArgumentUnpackingNotation, isLikelyPythonAttributeNotation, isMinerUTruncationPlaceholder, isMinerUTemplateAssetPlaceholder, mapMarkdownOutsideCode, normalizedArchiveAssetDestination, normalizedArchiveAssetPath, rewriteArchiveAssetReferences } from './archive-references.ts';
 import { PDFDocument } from 'pdf-lib';
 
 export function archivePath(path: string): string {
@@ -322,6 +322,25 @@ export function isLikelyChemicalNotation(text: string, matchIndex: number, desti
   return /[A-Za-z0-9)\]=#-]/.test(previous) || /[A-Za-z0-9[\]=#-]/.test(after);
 }
 
+// Reaction SMILES with atom maps can contain nested mapped atoms, for example
+// `[C@@H:6]([C:7]([O:8][CH3:9])=[O:10])`. MinerU flattens the reaction string
+// into a Markdown-looking `](...)` sequence; the destination then contains
+// brackets/colons that are invalid Archive path characters. Require both a
+// mapped chemical atom and nearby reaction/chemistry language so an actual
+// unsafe local path is still rejected.
+const MAPPED_CHEMICAL_ATOM_PATTERN = /\[(?:[A-Z][a-z]?|[bcnops])(?:@@?|@)?H?\d*(?:[+-]\d*)?:\d+\]/;
+function isLikelyMappedReactionNotation(text: string, matchIndex: number, destination: string): boolean {
+  const value = destination.trim();
+  const mappedAtoms = value.match(new RegExp(MAPPED_CHEMICAL_ATOM_PATTERN.source, 'g'));
+  // This exception is for a flattened reaction sequence, not a single
+  // bracketed atom that could still be a malformed local link.
+  if (!mappedAtoms || mappedAtoms.length < 2) return false;
+  const open = text.lastIndexOf('[', matchIndex);
+  const context = text.slice(Math.max(0, open - 1200), Math.min(text.length, matchIndex + value.length + 1200));
+  if (!/\b(?:reaction|mechanis(?:m|tic)|smiles|molecule|chemical|organic|reactant|product|atom)\b/i.test(context)) return false;
+  return /[()[\]=]|>>/.test(value);
+}
+
 /** Return true for bracketed mathematical expressions followed by a numeric
  * parenthesis, such as `[40 -5c_x/7](0)`.  MinerU emits this syntax for
  * ordinary prose/math, but the Markdown link scanner would otherwise resolve
@@ -332,6 +351,23 @@ function isLikelyMathematicalNotation(text: string, matchIndex: number, destinat
   if (open < 0) return false;
   const label = text.slice(open + 1, matchIndex);
   return /[\\_=+\-*/^]|(?:\d\s*[A-Za-z])|(?:[A-Za-z]\s*\d)/.test(label);
+}
+
+// Mathematical alphanumeric symbols such as `𝑴` and `𝒖` are common in
+// MinerU footnotes. A formula like `ℒ[𝑴](𝒖)` resembles a Markdown link even
+// though the parenthesized value is a variable, not an Archive path. Keep the
+// exception narrow: both sides must be Unicode math symbols and nearby text
+// must contain formula operators or math markup.
+const UNICODE_MATH_CHARACTER_PATTERN = /[\u{1D400}-\u{1D7FF}\u{2100}-\u{214F}\u{2200}-\u{22FF}]/u;
+function isLikelyUnicodeMathNotation(text: string, matchIndex: number, destination: string): boolean {
+  const value = destination.trim();
+  const isMathToken = (candidate: string) => candidate.length > 0
+    && [...candidate].every(character => UNICODE_MATH_CHARACTER_PATTERN.test(character));
+  if (!isMathToken(value)) return false;
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open < 0 || !isMathToken(text.slice(open + 1, matchIndex).trim())) return false;
+  const context = text.slice(Math.max(0, open - 320), Math.min(text.length, matchIndex + value.length + 320));
+  return /(?:[∈∑∫→≔≤≥]|[ℝℕℤℚℂ]|<sup>|<sub>|\$)/u.test(context);
 }
 
 // MinerU can preserve NER examples in code blocks as prose such as
@@ -374,15 +410,59 @@ function isLikelyParameterStatusNotation(text: string, matchIndex: number, desti
   return /^\{[^{}\r\n]+\}$/.test(text.slice(open + 1, matchIndex).trim());
 }
 
+// Travel, recommendation, and tool papers often describe an entity-display
+// convention such as `**[PoiName](poiId)**` and then show concrete IDs such as
+// `**[Beijing Zoo](0001)**`. MinerU can flatten the surrounding JSON/code
+// sample into ordinary Markdown, so the link scanner would otherwise treat
+// those IDs as files in the parse output. Keep the exception narrow: the link
+// must be bold, its destination must be a plain identifier, and nearby prose
+// must explicitly look like an entity/JSON schema. A normal local link such as
+// `**[Guide](0001)**` remains strict without that context.
+function isLikelyEntityIdNotation(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  const value = destination.trim();
+  if (open < 0 || !/^(?:\d{1,12}|[A-Za-z_][A-Za-z0-9_-]*Id)$/.test(value)) return false;
+
+  const close = text.indexOf(')', matchIndex + 2 + value.length);
+  if (close < 0) return false;
+  const before = text.slice(Math.max(0, open - 8), open);
+  const after = text.slice(close + 1, close + 8);
+  const boldOpen = before.endsWith('**') || before.endsWith('\\*\\*');
+  const boldClose = after.startsWith('**') || after.startsWith('\\*\\*');
+  if (!boldOpen || !boldClose) return false;
+
+  const context = text.slice(Math.max(0, open - 900), Math.min(text.length, close + 900));
+  if (!/\b(?:json|poi|hotel|attraction|transportation|reference\s+data|detailList|scheduleDetail)\b/i.test(context)) return false;
+
+  const label = text.slice(open + 1, matchIndex).trim();
+  return label.length > 0 && /[A-Za-z]/.test(label);
+}
+
 function isLikelyNonResourceNotation(text: string, matchIndex: number, destination: string): boolean {
   return isLikelyMarkdownImagePlaceholder(text, matchIndex, destination)
+    || isLikelyExtractedImageExample(text, matchIndex, destination)
     || isLikelyChemicalNotation(text, matchIndex, destination)
+    || isLikelyMappedReactionNotation(text, matchIndex, destination)
     || isLikelyMathematicalNotation(text, matchIndex, destination)
+    || isLikelyUnicodeMathNotation(text, matchIndex, destination)
+    || isLikelyCitationParenthesizedProse(text, matchIndex, destination)
     || isLikelyEntityAnnotation(text, matchIndex, destination)
     || isLikelyReferencePlaceholder(text, matchIndex, destination)
     || isLikelyParameterStatusNotation(text, matchIndex, destination)
+    || isLikelyEntityIdNotation(text, matchIndex, destination)
     || isLikelyPythonAttributeNotation(text, matchIndex, destination)
     || isLikelyPythonArgumentUnpackingNotation(text, matchIndex, destination);
+}
+
+function extractedImageExamplePaths(markdown: string): ReadonlySet<string> {
+  const paths = new Set<string>();
+  for (const match of markdown.matchAll(MARKDOWN_INLINE_LINK_PATTERN)) {
+    const destination = match[2] ?? match[3];
+    if (!destination || !isLikelyExtractedImageExample(markdown, match.index ?? 0, destination)) continue;
+    const path = referencePath(destination);
+    if (path) paths.add(path);
+  }
+  return paths;
 }
 
 function normalizeMarkdownReferenceLabel(value: string): string {
@@ -419,7 +499,13 @@ function mapTextResourcesSegment(text: string, visit: (value: string) => string)
     const label = normalizeMarkdownReferenceLabel(match[2] || match[1]!);
     if (label) usedLabels.add(label);
   }
-  const activeLabels = new Set(definitions.filter(definition => usedLabels.has(definition.label)).map(definition => definition.label));
+  // CommonMark footnote definitions use the same `[label]: value` shape as
+  // reference definitions, but their first token is prose rather than a file
+  // destination.  An active citation such as `[^1][^2]` must therefore not
+  // turn the first word of `[^2]: ‘US‘ tabs ...` into an Archive path.
+  const activeLabels = new Set(definitions
+    .filter(definition => !isFootnoteReferenceLabel(definition.label) && usedLabels.has(definition.label))
+    .map(definition => definition.label));
   const destinations: { start: number; end: number }[] = [];
   for (const pattern of [inlinePattern, definitionPattern]) for (const match of text.matchAll(pattern)) {
     const isActiveDefinition = pattern === definitionPattern && !activeLabels.has(normalizeMarkdownReferenceLabel(match[2]!));
@@ -443,22 +529,40 @@ function mapTextResourcesSegment(text: string, visit: (value: string) => string)
     });
 }
 
-/** Local links must resolve to the package, including ordinary Markdown links. */
-export function archiveReferences(markdown: string, content: unknown): string[] {
+/** Local links must resolve to the package, including ordinary Markdown links.
+ * When `content` is a page-only projection, pass the complete document as
+ * `contextMarkdown` so quoted OCR image names are classified consistently at
+ * every archive/evidence stage. */
+export function archiveReferences(markdown: string, content: unknown, contextMarkdown = markdown): string[] {
   const paths = new Set<string>();
+  const extractedExamplePaths = extractedImageExamplePaths(contextMarkdown);
   function add(value: string) {
     const path = referencePath(value);
     if (path) paths.add(path);
   }
-  for (const path of discoverArchiveAssetPaths(markdown, content)) add(path);
-  mapTextResources(markdown, value => { add(value); return value; });
+  for (const path of discoverArchiveAssetPaths(markdown, content)) {
+    if (!extractedExamplePaths.has(path)) add(path);
+  }
+  // A page record may begin in the middle of an OCR example.  Its local
+  // Markdown no longer contains the heading that identifies `fileoutpart*`,
+  // `img-*`, or `placeholder` as quoted extractor output, so use the full
+  // document-derived set when scanning the page projection as well.
+  mapTextResources(markdown, value => {
+    const path = referencePath(value);
+    if (!path || !extractedExamplePaths.has(path)) add(value);
+    return value;
+  });
   // Catch absolute drive paths that the legacy reference reader treats as URLs.
   const inspect = (v: unknown, key?: string): void => {
     const resource = isResourceField(key);
     if (typeof v === 'string') {
       if (key?.toLowerCase() === 'srcset') mapSrcset(v, value => { add(value); return value; });
       else if (resource) add(v);
-      else mapTextResources(v, value => { add(value); return value; });
+      else mapTextResources(v, value => {
+        const path = referencePath(value);
+        if (!path || !extractedExamplePaths.has(path)) add(value);
+        return value;
+      });
     }
     if (Array.isArray(v)) v.forEach(child => inspect(child, key));
     else if (v && typeof v === 'object') for (const [childKey, child] of Object.entries(v)) {
@@ -470,14 +574,16 @@ export function archiveReferences(markdown: string, content: unknown): string[] 
 }
 
 /** Normalization and verification share destination parsing, including strings
- * nested in MinerU table bodies. Legacy structured asset fields keep support. */
-export function rewriteArchiveReferences(markdown: string, content: unknown, paths: ReadonlyMap<string, string>) {
+ * nested in MinerU table bodies. Legacy structured asset fields keep support.
+ * `contextMarkdown` keeps page-only rewrites aligned with full-document
+ * OCR/example classification. */
+export function rewriteArchiveReferences(markdown: string, content: unknown, paths: ReadonlyMap<string, string>, contextMarkdown = markdown) {
   const rewrite = (value: string): string => {
     const path = referencePath(value);
     const destination = path && normalizedArchiveAssetDestination(path, paths);
     return destination ? destination + (value.match(/[?#].*$/)?.[0] ?? '') : value;
   };
-  const legacy = rewriteArchiveAssetReferences(markdown, content, paths);
+  const legacy = rewriteArchiveAssetReferences(markdown, content, paths, extractedImageExamplePaths(contextMarkdown));
   const structured = (value: unknown, key?: string): unknown => {
     const resource = isResourceField(key);
     if (typeof value === 'string') return key?.toLowerCase() === 'srcset' ? mapSrcset(value, rewrite)
@@ -543,7 +649,7 @@ export async function verifyArchiveV2(root: string): Promise<VerifiedArchiveV2> 
     return true;
   };
   if (!Array.isArray(contentList) || !contentList.length || !blocks(contentList)) throw new Error('invalid content-list schema');
-  const refs = [...new Set([...archiveReferences(fullMarkdown, contentList), ...archiveReferences('', rawPages)])];
+  const refs = [...new Set([...archiveReferences(fullMarkdown, contentList), ...archiveReferences('', rawPages, fullMarkdown)])];
   const resolvedRefs = refs.map(path => normalizedArchiveAssetPath(path, payloads) ?? path);
   for (const path of resolvedRefs) if (!payloads.has(path)) throw new Error('missing referenced resource: ' + path);
   for (const path of payloads.keys()) if (path.startsWith('assets/') && !resolvedRefs.includes(path)) throw new Error('unreferenced Archive asset');

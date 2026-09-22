@@ -157,7 +157,7 @@ export function renderPaperEvidenceV3(source: BufferedEvidenceSource): RenderedF
   const destinations = new Set<string>();
   const directories = new Map<string, string>();
   const files: RenderedFile[] = [];
-  const pageReferences = new Set(source.pages.flatMap(page => archiveReferences(page.text, [])));
+  const pageReferences = new Set(source.pages.flatMap(page => archiveReferences(page.text, [], source.fullMarkdown)));
   const references = new Set([...archiveReferences(source.fullMarkdown, source.contentList), ...pageReferences]);
   const publishedAssets = new Set<Asset>();
   for (const path of references) {
@@ -204,7 +204,7 @@ export function renderPaperEvidenceV3(source: BufferedEvidenceSource): RenderedF
   });
   const pages = [...source.pages].sort((a, b) => a.page - b.page);
   if (pages.length !== value.pageCount || pages.some((page, i) => page.page !== i + 1 || typeof page.text !== 'string')) throw new Error('invalid page sequence');
-  const rewrittenPages = pages.map(page => ({ ...page, text: rewriteArchiveReferences(page.text, [], paths).fullMarkdown }));
+  const rewrittenPages = pages.map(page => ({ ...page, text: rewriteArchiveReferences(page.text, [], paths, source.fullMarkdown).fullMarkdown }));
   files.push(textFile(`${root}/paper.md`, paper), textFile(`${root}/pages.md`, renderPages(rewrittenPages)), renderFile(`${root}/source.pdf`, source.pdfContents));
   return files.sort((a, b) => compareText(a.path, b.path));
 }

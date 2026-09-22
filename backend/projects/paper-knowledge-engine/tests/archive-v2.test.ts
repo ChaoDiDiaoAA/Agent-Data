@@ -22,11 +22,35 @@ test('citation followed by parenthesized prose is not a partial Markdown link', 
   expect(rewriteArchiveReferences('[PDF](assets/a.pdf "source")', [], new Map([['assets/a.pdf', 'source.pdf']])).fullMarkdown).toBe('[PDF](source.pdf "source")');
 });
 
+test('citation labels followed by bare architecture terms are not Archive links', () => {
+  const prose = 'Autoformer [40] and PatchTST [41](Transformer-based), TimesNet [42](temporal CNN), DLinear [43](linear), and TimeMixer [44](token-mixing).';
+  const content = [{ type: 'text', text: prose }];
+  expect(archiveReferences(prose, content)).toEqual([]);
+  expect(rewriteArchiveReferences(prose, content, new Map()).fullMarkdown).toBe(prose);
+  expect(rewriteArchiveReferences(prose, content, new Map([['Transformer-based', 'assets/Transformer-based']])).fullMarkdown).toBe(prose);
+  expect(archiveReferences('[41](assets/model.bin)', [])).toEqual(['assets/model.bin']);
+});
+
+test('footnote definitions keep prose destinations out of Archive references', () => {
+  const prose = [
+    'SiteID: ‘Lorexa‘ z score: ‘-1.60‘ [^1][^2]',
+    '[^1]: ‘/Manufacturing\\_Site\\_Operations\\_2020\\_2024.xlsx‘',
+    '[^2]: ‘US‘ tabs in ‘/4. Received From Client/Impact Therapeutics/ImpactTherapeutics\\_PnL.xlsx‘',
+  ].join('\n');
+  const content = [{ type: 'text', text: prose }];
+  expect(archiveReferences(prose, content)).toEqual([]);
+  expect(rewriteArchiveReferences(prose, content, new Map()).fullMarkdown).toBe(prose);
+});
+
 test('NER label examples in MinerU code text are not treated as Archive assets', () => {
   const prose = 'Entities : [ ENTITY ]( TYPE ), [ Apple ]( ORG), [ iPhone 15]( PRODUCT ), [ Cupertino ]( LOC)';
   const content = [{ type: 'code', code_body: prose }];
   expect(archiveReferences(prose, content)).toEqual([]);
   expect(rewriteArchiveReferences(prose, content, new Map()).fullMarkdown).toBe(prose);
+  // The exception is chemistry-contextual; a similarly shaped bare link still
+  // fails closed so a real invalid local destination cannot be hidden.
+  expect(() => archiveReferences('[Guide]([C:7])', [])).toThrow(/unsafe Archive path/);
+  expect(() => archiveReferences('Organic reaction reference: [Guide]([C:7])', [])).toThrow(/unsafe Archive path/);
 });
 
 test('conceptual reference examples in prose are not treated as Archive assets', () => {
@@ -41,6 +65,26 @@ test('truncated external image examples do not become missing Markdown destinati
   expect(archiveReferences(prose, [])).toEqual([]);
   expect(rewriteArchiveReferences(prose, [], new Map()).fullMarkdown).toBe(prose);
   expect(() => archiveReferences('![missing image]', [])).toThrow(/no destination/);
+});
+
+test('split external image destinations do not become missing Markdown destinations', () => {
+  const prose = '![Services Hexagon](https://example.com/\nservices-hexagon.png)';
+  expect(archiveReferences(prose, [])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [], new Map()).fullMarkdown).toBe(prose);
+  expect(() => archiveReferences('![missing image](assets/\nmissing.png)', [])).toThrow(/no destination/);
+});
+
+test('does not treat quoted OCR image examples as current Archive assets', () => {
+  const prose = [
+    '## Adobe Text Extract',
+    '![Figure](fileoutpart42.png)',
+    '## Ministral 3B',
+    '![Ringlock Scaffold](placeholder)',
+  ].join('\n');
+  expect(archiveReferences(prose, [])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [], new Map()).fullMarkdown).toBe(prose);
+  expect(archiveReferences('![Figure](fileoutpart42.png)', [])).toEqual(['fileoutpart42.png']);
+  expect(archiveReferences('![Figure](assets/fileoutpart42.png)', [])).toEqual(['assets/fileoutpart42.png']);
 });
 
 test('does not treat generic Markdown image URL placeholders as Archive paths', () => {
@@ -68,10 +112,30 @@ test('does not treat chemical SMILES notation as Markdown asset links', () => {
   expect(archiveReferences('[C](assets/chemical.pdf)', [])).toEqual(['assets/chemical.pdf']);
 });
 
+test('does not treat mapped reaction notation as Archive paths', () => {
+  const prose = [
+    'Original Reaction: [C@@H:6]([C:7]([O:8][CH3:9])=[O:10])[NH:11][C:12](=[O:13])[NH:14]',
+    'Updated Reaction: [O:201]=[C:101]([O:202][CH2:203][c:204]1[cH:205][cH:206])',
+  ].join('\n');
+  const content = [{ type: 'code', code_body: prose }];
+
+  expect(archiveReferences(prose, content)).toEqual([]);
+  expect(rewriteArchiveReferences(prose, content, new Map()).fullMarkdown).toBe(prose);
+});
+
 test('does not treat mathematical bracket expressions as Markdown asset links', () => {
   const prose = 'Term 2: [40 -5c\\_x/7](6) and Term 3: [40 -5c\\_x/7](0).';
   expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
   expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
+});
+
+test('does not treat Unicode mathematical variables as Archive paths', () => {
+  const prose = 'A matrix 𝑴 ∈ ℝ<sup>!×#</sup> defines ℒ[𝑴]: ℝ<sup>!</sup> → ℝ<sup>#</sup>, ℒ[𝑴](𝒖) ≔ ∑ 𝑢<sub>i</sub>𝑟<sub>i</sub>(𝑴).';
+  const content = [{ type: 'page_footnote', text: prose }];
+
+  expect(archiveReferences(prose, content)).toEqual([]);
+  expect(rewriteArchiveReferences(prose, content, new Map()).fullMarkdown).toBe(prose);
+  expect(archiveReferences('[Guide](𝒖)', [])).toEqual(['𝒖']);
 });
 
 test('does not treat MinerU escaped Python attribute notation as an Archive path', () => {
@@ -96,6 +160,23 @@ test('does not treat required-or-optional parameter notation as an Archive path'
   const prose = 'Parameters: - {param_name} [{type}](required/optional): {param_description}';
   expect(archiveReferences(prose, [{ type: 'text', text: prose }])).toEqual([]);
   expect(rewriteArchiveReferences(prose, [{ type: 'text', text: prose }], new Map()).fullMarkdown).toBe(prose);
+});
+
+test('does not treat bold entity-id examples as Archive paths', () => {
+  const prose = [
+    'Attractions: poi (id: poiId, name: poiName); hotels use hotel (id: hotelId, name: hotelName).',
+    'Use the format **[PoiName](poiId)** or **[HotelName](hotelId)** when describing reference data.',
+    'The JSON example is **[Beijing Zoo](0001)** and **[Beijing Tiantan Manssion Hotel](0002)**.',
+  ].join('\n');
+  const content = [{ type: 'text', text: prose }];
+
+  expect(archiveReferences(prose, content)).toEqual([]);
+  expect(archiveReferences('', content)).toEqual([]);
+  expect(archiveReferences(prose.replaceAll('**', '\\*\\*'), [])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, content, new Map()).fullMarkdown).toBe(prose);
+  // A bare, unqualified local link remains strict so missing resources cannot
+  // be hidden by the entity-id exception.
+  expect(archiveReferences('**[Guide](0001)** is a local artifact.', [])).toEqual(['0001']);
 });
 
 test('does not treat template HTML asset placeholders as Archive paths', () => {
@@ -193,6 +274,22 @@ test('does not treat image-like syntax inside fenced or inline code as Markdown 
     .toContain('<![CDATA[Backup file content v1]]>');
 });
 
+test('does not treat HTML source examples inside fenced code as Archive resources', () => {
+  const prose = [
+    '```json',
+    '{',
+    '  "id": "<source id>",',
+    '  "text": "<img alt=\\"example\\">"',
+    '}',
+    '```',
+    '',
+    '![real](assets/figure.jpg)',
+  ].join('\n');
+  expect(archiveReferences(prose, [])).toEqual(['assets/figure.jpg']);
+  expect(rewriteArchiveReferences(prose, [], new Map([['assets/figure.jpg', 'assets/real.jpg']])).fullMarkdown)
+    .toContain('"id": "<source id>",');
+});
+
 test('treats escaped backticks as prose while retaining real inline code masking for image assets', () => {
   const sha = '5b1d0f7e4a8c3e2d9f6b0a1c4d8e7f2a9b3c6d0e1f4a7b8c2d5e9f0a3b6c1d4e';
   const prose = [
@@ -284,6 +381,19 @@ test('writer preserves an asset referenced only by page text', async () => {
   await writeFile(join(input.workspace, 'pages.json'), JSON.stringify([{ pageNumber: 1, text: '![page](assets/page.jpg)' }]));
   const archive = await writeArchiveV2(input);
   expect(await readFile(join(archive.root, 'assets/page.jpg'), 'utf8')).toBe('page-image');
+});
+
+test('writer and verifier reuse full Markdown context for OCR image examples in page text', async () => {
+  const input = await fixtureInput();
+  const markdown = '## Adobe Text Extract\n![Figure](fileoutpart7.png)\n![figure](assets/figure.jpg)';
+  await writeFile(join(input.workspace, 'document.md'), markdown);
+  await writeFile(join(input.workspace, 'pages.json'), JSON.stringify([{ pageNumber: 1, text: '![Figure](fileoutpart7.png)' }]));
+
+  expect(archiveReferences('![Figure](fileoutpart7.png)', [], markdown)).toEqual([]);
+  expect(archiveReferences('', [{ text: '![Figure](fileoutpart7.png)' }], markdown)).toEqual([]);
+  const archive = await writeArchiveV2(input);
+  await expect(verifyArchiveV2(archive.root)).resolves.toBeDefined();
+  expect(archive.manifest.files.some(file => file.path.includes('fileoutpart7'))).toBe(false);
 });
 
 test('writes a lean archive and excludes MinerU intermediates', async () => {

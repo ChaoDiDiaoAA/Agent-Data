@@ -37,6 +37,124 @@ test('normalizes table image references in page text with the same asset mapping
   assert.ok(!(await readFile(join(root, 'normalized/page-marked.txt'), 'utf8')).includes('src="images/'));
 });
 
+test('normalizes MinerU split external image URLs without inventing Archive resources', async () => {
+  const root = await fixtureRoot('split-external-image');
+  const prose = '![Services Hexagon](https://example.com/\nservices-hexagon.png)';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.equal(await readFile(result.markdownPath, 'utf8'), prose);
+  assert.equal(await Bun.file(join(root, 'assets', 'services-hexagon.png')).exists(), false);
+});
+
+test('normalizes citation architecture prose without inventing Archive resources', async () => {
+  const root = await fixtureRoot('citation-architecture-prose');
+  const prose = 'Autoformer [40] and PatchTST [41](Transformer-based), TimesNet [42](temporal CNN), DLinear [43](linear), and TimeMixer [44](token-mixing).';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.equal(await readFile(result.markdownPath, 'utf8'), prose);
+  assert.equal(await Bun.file(join(root, 'assets', 'Transformer-based')).exists(), false);
+});
+
+test('normalizes quoted OCR image examples without inventing Archive resources', async () => {
+  const root = await fixtureRoot('ocr-image-examples');
+  const prose = '## Adobe Text Extract\n![Figure](fileoutpart42.png)\n## Ministral 3B\n![Ringlock Scaffold](placeholder)';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.equal(await readFile(result.markdownPath, 'utf8'), prose);
+  assert.equal(await Bun.file(join(root, 'assets', 'fileoutpart42.png')).exists(), false);
+  assert.equal(await Bun.file(join(root, 'assets', 'placeholder')).exists(), false);
+});
+
+test('normalizes bold entity-id examples without inventing Archive resources', async () => {
+  const root = await fixtureRoot('entity-id-examples');
+  const prose = [
+    'Attractions: poi (id: poiId, name: poiName); hotels use hotel (id: hotelId, name: hotelName).',
+    'Use the format **[PoiName](poiId)** or **[HotelName](hotelId)** when describing reference data.',
+    'The JSON example is **[Beijing Zoo](0001)** and **[Beijing Tiantan Manssion Hotel](0002)**.',
+  ].join('\n');
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ outputDir: root, model: 'pipeline', cliBackend: 'pipeline', pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.equal(await readFile(result.markdownPath, 'utf8'), prose);
+  assert.equal(await Bun.file(join(root, 'assets', '0001')).exists(), false);
+  assert.equal(await Bun.file(join(root, 'assets', '0002')).exists(), false);
+  assert.equal(await Bun.file(join(root, 'assets', 'poiId')).exists(), false);
+  assert.equal(await Bun.file(join(root, 'assets', 'hotelId')).exists(), false);
+});
+
+test('normalizes mapped reaction notation without treating atom maps as Archive paths', async () => {
+  const root = await fixtureRoot('mapped-reaction');
+  const prose = [
+    'Original Reaction: [C@@H:6]([C:7]([O:8][CH3:9])=[O:10])[NH:11][C:12](=[O:13])[NH:14]',
+    'Updated Reaction: [O:201]=[C:101]([O:202][CH2:203][c:204]1[cH:205][cH:206])',
+  ].join('\n');
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'code', code_body: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ outputDir: root, model: 'pipeline', cliBackend: 'pipeline', pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.equal(await readFile(result.markdownPath, 'utf8'), prose);
+});
+
+test('normalizes Unicode mathematical variables without treating them as Archive paths', async () => {
+  const root = await fixtureRoot('unicode-math');
+  const prose = 'A matrix 𝑴 ∈ ℝ<sup>!×#</sup> defines ℒ[𝑴]: ℝ<sup>!</sup> → ℝ<sup>#</sup>, ℒ[𝑴](𝒖) ≔ ∑ 𝑢<sub>i</sub>𝑟<sub>i</sub>(𝑴).';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'page_footnote', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ outputDir: root, model: 'pipeline', cliBackend: 'pipeline', pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.equal(await readFile(result.markdownPath, 'utf8'), prose);
+});
+
+test('normalizes footnote definitions whose first token is prose instead of an Archive asset', async () => {
+  const root = await fixtureRoot('footnote-prose-destination');
+  const prose = [
+    'SiteID: ‘Lorexa‘ z score: ‘-1.60‘ [^1][^2]',
+    '[^1]: ‘/Manufacturing\\_Site\\_Operations\\_2020\\_2024.xlsx‘',
+    '[^2]: ‘US‘ tabs in ‘/4. Received From Client/Impact Therapeutics/ImpactTherapeutics\\_PnL.xlsx‘',
+  ].join('\n');
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.equal(await readFile(result.markdownPath, 'utf8'), prose);
+  assert.equal(await Bun.file(join(root, 'assets', '‘US‘')).exists(), false);
+});
+
 test('normalizes split chemical SMILES without inventing Archive resources', async () => {
   const root = await fixtureRoot('chemical-smiles');
   const markdown = '# Paper\n\n[CH3:19][C\n\n:4](=[O:23])[C@@H:13]1';

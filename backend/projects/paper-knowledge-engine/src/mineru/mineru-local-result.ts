@@ -177,7 +177,7 @@ export async function normalizeLocalMinerUResult(job: Pick<LocalParseJob, 'model
   }
   const rewritten = rewriteArchiveReferences(markdownText, contentList, assetPaths);
   const normalizedPages = pages.map(page => ({ ...page,
-    text: rewriteArchiveReferences(page.text, [], assetPaths).fullMarkdown,
+    text: rewriteArchiveReferences(page.text, [], assetPaths, markdownText).fullMarkdown,
   }));
 
   const normalizedDir = join(root, 'normalized');

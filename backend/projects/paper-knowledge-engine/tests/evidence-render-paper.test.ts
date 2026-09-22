@@ -141,6 +141,25 @@ test('paper renderer rewrites a raw Markdown image only when its normalized Arch
   expect(rendered.some(file => file.path.endsWith('assets/images/figure.png'))).toBe(true);
 });
 
+test('paper renderer ignores OCR example images in page projections', () => {
+  const source = fixture('D:/fixtures/ocr-page-example');
+  source.fullMarkdown = [
+    '## Adobe Text Extract',
+    '![Figure](fileoutpart7.png)',
+    '## Actual figure',
+    '![Figure](assets/figure.png)',
+  ].join('\n');
+  source.pages = [
+    { page: 1, text: '![Figure](fileoutpart7.png)' },
+    { page: 2, text: '![Figure](assets/figure.png)' },
+  ];
+
+  const rendered = renderPaperEvidence(source);
+  expect(rendered.some(file => file.path.includes('fileoutpart7'))).toBe(false);
+  expect(rendered.some(file => file.path.endsWith('assets/figure.png'))).toBe(true);
+  expect(text(rendered, 'pages.md')).toContain('fileoutpart7.png');
+});
+
 test('paper template embeds the full document without unresolved placeholders', () => {
   const paper = text(renderPaperEvidence(fixture('D:/fixtures/template')), 'paper.md');
   expect(paper).not.toMatch(/\{\{[A-Za-z]+\}\}/);

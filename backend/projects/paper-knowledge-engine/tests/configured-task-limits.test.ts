@@ -18,21 +18,16 @@ import { loadEngineContext } from '../src/shared/engine-context.ts';
 import { asLibraryId } from '../src/shared/identity.ts';
 
 for (const id of ['fsd','agent-engineering','multi-agent-engineering','llm-post-training','agent-tool','agent-context','agent-memory','skill-prompt-engineering']) {
-  test(`${id} configured task bypasses an old local cooldown without discarding its run`, async () => {
+  test(`${id} configured task enables adaptive arXiv cooldown without discarding its run`, async () => {
     let observed = false;
     let runId = '';
     const store = openStateStore(':memory:');
     const result = await runConfiguredTask(['--mode','current','--limit','0'], process.cwd(), {
       libraryId: asLibraryId(id), openStateStore: () => store, bootstrap: async () => {},
       harvest: async (shards, _window, options) => {
-        assert.equal(options.arxiv?.capacityCooldownMs, 0);
+        assert.equal(options.arxiv?.capacityCooldownMs, 900_000);
         assert.ok(options.rateLimitPath);
         const shard = shards[0]!;
-        store.beginHarvestShard({runId,shardKey:shard.key,shardIndex:1,totalShards:shards.length,
-          track:shard.track,dateMode:shard.dateMode,query:shard.query,categories:shard.categories});
-        store.failHarvestShard({runId,shardKey:shard.key}, Object.assign(new Error('old cooldown'), {
-          code:'ARXIV_CAPACITY_LIMITED',retryNotBefore:'2999-01-01T00:00:00.000Z',
-        }));
         options.checkpoint.start(shard,0);
         options.checkpoint.complete(shard,0,[]);
         assert.deepEqual(store.listCompletedHarvestShardKeys(runId),[shard.key]);

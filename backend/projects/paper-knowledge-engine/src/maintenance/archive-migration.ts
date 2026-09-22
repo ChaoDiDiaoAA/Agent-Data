@@ -140,7 +140,7 @@ async function preparePaper(input: ArchiveMigrationInput, oldRoot: string): Prom
     [source.pdfPath, 'source.pdf'], [source.normalized.fullMarkdown, 'document.md'],
     [source.normalized.pages, 'pages.json'], [source.normalized.contentList, 'content-list.json'],
   ]);
-  const refs = [...new Set([...archiveReferences(markdown, content), ...archiveReferences('', pages)])].sort();
+  const refs = [...new Set([...archiveReferences(markdown, content), ...archiveReferences('', pages, markdown)])].sort();
   const assetsByHash = new Map<string, string>();
   const destinationOwners = new Map<string, { destination: string; payload: Uint8Array }>();
   const destinationSpellings = new Map<string, string>();
@@ -218,7 +218,7 @@ async function preparePaper(input: ArchiveMigrationInput, oldRoot: string): Prom
   output.set('source.json', Buffer.from(canonicalJson(metadata)));
   output.set('source.pdf', body(source.pdfPath));
   output.set('document.md', Buffer.from(rewritten.fullMarkdown));
-  output.set('pages.json', Buffer.from(canonicalJson(rewriteArchiveReferences('', pages, referenceMap).contentList)));
+  output.set('pages.json', Buffer.from(canonicalJson(rewriteArchiveReferences('', pages, referenceMap, markdown).contentList)));
   output.set('content-list.json', Buffer.from(canonicalJson(rewritten.contentList)));
   const manifest: ArchiveSourceV2 = { schemaVersion: 2, libraryId: input.libraryId, sourceKind,
     baseId: source.baseId, version: source.version, pdfSha256: source.pdfSha256,

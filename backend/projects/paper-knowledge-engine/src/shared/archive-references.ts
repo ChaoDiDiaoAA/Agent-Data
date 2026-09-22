@@ -123,7 +123,8 @@ function markdownAssetPaths(markdown: string): string[] {
     const start = match.index;
     inlineRanges.push({ start, end: start + match[0].length });
     const marker = scan.indexOf('](', start);
-    if (marker >= 0 && isLikelyMarkdownImagePlaceholder(scan, marker, match[1] ?? match[2]!)) continue;
+    if (marker >= 0 && (isLikelyMarkdownImagePlaceholder(scan, marker, match[1] ?? match[2]!)
+      || isLikelyExtractedImageExample(scan, marker, match[1] ?? match[2]!))) continue;
     const path = localAssetPath(match[1] ?? match[2]);
     if (path) paths.push(path);
   }
@@ -138,7 +139,8 @@ function markdownAssetPaths(markdown: string): string[] {
     const label = normalizeReferenceLabel(match[2] || match[1]);
     const destination = definitions.get(label);
     if (!destination) {
-      if (isTruncatedExternalImage(scan, start + match[0].length)) continue;
+      if (isTruncatedExternalImage(scan, start + match[0].length)
+        || isSplitExternalImageReference(scan, start + match[0].length)) continue;
       throw new Error(`Markdown image reference has no destination: ${label}`);
     }
     const path = localAssetPath(destination);
@@ -146,7 +148,10 @@ function markdownAssetPaths(markdown: string): string[] {
   }
 
   const htmlImageRanges: { start: number; end: number }[] = [];
-  for (const match of markdown.matchAll(/<(img|source)(?=[\s/>])([^>]*)>/gi)) {
+  // HTML resource syntax inside fenced or inline code is an example, not an
+  // Archive reference. `scan` preserves offsets while masking those ranges,
+  // so both discovery and malformed-tag checks must use it consistently.
+  for (const match of scan.matchAll(/<(img|source)(?=[\s/>])([^>]*)>/gi)) {
     const start = match.index;
     htmlImageRanges.push({ start, end: start + match[0].length });
     const tag = match[1].toLowerCase();
@@ -171,7 +176,7 @@ function markdownAssetPaths(markdown: string): string[] {
       if (path) paths.push(path);
     }
   }
-  for (const match of markdown.matchAll(/<(?:img|source)(?=[\s/>])/gi)) {
+  for (const match of scan.matchAll(/<(?:img|source)(?=[\s/>])/gi)) {
     if (!htmlImageRanges.some(range => match.index >= range.start && match.index < range.end)) {
       throw new Error('Markdown contains malformed HTML image syntax');
     }
@@ -183,6 +188,23 @@ function normalizeReferenceLabel(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** CommonMark footnote definitions look like reference definitions, but their
+ * first token is prose and must never be treated as an Archive path. */
+export function isFootnoteReferenceLabel(value: string): boolean {
+  return value.trim().startsWith('^');
+}
+
+/** MinerU can flatten a citation followed by an architectural descriptor
+ * into Markdown-looking prose such as `[41](Transformer-based)`. */
+export function isLikelyCitationParenthesizedProse(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open < 0 || text[open - 1] === '!') return false;
+  const label = text.slice(open + 1, matchIndex).trim();
+  if (!/^\d+(?:\s*[-–,]\s*\d+)*$/.test(label)) return false;
+  const value = destination.trim().replace(/^<|>$/g, '');
+  return /^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u.test(value);
+}
+
 /**
  * MinerU may truncate an external image embedded in a table cell before the
  * closing Markdown parenthesis, for example `![shot](https://.../Simulat...</td>`.
@@ -191,6 +213,38 @@ function normalizeReferenceLabel(value: string): string {
  */
 function isTruncatedExternalImage(markdown: string, end: number): boolean {
   return /^\s*\(\s*https?:\/\/[^\r\n)]*(?:\.\.\.|…)[^\r\n)]*(?:<\/[^>]+>|$)/i.test(markdown.slice(end));
+}
+
+/**
+ * MinerU can wrap a long external image URL at a line boundary, for example
+ * `![Services Hexagon](https://example.com/\nservices-hexagon.png)`. The
+ * inline-image scanner intentionally rejects newlines in destinations, so
+ * the later reference scan would otherwise report a false missing destination
+ * for the image label. Only an explicitly external URL with a closed image
+ * expression is soft; malformed local images remain strict.
+ */
+function isSplitExternalImageReference(markdown: string, end: number): boolean {
+  return /^\s*\(\s*https?:\/\/[^\r\n)]*(?:(?:\r\n|\r|\n)[^\r\n)]*)+\s*\)/i.test(markdown.slice(end));
+}
+
+/**
+ * Papers sometimes quote the output of other OCR/extraction systems, whose
+ * Markdown contains names such as `fileoutpart42.png` or `placeholder`.
+ * Those names are prose examples unless they occur in the current MinerU
+ * asset tree. Keep the exception tied to an OCR/extraction section so ordinary
+ * local files with similar names remain strict.
+ */
+export function isLikelyExtractedImageExample(text: string, matchIndex: number, destination: string): boolean {
+  const open = text.lastIndexOf('[', matchIndex);
+  if (open < 0) return false;
+  const value = destination.trim().replace(/^<|>$/g, '').split(/[?#]/, 1)[0] ?? '';
+  const isNamedExtractorOutput = /^(?:fileoutpart\d+|img-\d+)\.(?:png|jpe?g|gif|webp)$/i.test(value);
+  const isPlaceholder = value.toLowerCase() === 'placeholder';
+  if (!isNamedExtractorOutput && !isPlaceholder) return false;
+  const context = text.slice(Math.max(0, open - 2000), open);
+  if (isPlaceholder) return /\b(?:mistral|ocr|extract|placeholder)\b/i.test(context);
+  if (text[open - 1] !== '!') return false;
+  return /\b(?:adobe|mistral|ocr|extract|easyocr)\b/i.test(context);
 }
 
 /**
@@ -333,12 +387,14 @@ function rewriteMarkdownAssetPaths(markdown: string, assetPaths: ReadonlyMap<str
   return mapMarkdownOutsideCode(markdown, segment => {
     const inline = segment.replace(/((?:!?\[[^\]\r\n]*\])\(\s*)(<[^>\r\n]+>|[^\s)]+)((?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\))/g,
       (_all, prefix: string, destination: string, suffix: string, offset: number) =>
-        (isLikelyPythonAttributeNotation(segment, offset + prefix.length - 2, destination)
+        (isLikelyCitationParenthesizedProse(segment, offset + prefix.length - 2, destination)
+          || isLikelyPythonAttributeNotation(segment, offset + prefix.length - 2, destination)
           || isLikelyPythonArgumentUnpackingNotation(segment, offset + prefix.length - 2, destination))
           ? _all
           : `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`);
-    const definitions = inline.replace(/^([ \t]{0,3}\[[^\]\r\n]+\]:[ \t]*)(<[^>\r\n]+>|[^\s\r\n]+)((?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*)$/gm,
-      (_all, prefix: string, destination: string, suffix: string) => `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`);
+    const definitions = inline.replace(/^([ \t]{0,3}\[([^\]\r\n]+)\]:[ \t]*)(<[^>\r\n]+>|[^\s\r\n]+)((?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*)$/gm,
+      (_all, prefix: string, label: string, destination: string, suffix: string) =>
+        isFootnoteReferenceLabel(label) ? _all : `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`);
     return definitions.replace(/<(img|source)\b([^>]*)>/gi, (_all, tag: string, attributes: string) => {
       if (isBareHtmlImageTag(attributes)) return escapeLiteralHtmlImageTag(tag, attributes);
       return `<${tag}${rewriteHtmlAttribute(rewriteHtmlAttribute(attributes, 'src', assetPaths), 'srcset', assetPaths)}>`;
@@ -360,8 +416,9 @@ function rewriteContentListAssetPaths(value: unknown, assetPaths: ReadonlyMap<st
   return value;
 }
 
-export function rewriteArchiveAssetReferences(fullMarkdown: string, contentList: unknown, assetPaths: ReadonlyMap<string, string>) {
+export function rewriteArchiveAssetReferences(fullMarkdown: string, contentList: unknown, assetPaths: ReadonlyMap<string, string>, ignoredPaths: ReadonlySet<string> = new Set()) {
   for (const path of discoverArchiveAssetPaths(fullMarkdown, contentList)) {
+    if (ignoredPaths.has(path)) continue;
     if (!normalizedArchiveAssetDestination(path, assetPaths)) throw new Error(`referenced asset has no normalized destination: ${path}`);
   }
   return {
