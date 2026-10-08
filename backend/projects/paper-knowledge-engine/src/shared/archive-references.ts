@@ -392,10 +392,40 @@ function rewriteMarkdownAssetPaths(markdown: string, assetPaths: ReadonlyMap<str
           || isLikelyPythonArgumentUnpackingNotation(segment, offset + prefix.length - 2, destination))
           ? _all
           : `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`);
-    const definitions = inline.replace(/^([ \t]{0,3}\[([^\]\r\n]+)\]:[ \t]*)(<[^>\r\n]+>|[^\s\r\n]+)((?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*)$/gm,
+    const definitionPattern = /^([ \t]{0,3}\[([^\]\r\n]+)\]:[ \t]*)(<[^>\r\n]+>|[^\s\r\n]+)((?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*)$/gm;
+    const definitions = [...inline.matchAll(definitionPattern)].map(match => ({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+      label: normalizeReferenceLabel(match[2]!),
+    }));
+    // A bracket-colon line is only a resource definition when an explicit
+    // reference (or an image shortcut) uses its label. Prompt templates and
+    // extracted prose commonly contain `[Role]: escaped_text`, which must
+    // remain text even when the destination is not a valid POSIX path.
+    let referenceScan = inline;
+    for (const definition of definitions) {
+      referenceScan = referenceScan.slice(0, definition.start)
+        + ' '.repeat(definition.end - definition.start)
+        + referenceScan.slice(definition.end);
+    }
+    const usedLabels = new Set<string>();
+    for (const match of referenceScan.matchAll(/!?(?:\[([^\]\r\n]*)\])\[([^\]\r\n]*)\]/g)) {
+      const label = normalizeReferenceLabel(match[2] || match[1]!);
+      if (label) usedLabels.add(label);
+    }
+    for (const match of referenceScan.matchAll(/!\[([^\]\r\n]*)\](?![ \t]*\[)/g)) {
+      const label = normalizeReferenceLabel(match[1]!);
+      if (label) usedLabels.add(label);
+    }
+    const activeLabels = new Set(definitions
+      .filter(definition => !isFootnoteReferenceLabel(definition.label) && usedLabels.has(definition.label))
+      .map(definition => definition.label));
+    const rewrittenDefinitions = inline.replace(definitionPattern,
       (_all, prefix: string, label: string, destination: string, suffix: string) =>
-        isFootnoteReferenceLabel(label) ? _all : `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`);
-    return definitions.replace(/<(img|source)\b([^>]*)>/gi, (_all, tag: string, attributes: string) => {
+        activeLabels.has(normalizeReferenceLabel(label))
+          ? `${prefix}${rewriteDestination(destination, assetPaths)}${suffix}`
+          : _all);
+    return rewrittenDefinitions.replace(/<(img|source)\b([^>]*)>/gi, (_all, tag: string, attributes: string) => {
       if (isBareHtmlImageTag(attributes)) return escapeLiteralHtmlImageTag(tag, attributes);
       return `<${tag}${rewriteHtmlAttribute(rewriteHtmlAttribute(attributes, 'src', assetPaths), 'srcset', assetPaths)}>`;
     });

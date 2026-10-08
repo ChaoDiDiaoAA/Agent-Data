@@ -42,6 +42,12 @@ test('footnote definitions keep prose destinations out of Archive references', (
   expect(rewriteArchiveReferences(prose, content, new Map()).fullMarkdown).toBe(prose);
 });
 
+test('inactive bracket-colon prose with escaped tokens is not rewritten as an Archive path', () => {
+  const prose = '[Trajectory Log]: trajectory\\_text\nFinal Outcome: SUCCESS';
+  expect(archiveReferences(prose, [])).toEqual([]);
+  expect(rewriteArchiveReferences(prose, [], new Map()).fullMarkdown).toBe(prose);
+});
+
 test('NER label examples in MinerU code text are not treated as Archive assets', () => {
   const prose = 'Entities : [ ENTITY ]( TYPE ), [ Apple ]( ORG), [ iPhone 15]( PRODUCT ), [ Cupertino ]( LOC)';
   const content = [{ type: 'code', code_body: prose }];

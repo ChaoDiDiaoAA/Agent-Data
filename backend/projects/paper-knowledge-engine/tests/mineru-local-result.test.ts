@@ -155,6 +155,20 @@ test('normalizes footnote definitions whose first token is prose instead of an A
   assert.equal(await Bun.file(join(root, 'assets', '‘US‘')).exists(), false);
 });
 
+test('normalizes inactive bracket-colon prose without treating escaped tokens as Archive paths', async () => {
+  const root = await fixtureRoot('inactive-bracket-colon-prose');
+  const prose = '[Trajectory Log]: trajectory\\_text\nFinal Outcome: SUCCESS';
+  await writeFile(join(root, 'paper.md'), prose);
+  await writeFile(join(root, 'paper_content_list.json'), JSON.stringify([
+    { page_idx: 0, type: 'text', text: prose },
+  ]));
+
+  const result = await normalizeLocalMinerUResult({ model: 'pipeline', cliBackend: 'pipeline', outputDir: root, pageCount: 1 });
+
+  assert.equal(result.pageCount, 1);
+  assert.equal(await readFile(result.markdownPath, 'utf8'), prose);
+});
+
 test('normalizes split chemical SMILES without inventing Archive resources', async () => {
   const root = await fixtureRoot('chemical-smiles');
   const markdown = '# Paper\n\n[CH3:19][C\n\n:4](=[O:23])[C@@H:13]1';
